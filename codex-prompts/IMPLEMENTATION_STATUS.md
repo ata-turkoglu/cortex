@@ -5,7 +5,7 @@ Codex must keep this file updated.
 ## Overall
 
 - [x] Phase 1 — Repository and AI context
-- [ ] Phase 2 — Frontend foundation
+- [x] Phase 2 — Frontend foundation
 - [ ] Phase 3 — Backend foundation
 - [ ] Phase 4 — Database and workspace
 - [ ] Phase 5 — Document ingestion
@@ -18,7 +18,7 @@ Codex must keep this file updated.
 ## Current phase
 
 - Phase: Phase 2 — Frontend foundation
-- Status: In progress
+- Status: Complete
 - Started: 2026-08-02
 - Last updated: 2026-08-02
 
@@ -32,7 +32,7 @@ Codex must keep this file updated.
 
 ## In progress
 
-- Phase 2 remaining: complete setup/cost/path UI primitives, expand adapter coverage and component tests, then validate responsive activity behavior before marking the phase complete.
+- None.
 
 ## Blocking issues
 
@@ -50,6 +50,7 @@ Codex must keep this file updated.
 | 2026-08-02 | 2 | `corepack pnpm --dir frontend build` | Passed |
 | 2026-08-02 | 2 | `corepack pnpm --dir frontend test` | Passed (1 test) |
 | 2026-08-02 | 2 | `corepack pnpm --dir frontend lint` | Passed |
+| 2026-08-02 | 2 | adapter-boundary search | Passed; no feature-level PrimeReact, lucide-react, or React Flow imports |
 
 ## High-risk boundary status
 
