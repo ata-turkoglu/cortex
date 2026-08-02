@@ -17,8 +17,8 @@ Codex must keep this file updated.
 
 ## Current phase
 
-- Phase: Phase 1 — Repository and AI context
-- Status: Complete
+- Phase: Phase 2 — Frontend foundation
+- Status: In progress
 - Started: 2026-08-02
 - Last updated: 2026-08-02
 
@@ -28,10 +28,11 @@ Codex must keep this file updated.
 - Added canonical/scoped AI instructions, project map, adapter generator, context validation, and freshness checks.
 - Added initial architecture, API, workflow, frontend, dependency, licensing, linting, and pre-commit documentation/configuration.
 - Installed pinned JavaScript and Python development tooling in ignored local dependency directories.
+- Started Phase 2: created the Vite/React/TypeScript shell, pinned frontend dependency graph, Tailwind and PrimeReact setup, route placeholders, UI adapters, icon registry, platform layout, appearance store, and generated-API boundary.
 
 ## In progress
 
-- None.
+- Phase 2 remaining: complete setup/cost/path UI primitives, expand adapter coverage and component tests, then validate responsive activity behavior before marking the phase complete.
 
 ## Blocking issues
 
@@ -46,6 +47,9 @@ Codex must keep this file updated.
 | 2026-08-02 | 1 | `python scripts/ai-context/check-context-freshness.py` | Passed |
 | 2026-08-02 | 1 | `pre-commit run --all-files` | Passed |
 | 2026-08-02 | 1 | `python scripts/license-report.py` | Passed; generated declared-dependency inventory |
+| 2026-08-02 | 2 | `corepack pnpm --dir frontend build` | Passed |
+| 2026-08-02 | 2 | `corepack pnpm --dir frontend test` | Passed (1 test) |
+| 2026-08-02 | 2 | `corepack pnpm --dir frontend lint` | Passed |
 
 ## High-risk boundary status
 
