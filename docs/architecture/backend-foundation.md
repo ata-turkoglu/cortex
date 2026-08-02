@@ -9,6 +9,9 @@ Uploads validate size, extension and MIME type; normalize filenames; prevent tra
 use unique storage names and checksums; and return structured errors for unsupported,
 corrupt, or encrypted files. Uploaded content is never executed.
 
+V1 does not watch arbitrary external folders. Files enter only through upload or replacement
+flows; a later re-upload is the mechanism for detecting changed source content.
+
 Startup identifies stale running work; jobs become interrupted or resume from a safe
 checkpoint. Deletions are idempotent workflows, and partial cleanup schedules reconciliation
 across SQLite, Qdrant, bm25s, GraphRAG, NetworkX, uploads, normalized files, and caches.

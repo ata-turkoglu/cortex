@@ -6,45 +6,45 @@ Implement upload, validation, Docling parsing, normalized Markdown storage, meta
 
 ## Checklist
 
-- [ ] Support `.md`, `.txt`, `.docx`, and `.pdf`.
-- [ ] Implement multi-file upload.
-- [ ] Implement folder-aware uploads.
-- [ ] Store original source files unchanged.
-- [ ] Store normalized Markdown separately.
-- [ ] Integrate Docling.
+- [x] Support `.md`, `.txt`, `.docx`, and `.pdf`.
+- [x] Implement multi-file upload.
+- [x] Implement folder-aware uploads.
+- [x] Store original source files unchanged.
+- [x] Store normalized Markdown separately.
+- [x] Integrate Docling.
 - [ ] Integrate Docling with LlamaIndex document/node processing where appropriate.
-- [ ] Implement file hash and normalized-content hash.
-- [ ] Reject exact duplicates safely.
-- [ ] Create new document versions for changed content.
-- [ ] Preserve logical document IDs.
+- [x] Implement file hash and normalized-content hash.
+- [x] Reject exact duplicates safely.
+- [x] Create new document versions for changed content.
+- [x] Preserve logical document IDs.
 - [ ] Implement document lifecycle states.
 - [ ] Implement metadata extraction through layer-specific provider assignment.
-- [ ] Store metadata origin as system, extracted, or user.
-- [ ] Implement user metadata correction precedence.
-- [ ] Implement Cortex chunk creation.
-- [ ] Persist parent/neighbor/heading relationships.
-- [ ] Create ingestion workflow definition.
+- [x] Store metadata origin as system, extracted, or user.
+- [x] Implement user metadata correction precedence.
+- [x] Implement Cortex chunk creation.
+- [x] Persist parent/neighbor/heading relationships.
+- [x] Create ingestion workflow definition.
 - [ ] Make ingestion resumable and idempotent.
 - [ ] Add tests with all supported formats.
-- [ ] Update `IMPLEMENTATION_STATUS.md`.
+- [x] Update `IMPLEMENTATION_STATUS.md`.
 
 ## Acceptance criteria
 
-- [ ] Original and normalized files are both available.
-- [ ] Re-uploading an identical file does not duplicate content.
-- [ ] Changed content creates a new version.
+- [x] Original and normalized files are both available.
+- [x] Re-uploading an identical file does not duplicate content.
+- [x] Changed content creates a new version.
 - [ ] Failed parsing exposes sanitized technical details.
 - [ ] Page navigation does not stop ingestion.
 
 ## Additional checklist
 
-- [ ] Add configurable maximum upload size.
-- [ ] Validate extension and MIME/content type.
-- [ ] Normalize filenames.
-- [ ] Prevent path traversal.
-- [ ] Use unique safe storage names.
+- [x] Add configurable maximum upload size.
+- [x] Validate extension and MIME/content type.
+- [x] Normalize filenames.
+- [x] Prevent path traversal.
+- [x] Use unique safe storage names.
 - [ ] Handle corrupt files with structured errors.
 - [ ] Handle encrypted/password-protected files with structured errors.
-- [ ] Ensure uploaded content is never executed.
-- [ ] Document that external file watching is out of scope for V1.
-- [ ] Add upload security tests.
+- [x] Ensure uploaded content is never executed.
+- [x] Document that external file watching is out of scope for V1.
+- [x] Add upload security tests.

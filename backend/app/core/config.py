@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://host.docker.internal:11434"
     data_path: Path = Path("./data")
     sqlite_busy_timeout_ms: int = 5000
+    upload_max_bytes: int = 50 * 1024 * 1024
+    chunk_token_limit: int = 500
+    chunk_overlap_tokens: int = 50
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
 

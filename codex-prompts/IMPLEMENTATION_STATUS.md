@@ -17,8 +17,8 @@ Codex must keep this file updated.
 
 ## Current phase
 
-- Phase: Phase 4 — Database and workspace
-- Status: Complete
+- Phase: Phase 5 — Document ingestion
+- Status: In progress
 - Started: 2026-08-02
 - Last updated: 2026-08-02
 
@@ -31,10 +31,14 @@ Codex must keep this file updated.
 - Started Phase 2: created the Vite/React/TypeScript shell, pinned frontend dependency graph, Tailwind and PrimeReact setup, route placeholders, UI adapters, icon registry, platform layout, appearance store, and generated-API boundary.
 - Started Phase 3: added FastAPI `/api/v1` application, correlation IDs, standard error envelope, health service map, SQLite WAL/foreign-key configuration, secret-store abstraction, model defaults, and initial Docker Compose topology.
 - Started Phase 4: added workspace resource/state records, WorkspaceContext, workspace CRUD/soft-delete endpoints, and the relational schema migration.
+- Started Phase 5: added secure workspace uploads, document versioning and deduplication,
+  Docling normalization, folder assignment, metadata provenance, chunking, and ingestion-run persistence.
 
 ## In progress
 
-- No active work in Phase 4.
+- Phase 5: secure upload, document versioning, Docling normalization, and Cortex chunking are in place.
+  Remaining: provider-assigned extraction, durable worker execution, and corrupt/encrypted
+  parser coverage.
 
 - Deferred by user decision: production OpenAI/Anthropic request adapters and automatic provider-reported token counting. See `docs/FUTURE_BACKLOG.md`.
 

@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from .api.health import router as health_router
 from .api.settings import router as settings_router
 from .api.workspaces import router as workspaces_router
+from .api.uploads import router as uploads_router
 from .core.errors import ErrorEnvelope
 from .core.logging import configure_logging
 
@@ -51,3 +52,4 @@ async def unhandled(request: Request, _):
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(workspaces_router, prefix="/api/v1")
+app.include_router(uploads_router, prefix="/api/v1")

@@ -1,9 +1,11 @@
 alembic==1.14.1
 dramatiq[redis]==1.17.1
+docling==2.114.0
 fastapi==0.115.8
 httpx==0.28.1
 keyring==25.6.0
 pydantic-settings==2.7.1
+python-multipart==0.0.22
 qdrant-client==1.13.2
 redis==5.2.1
 sqlalchemy==2.0.38
