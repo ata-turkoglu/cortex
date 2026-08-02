@@ -6,8 +6,8 @@ Codex must keep this file updated.
 
 - [x] Phase 1 — Repository and AI context
 - [x] Phase 2 — Frontend foundation
-- [ ] Phase 3 — Backend foundation
-- [ ] Phase 4 — Database and workspace
+- [x] Phase 3 — Backend foundation
+- [x] Phase 4 — Database and workspace
 - [ ] Phase 5 — Document ingestion
 - [ ] Phase 6 — Retrieval and GraphRAG
 - [ ] Phase 7 — Jobs, workflows, and monitoring
@@ -17,7 +17,7 @@ Codex must keep this file updated.
 
 ## Current phase
 
-- Phase: Phase 2 — Frontend foundation
+- Phase: Phase 4 — Database and workspace
 - Status: Complete
 - Started: 2026-08-02
 - Last updated: 2026-08-02
@@ -29,10 +29,14 @@ Codex must keep this file updated.
 - Added initial architecture, API, workflow, frontend, dependency, licensing, linting, and pre-commit documentation/configuration.
 - Installed pinned JavaScript and Python development tooling in ignored local dependency directories.
 - Started Phase 2: created the Vite/React/TypeScript shell, pinned frontend dependency graph, Tailwind and PrimeReact setup, route placeholders, UI adapters, icon registry, platform layout, appearance store, and generated-API boundary.
+- Started Phase 3: added FastAPI `/api/v1` application, correlation IDs, standard error envelope, health service map, SQLite WAL/foreign-key configuration, secret-store abstraction, model defaults, and initial Docker Compose topology.
+- Started Phase 4: added workspace resource/state records, WorkspaceContext, workspace CRUD/soft-delete endpoints, and the relational schema migration.
 
 ## In progress
 
-- None.
+- No active work in Phase 4.
+
+- Deferred by user decision: production OpenAI/Anthropic request adapters and automatic provider-reported token counting. See `docs/FUTURE_BACKLOG.md`.
 
 ## Blocking issues
 
@@ -51,6 +55,15 @@ Codex must keep this file updated.
 | 2026-08-02 | 2 | `corepack pnpm --dir frontend test` | Passed (1 test) |
 | 2026-08-02 | 2 | `corepack pnpm --dir frontend lint` | Passed |
 | 2026-08-02 | 2 | adapter-boundary search | Passed; no feature-level PrimeReact, lucide-react, or React Flow imports |
+| 2026-08-02 | 3 | `python -m pytest tests -q` (from `backend`) | Passed (1 test) |
+| 2026-08-02 | 3 | `alembic -c alembic.ini upgrade head` (from `backend`) | Passed |
+| 2026-08-02 | 3 | `ruff check app tests alembic` (from `backend`) | Passed |
+| 2026-08-02 | 3 | `python -m pytest tests -q` (from `backend`) | Passed (3 tests) |
+| 2026-08-02 | 3 | `docker compose -f infrastructure/docker-compose.yml config` | Passed |
+| 2026-08-02 | 3 | `GET /api/v1/health` via Docker Compose | Passed; backend, SQLite, Redis, Qdrant, Ollama, and worker healthy |
+| 2026-08-02 | 3 | `corepack pnpm api:generate` | Passed; generated OpenAPI TypeScript schema |
+| 2026-08-02 | 4 | `python -m pytest tests -q -p no:cacheprovider` (from `backend`) | Passed (9 tests) |
+| 2026-08-02 | 4 | Alembic upgrade from empty SQLite and from revision `0002_usage_records` | Passed; prior data preserved |
 
 ## High-risk boundary status
 
