@@ -12,6 +12,7 @@ Verify correctness, isolation, resilience, performance, and architecture complia
 - [ ] Verify workspace isolation in Qdrant.
 - [ ] Verify workspace isolation in conversations.
 - [ ] Verify ingestion for all supported formats.
+  - Include corrupt and encrypted/password-protected PDF and DOCX fixtures with structured-error assertions.
 - [ ] Verify duplicate and version behavior.
 - [ ] Verify background processing across navigation.
 - [ ] Verify SSE reconnect.

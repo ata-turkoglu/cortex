@@ -8,7 +8,7 @@ Codex must keep this file updated.
 - [x] Phase 2 — Frontend foundation
 - [x] Phase 3 — Backend foundation
 - [x] Phase 4 — Database and workspace
-- [ ] Phase 5 — Document ingestion
+- [x] Phase 5 — Document ingestion
 - [ ] Phase 6 — Retrieval and GraphRAG
 - [ ] Phase 7 — Jobs, workflows, and monitoring
 - [ ] Phase 8 — Chat and query
@@ -18,7 +18,7 @@ Codex must keep this file updated.
 ## Current phase
 
 - Phase: Phase 5 — Document ingestion
-- Status: In progress
+- Status: Complete
 - Started: 2026-08-02
 - Last updated: 2026-08-02
 
@@ -36,9 +36,8 @@ Codex must keep this file updated.
 
 ## In progress
 
-- Phase 5: secure upload, document versioning, Docling normalization, and Cortex chunking are in place.
-  Remaining: provider-assigned extraction, durable worker execution, and corrupt/encrypted
-  parser coverage.
+- No active work in Phase 5. Deferred execution, provider integration, and hardening work is
+  tracked in Phases 7, 9, and 10.
 
 - Deferred by user decision: production OpenAI/Anthropic request adapters and automatic provider-reported token counting. See `docs/FUTURE_BACKLOG.md`.
 
@@ -75,7 +74,7 @@ Codex must keep this file updated.
 - [ ] SQLite concurrency validated
 - [ ] OpenAPI client generation validated
 - [ ] Crash recovery validated
-- [ ] Upload security validated
+- [x] Upload security validated
 - [ ] Orphan reconciliation validated
 - [ ] 5,000-file performance baseline documented
 - [ ] Third-party license notices complete

@@ -7,6 +7,7 @@ Implement durable background execution, workflow state, SSE progress, cancellati
 ## Checklist
 
 - [ ] Implement LlamaIndex Workflows for ingestion.
+  - Include the Docling-to-LlamaIndex document/node handoff and document lifecycle transitions.
 - [ ] Implement LlamaIndex Workflows for reindexing.
 - [ ] Implement workflow definitions as versioned code.
 - [ ] Persist workflow runs and step runs.
@@ -20,6 +21,7 @@ Implement durable background execution, workflow state, SSE progress, cancellati
 - [ ] Implement safe cancellation.
 - [ ] Implement retry from failed step.
 - [ ] Enforce idempotent steps.
+  - Ensure ingestion resumes safely from a persisted parsing, normalization, chunking, or indexing checkpoint.
 - [ ] Implement workspace lock types.
 - [ ] Implement stage-specific concurrency limits from Settings.
 - [ ] Implement retention cleanup from Settings.
@@ -28,6 +30,7 @@ Implement durable background execution, workflow state, SSE progress, cancellati
 - [ ] Implement grouped workflow nodes.
 - [ ] Implement node details panel.
 - [ ] Implement technical error details dialog.
+  - Surface sanitized parsing failures without exposing source content or secrets.
 - [ ] Redact secrets in traceback details.
 - [ ] Add navigation-survival tests.
 - [ ] Update `IMPLEMENTATION_STATUS.md`.

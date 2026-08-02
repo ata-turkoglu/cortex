@@ -6,6 +6,8 @@ Implement all global settings, runtime propagation, system health, system archit
 
 ## Checklist
 
+- [ ] Wire metadata extraction to the global layer-specific provider/model assignment.
+
 - [ ] Implement Appearance Settings.
 - [ ] Implement provider connection settings.
 - [ ] Implement model discovery/listing where supported.
