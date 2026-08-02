@@ -1,0 +1,41 @@
+# JavaScript
+node_modules/
+.pnpm-store/
+frontend/node_modules/
+frontend/dist/
+coverage/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pre-commit-cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Runtime data: retain empty directories with .gitkeep only
+data/*
+!data/.gitkeep
+data/uploads/
+data/normalized/
+data/indexes/
+data/models/
+data/cache/
+data/logs/
+data/qdrant/
+data/sqlite/
+
+# Local configuration and IDE files
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+*.log
+
+# Generated API and reports
+frontend/src/api/generated/
+reports/licenses/

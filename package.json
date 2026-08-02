@@ -1,0 +1,20 @@
+{
+  "name": "cortex",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.4.1",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "context:generate": "python scripts/ai-context/generate-adapters.py",
+    "context:validate": "python scripts/ai-context/validate-context.py",
+    "context:freshness": "python scripts/ai-context/check-context-freshness.py",
+    "licenses:report": "python scripts/license-report.py",
+    "format:check": "prettier --check .",
+    "lint": "pnpm --dir frontend lint"
+  },
+  "devDependencies": {
+    "prettier": "3.5.3"
+  }
+}

@@ -1,0 +1,4 @@
+codex-prompts/
+.ai/project-map.yaml
+.pre-commit-cache/
+reports/

@@ -1,0 +1,2 @@
+# Generated with: python -m piptools compile --generate-hashes --output-file backend/requirements.lock backend/requirements.in
+# This intentionally empty lockfile is valid until Phase 3 introduces backend dependencies.

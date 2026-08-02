@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "repository": "Cortex",
+  "entrypoints": ["AGENTS.md", "codex-prompts/MASTER_PROMPT.md", "codex-prompts/docs/DECISIONS.md"],
+  "context_excluded": ["data", "node_modules", ".pnpm-store", ".venv", "frontend/dist", "frontend/src/api/generated", "reports/licenses"],
+  "modules": [
+    {"path": "frontend", "context": "frontend/AGENTS.md", "docs": ["docs/frontend/README.md", "docs/api/contract.md"]},
+    {"path": "backend", "context": "backend/AGENTS.md", "docs": ["docs/architecture/backend-foundation.md", "docs/api/contract.md"]},
+    {"path": "backend/app/retrieval", "context": "backend/app/retrieval/AGENTS.md", "docs": ["docs/architecture/retrieval-boundaries.md"]},
+    {"path": "backend/app/graphrag", "context": "backend/app/graphrag/AGENTS.md", "docs": ["docs/architecture/graphrag-boundary.md"]},
+    {"path": "backend/app/workflows", "context": "backend/app/workflows/AGENTS.md", "docs": ["docs/workflows/durable-workflows.md"]},
+    {"path": "infrastructure", "context": "infrastructure/AGENTS.md", "docs": ["docs/architecture/deployment.md"]}
+  ],
+  "documentation_rules": {
+    "public_contract_change_requires": ["docs/api/contract.md"],
+    "architecture_change_requires": ["docs/architecture/README.md"],
+    "workflow_change_requires": ["docs/workflows/durable-workflows.md"]
+  }
+}

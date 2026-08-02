@@ -1,0 +1,2 @@
+# Runtime dependencies are introduced in the feature phase that first needs them.
+# Every entry must use == and be compiled with hashes into requirements.lock.

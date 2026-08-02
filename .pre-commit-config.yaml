@@ -1,0 +1,23 @@
+exclude: ^codex-prompts/
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      - id: ruff
+        args: [--no-fix]
+      - id: ruff-format
+        args: [--check]
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        entry: corepack pnpm exec prettier --check
+        language: system
+        types_or: [javascript, json, markdown, yaml]
