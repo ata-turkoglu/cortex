@@ -50,6 +50,7 @@ Do not implement these in V1 unless explicitly requested.
 - Cross-workspace search
 - Cross-workspace GraphRAG
 - Automated retrieval retry based on evidence quality
+- OpenAI and Anthropic production request adapters with automatic provider-reported token usage capture
 
 ## Integrations
 

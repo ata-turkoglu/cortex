@@ -10,11 +10,13 @@
     "context:generate": "python scripts/ai-context/generate-adapters.py",
     "context:validate": "python scripts/ai-context/validate-context.py",
     "context:freshness": "python scripts/ai-context/check-context-freshness.py",
+    "api:generate": "corepack pnpm exec openapi-typescript http://localhost:4000/api/v1/openapi.json -o frontend/src/api/generated/schema.ts",
     "licenses:report": "python scripts/license-report.py",
     "format:check": "prettier --check .",
     "lint": "pnpm --dir frontend lint"
   },
   "devDependencies": {
+    "openapi-typescript": "7.6.1",
     "prettier": "3.5.3"
   }
 }

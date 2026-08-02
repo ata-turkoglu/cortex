@@ -1,0 +1,35 @@
+services:
+  frontend:
+    image: node:24.0.2-alpine3.21
+    working_dir: /app/frontend
+    command: sh -c "corepack pnpm install --frozen-lockfile && corepack pnpm --dir frontend dev --host 0.0.0.0"
+    ports: ["3000:5173"]
+    volumes: ["../:/app", "frontend-node-modules:/app/node_modules"]
+  backend:
+    build: { context: .., dockerfile: backend/Dockerfile }
+    ports: ["4000:8000"]
+    environment:
+      CORTEX_DATABASE_URL: sqlite:////data/sqlite/cortex.db
+      CORTEX_REDIS_URL: redis://redis:6379/0
+      CORTEX_QDRANT_URL: http://qdrant:6333
+      CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes: ["../data:/data"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [redis, qdrant]
+  worker:
+    build: { context: .., dockerfile: backend/Dockerfile }
+    command: dramatiq app.workers
+    environment:
+      CORTEX_DATABASE_URL: sqlite:////data/sqlite/cortex.db
+      CORTEX_REDIS_URL: redis://redis:6379/0
+      CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes: ["../data:/data"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [redis]
+  redis:
+    image: redis:7.4.2-alpine3.21
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    volumes: ["../data/qdrant:/qdrant/storage"]
+volumes:
+  frontend-node-modules:

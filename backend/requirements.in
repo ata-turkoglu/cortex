@@ -1,2 +1,10 @@
-# Runtime dependencies are introduced in the feature phase that first needs them.
-# Every entry must use == and be compiled with hashes into requirements.lock.
+alembic==1.14.1
+dramatiq[redis]==1.17.1
+fastapi==0.115.8
+httpx==0.28.1
+keyring==25.6.0
+pydantic-settings==2.7.1
+qdrant-client==1.13.2
+redis==5.2.1
+sqlalchemy==2.0.38
+uvicorn[standard]==0.34.0
