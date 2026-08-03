@@ -20,3 +20,10 @@ Retrieval configuration is global in V1. Changing an embedding configuration cre
 durable dense-reindex request and prevents incompatible dense vectors from serving results until
 the replacement index is ready. GraphRAG input, index execution, and output mirroring are split
 so network/model work never runs while a SQLite transaction is open.
+# Backend transaction boundaries
+
+Database sessions are used only to snapshot or persist state. Upload validation commits its
+database snapshot before Docling/file work; chat/provider, GraphRAG, Qdrant, and external
+deletion cleanup run through worker-owned adapters after the session is closed. A failed
+external deletion queues a durable reconciliation workflow rather than extending the original
+transaction.

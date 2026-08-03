@@ -8,6 +8,7 @@ class ModelCapability:
     model: str
     chat: bool = False
     embeddings: bool = False
+    digest: str | None = None
 
 
 class LLMProvider(Protocol):

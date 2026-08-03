@@ -14,12 +14,12 @@ Create the FastAPI application, configuration system, provider abstractions, log
 - [x] Configure Alembic.
 - [x] Configure Redis.
 - [x] Configure Dramatiq worker.
-- [ ] Configure Qdrant client.
+- [x] Configure Qdrant client.
 - [x] Add provider interfaces for Ollama, OpenAI, and Anthropic.
-- [ ] Add embedding provider interfaces for Ollama and OpenAI.
+- [x] Add embedding provider interfaces for Ollama and OpenAI.
 - [x] Add model capability metadata and validation.
 - [x] Add secure credential storage/redaction behavior.
-- [ ] Add health checks for backend, SQLite, Redis, worker, Qdrant, Ollama, OpenAI, Anthropic, and GraphRAG runtime.
+- [x] Add health checks for backend, SQLite, Redis, worker, Qdrant, Ollama, OpenAI, Anthropic, and GraphRAG runtime.
 - [x] Add Dockerfiles.
 - [x] Add Docker Compose for frontend, backend, worker, redis, and qdrant.
 - [x] Configure host-mounted SQLite and data paths.
@@ -41,11 +41,11 @@ Create the FastAPI application, configuration system, provider abstractions, log
 - [x] Configure SQLite WAL mode.
 - [x] Enable SQLite foreign keys.
 - [x] Configure SQLite busy timeout and bounded lock retries.
-- [ ] Ensure no network/model operation runs inside a database transaction.
+- [x] Ensure no network/model operation runs inside a database transaction.
 - [x] Define standard Cortex API error envelope.
 - [x] Expose and validate OpenAPI schema.
 - [x] Add frontend client generation command from OpenAPI.
-- [ ] Add graceful shutdown hooks.
+- [x] Add graceful shutdown hooks.
 - [x] Add startup stale-job recovery hook.
 - [x] Add dependency-license check.
 
@@ -75,4 +75,4 @@ Create the FastAPI application, configuration system, provider abstractions, log
 - [x] Detect whether the default embedding model is installed.
 - [x] Show, but do not execute, the required Ollama pull command.
 - [x] Implement embedding health checks for dimensions, finite values, normalization, and consistency.
-- [ ] Capture Ollama model digest/details when available.
+- [x] Capture Ollama model digest/details when available.

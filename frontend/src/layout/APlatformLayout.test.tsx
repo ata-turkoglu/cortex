@@ -55,4 +55,22 @@ describe("platform workflow progress", () => {
       expect(screen.getByText("1 aktif iş")).toBeInTheDocument(),
     );
   });
+
+  it("aggregates a large active-job list without dropping progress indicators", async () => {
+    vi.spyOn(apiClient, "listWorkflows").mockResolvedValue(
+      Array.from({ length: 120 }, (_, index) => ({
+        ...activeRun,
+        id: `run-${index}`,
+        steps: index % 2 ? activeRun.steps : [],
+      })),
+    );
+    render(
+      <MemoryRouter>
+        <APlatformLayout title="Busy">
+          <p>busy</p>
+        </APlatformLayout>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByText(/120 aktif/).length).toBeGreaterThan(0));
+  });
 });

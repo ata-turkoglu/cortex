@@ -16,16 +16,19 @@ services:
     volumes: ["../data:/data"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: [redis, qdrant]
+    stop_grace_period: 30s
   worker:
     build: { context: .., dockerfile: backend/Dockerfile }
     command: dramatiq app.workers
     environment:
       CORTEX_DATABASE_URL: sqlite:////data/sqlite/cortex.db
       CORTEX_REDIS_URL: redis://redis:6379/0
+      CORTEX_QDRANT_URL: http://qdrant:6333
       CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
     volumes: ["../data:/data"]
     extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on: [redis]
+    depends_on: [redis, qdrant]
+    stop_grace_period: 30s
   redis:
     image: redis:7.4.2-alpine3.21
   qdrant:

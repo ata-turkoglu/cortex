@@ -14,6 +14,7 @@ class OllamaProvider:
                 model["name"],
                 chat=True,
                 embeddings="embed" in model["name"] or "bge" in model["name"],
+                digest=model.get("digest"),
             )
             for model in payload.get("models", [])
         ]

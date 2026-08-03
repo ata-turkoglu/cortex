@@ -1,10 +1,14 @@
 import asyncio
+import importlib.util
 import sqlite3
 
 import redis.asyncio as redis
 from fastapi import APIRouter
 
 from ..core.config import get_settings
+from ..core.qdrant import get_qdrant_client
+from ..providers.anthropic import AnthropicProvider
+from ..providers.openai import OpenAIProvider
 
 router = APIRouter(tags=["health"])
 
@@ -31,6 +35,14 @@ async def probe_redis(url: str) -> str:
         await client.aclose()
 
 
+async def probe_qdrant() -> str:
+    try:
+        await asyncio.to_thread(get_qdrant_client().get_collections)
+        return "healthy"
+    except Exception:
+        return "unavailable"
+
+
 @router.get("/health")
 async def health():
     settings = get_settings()
@@ -41,20 +53,21 @@ async def health():
         sqlite_status = "unavailable"
     redis_status, qdrant, ollama = await asyncio.gather(
         probe_redis(settings.redis_url),
-        probe(settings.qdrant_url + "/healthz"),
+        probe_qdrant(),
         probe(settings.ollama_base_url + "/api/tags"),
     )
+    services = {
+        "backend": "healthy", "sqlite": sqlite_status, "redis": redis_status, "qdrant": qdrant,
+        "ollama": ollama, "worker": "healthy" if redis_status == "healthy" else "unknown",
+        "openai": "configured" if OpenAIProvider().configured() else "not-configured",
+        "anthropic": "configured" if AnthropicProvider().configured() else "not-configured",
+        "graphrag": "available" if importlib.util.find_spec("graphrag") else "not-installed",
+    }
     return {
         "status": "healthy" if sqlite_status == redis_status == qdrant == "healthy" else "degraded",
-        "services": {
-            "backend": "healthy",
-            "sqlite": sqlite_status,
-            "redis": redis_status,
-            "qdrant": qdrant,
-            "ollama": ollama,
-            "worker": "healthy" if redis_status == "healthy" else "unknown",
-            "openai": "not-configured",
-            "anthropic": "not-configured",
-            "graphrag": "not-installed",
-        },
+        "services": services,
+        "components": [
+            {"id": name, "label": name.replace("_", " ").title(), "status": status}
+            for name, status in services.items()
+        ],
     }

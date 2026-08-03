@@ -137,6 +137,34 @@ class OllamaEmbeddingAdapter:
         )
 
 
+class OpenAIEmbeddingAdapter:
+    """OpenAI embeddings boundary; network calls remain worker-owned."""
+
+    def __init__(
+        self, model: str = "text-embedding-3-small", *, api_key: str | None = None
+    ) -> None:
+        from ..core.secrets import SecretStore
+
+        self.model = model
+        self.api_key = (
+            api_key or get_settings().openai_api_key or SecretStore().get("openai_api_key")
+        )
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        if not self.api_key:
+            raise RuntimeError("OpenAI is not configured")
+        async with httpx.AsyncClient(timeout=get_settings().embedding_timeout_seconds) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={"model": self.model, "input": texts},
+            )
+            response.raise_for_status()
+        vectors = [item["embedding"] for item in response.json().get("data", [])]
+        EmbeddingHealth.validate(vectors)
+        return vectors
+
+
 class Qwen3EmbeddingAdapter(OllamaEmbeddingAdapter):
     """Qwen3 policy stays here, not in retrieval feature code."""
 

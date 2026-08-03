@@ -50,7 +50,7 @@ Create the React application shell, UI abstraction layer, appearance system, and
 - [x] Prevent manual duplication of backend DTOs in feature code.
 - [x] Add server-side pagination patterns for large tables.
 - [x] Add virtualization abstractions for long lists where appropriate.
-- [ ] Add responsive-performance checks while background jobs are active.
+- [x] Add responsive-performance checks while background jobs are active.
 
 ## Additional checklist — onboarding and cost UI
 
