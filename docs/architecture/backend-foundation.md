@@ -15,3 +15,8 @@ flows; a later re-upload is the mechanism for detecting changed source content.
 Startup identifies stale running work; jobs become interrupted or resume from a safe
 checkpoint. Deletions are idempotent workflows, and partial cleanup schedules reconciliation
 across SQLite, Qdrant, bm25s, GraphRAG, NetworkX, uploads, normalized files, and caches.
+
+Retrieval configuration is global in V1. Changing an embedding configuration creates one
+durable dense-reindex request and prevents incompatible dense vectors from serving results until
+the replacement index is ready. GraphRAG input, index execution, and output mirroring are split
+so network/model work never runs while a SQLite transaction is open.

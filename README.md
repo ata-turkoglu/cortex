@@ -6,13 +6,13 @@ is specified by the versioned build pack in [`codex-prompts/`](codex-prompts/REA
 ## Development baseline
 
 - Node.js 24.x, enabled through Corepack, with `pnpm@10.4.1`
-- Python 3.10.x and pip
+- Python 3.11.x and uv
 - Docker Desktop/WSL2 on Windows 11
 
 Enable the JavaScript package manager with `corepack enable`, then use `corepack pnpm`.
-Python runtime dependencies are declared in `backend/requirements.in` and compiled into a
-hash-checked `backend/requirements.lock`. No floating dependency or Docker image versions
-are permitted.
+Python runtime and development dependencies are declared in `backend/pyproject.toml` and
+resolved by the committed `backend/uv.lock`. No floating dependency or Docker image
+versions are permitted.
 
 ## Repository navigation
 
@@ -30,9 +30,11 @@ python scripts/ai-context/check-context-freshness.py
 python scripts/license-report.py
 ```
 
-Install pinned developer tooling before running pre-commit:
+Create the backend environment and install pinned dependencies with uv:
 
 ```powershell
-python -m pip install -r backend/requirements-dev.in
-pre-commit run --all-files
+cd backend
+uv venv --python 3.11
+uv sync --dev --group graphrag
+uv run pre-commit run --all-files
 ```

@@ -15,6 +15,7 @@ This is a new system. Do not reuse or depend on the old KnowledgeOS project.
 - Execute the files under `phases/` in numeric order.
 - Maintain `IMPLEMENTATION_STATUS.md`.
 - Replace `[ ]` with `[x]` only after the corresponding task is fully implemented and validated.
+- Mark every fully implemented and validated task as `[x]` in its owning file under `phases/` before reporting the work complete.
 - When a task is partially complete, leave it unchecked and add a short indented note explaining what remains.
 - Do not silently change architectural decisions.
 - If a required library API differs from expectations, adapt the implementation while preserving the architecture and document the deviation.

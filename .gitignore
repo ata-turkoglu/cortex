@@ -4,17 +4,30 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 coverage/
+frontend/.vite/
+frontend/coverage/
+playwright-report/
+test-results/
+.eslintcache
 
 # Python
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pip-tools-cache/
 .pre-commit-cache/
 .ruff_cache/
 .mypy_cache/
+.pytype/
 .coverage
 htmlcov/
+backend/.pytest_cache/
+backend/.coverage
+backend/.mypy_cache/
+*.sqlite
+*.sqlite3
+*.db
 
 # Runtime data: retain empty directories with .gitkeep only
 data/*
@@ -39,3 +52,4 @@ data/sqlite/
 # Generated API and reports
 frontend/src/api/generated/
 reports/licenses/
+frontend/src/api/generated/*.tmp

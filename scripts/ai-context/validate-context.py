@@ -2,6 +2,7 @@
 """Validate Cortex's small, vendor-neutral AI navigation system."""
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -23,6 +24,15 @@ def local_markdown_paths(path: Path) -> list[str]:
         for link in links
         if link and "://" not in link and not link.startswith("mailto:")
     ]
+
+
+def iter_markdown_files(excluded_directories: set[str]):
+    """Walk Markdown without descending into inaccessible dependency directories."""
+    for directory, names, filenames in os.walk(ROOT, topdown=True):
+        names[:] = [name for name in names if name not in excluded_directories]
+        for filename in filenames:
+            if filename.endswith(".md"):
+                yield Path(directory) / filename
 
 
 def main() -> int:
@@ -52,11 +62,8 @@ def main() -> int:
             errors.append(
                 f"adapter is stale or contains duplicated instructions: {adapter}"
             )
-    for markdown in ROOT.rglob("*.md"):
-        if any(
-            part in {".git", "node_modules", ".venv", "data"} for part in markdown.parts
-        ):
-            continue
+    excluded = {".git", "node_modules", ".venv", "data", ".pnpm-store"}
+    for markdown in iter_markdown_files(excluded):
         for link in local_markdown_paths(markdown):
             if not (markdown.parent / link).exists():
                 errors.append(

@@ -33,6 +33,12 @@ Do not implement these in V1 unless explicitly requested.
 - Cross-device synchronization
 - Advanced retention policies
 - Archive storage tiers
+- Cross-store deletion reconciliation that executes against live Qdrant, GraphRAG artifact, and
+  host-file stores, with Docker-backed partial-failure fixtures. Deferred from Phase 7 because
+  the current test environment intentionally does not provision those runtime data stores.
+- Periodic orphan-reconciliation scheduler with production deployment ownership and cadence.
+- Worker graceful-shutdown integration test using a real Redis/Dramatiq worker process and a
+  controlled termination signal.
 
 ## AI and retrieval
 
