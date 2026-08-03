@@ -22,11 +22,16 @@ async def provider_status():
 
 @router.get("/settings/budgets")
 async def budget_status():
+    settings = get_settings()
     return {
-        "daily_soft_budget_usd": 0.0,
-        "monthly_soft_budget_usd": 0.0,
-        "warning_percent": 80,
+        "daily_soft_budget_usd": settings.daily_soft_budget_usd,
+        "monthly_soft_budget_usd": settings.monthly_soft_budget_usd,
+        "warning_percent": settings.budget_warning_percent,
         "enforcement": "pause-queued-cost-incurring-work",
+        "query_expansion_enabled": settings.query_expansion_enabled,
+        "automatic_quality_escalation_enabled": settings.automatic_quality_escalation_enabled,
+        "openai_input_cost_per_1k_usd": settings.openai_input_cost_per_1k_usd,
+        "openai_output_cost_per_1k_usd": settings.openai_output_cost_per_1k_usd,
     }
 
 

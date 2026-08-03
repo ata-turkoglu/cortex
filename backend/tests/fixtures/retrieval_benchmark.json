@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "turkish-heading-context",
+      "workspace_id": "benchmark-tr",
+      "query": "Ankara hangi ülkenin başkentidir?",
+      "expected_chunk_ids": ["capital-001"],
+      "max_latency_ms": 1500
+    },
+    {
+      "id": "cross-lingual-baseline",
+      "workspace_id": "benchmark-cross-lingual",
+      "query": "What is the capital of Türkiye?",
+      "expected_chunk_ids": ["capital-001"],
+      "max_latency_ms": 1500
+    }
+  ]
+}

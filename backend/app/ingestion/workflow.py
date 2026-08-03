@@ -12,7 +12,7 @@ INGESTION_DEFINITION_ID = "document-ingestion"
 INGESTION_DEFINITION_VERSION = "1"
 
 
-def create_ingestion_run(session: Session, workspace_id: str, document_version_id: str) -> WorkflowRun:
+def create_ingestion_run(session: Session, workspace_id: str, document_version_id: str, *, queued: bool = False) -> WorkflowRun:
     definition = session.get(WorkflowDefinition, INGESTION_DEFINITION_ID)
     if definition is None:
         definition = WorkflowDefinition(
@@ -25,9 +25,9 @@ def create_ingestion_run(session: Session, workspace_id: str, document_version_i
     now = datetime.now(timezone.utc)
     run = WorkflowRun(
         id=str(uuid4()), workspace_id=workspace_id, definition_id=INGESTION_DEFINITION_ID,
-        state="completed", job_type="ingestion", recovery_state=None,
+        state="queued" if queued else "completed", job_type="ingestion", recovery_state=None,
         payload_json=json.dumps({"document_version_id": document_version_id}),
-        created_at=now, updated_at=now, finished_at=now,
+        created_at=now, updated_at=now, finished_at=None if queued else now,
     )
     session.add(run)
     return run

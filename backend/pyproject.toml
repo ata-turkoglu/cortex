@@ -1,15 +1,47 @@
 [project]
 name = "cortex-backend"
 version = "0.1.0"
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "alembic==1.14.1",
+  "dramatiq[redis]==1.17.1",
+  "docling==2.114.0",
+  "fastapi==0.115.8",
+  "httpx==0.28.1",
+  "keyring==25.6.0",
+  "networkx==3.4.2",
+  "pydantic-settings==2.14.2",
+  "python-multipart==0.0.22",
+  "qdrant-client==1.13.2",
+  "redis==5.2.1",
+  "sqlalchemy==2.0.38",
+  "uvicorn[standard]==0.34.0",
+]
+
+[dependency-groups]
+dev = [
+  "black==25.1.0",
+  "pre-commit==4.1.0",
+  "pytest==8.3.4",
+  "ruff==0.9.10",
+]
+graphrag = [
+  "bm25s==0.3.9",
+  "graphrag==2.6.0",
+  "llama-index-core==0.12.32",
+  "sentence-transformers==3.4.1",
+]
+
+[tool.uv]
+required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 
 [tool.black]
 line-length = 100
-target-version = ["py310"]
+target-version = ["py311"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 exclude = ["data", ".venv"]
 
 [tool.ruff.lint]

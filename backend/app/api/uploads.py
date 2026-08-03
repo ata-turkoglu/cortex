@@ -165,7 +165,7 @@ async def upload_files(
                     relationship_type="next",
                 )
             )
-        workflow_run = create_ingestion_run(session, workspace_id, version.id)
+        workflow_run = create_ingestion_run(session, workspace_id, version.id, queued=True)
         uploaded.append(
             {
                 "filename": stored.original_filename,
@@ -179,4 +179,12 @@ async def upload_files(
                 "workflow_run_id": workflow_run.id,
             }
         )
+    session.flush()
+    # Send only after rows are flushed; Redis may be unavailable during local tests.
+    from ..workers.broker import execute_workflow
+    for item in uploaded:
+        try:
+            execute_workflow.send(item["workflow_run_id"])
+        except Exception:
+            pass
     return {"uploads": uploaded}

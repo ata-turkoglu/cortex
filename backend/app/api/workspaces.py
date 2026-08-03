@@ -7,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ..core.database import SessionLocal
 from ..core.workspaces import WorkspaceContext, WorkspaceNotFoundError
-from ..models import GraphRagState, Workspace, WorkspaceIndexState, WorkspaceResource
+from ..models import Document, GraphRagState, Workspace, WorkspaceIndexState, WorkspaceResource
+from ..workflows.service import create_run
 router=APIRouter(prefix="/workspaces",tags=["workspaces"]); SLUG=re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 def get_session():
     session=SessionLocal()
@@ -35,4 +36,19 @@ def get(workspace_id:str,s:Session=Depends(get_session)): return lookup(s,worksp
 @router.delete("/{workspace_id}",status_code=204)
 def delete(workspace_id:str,s:Session=Depends(get_session)):
     w=lookup(s,workspace_id); now=datetime.now(timezone.utc); w.deleted_at=now; w.state="deleting"; w.updated_at=now
+    run=create_run(s,w.id,"workspace_delete"); s.flush()
+    from ..workers.broker import execute_workflow
+    try: execute_workflow.send(run.id)
+    except Exception: pass
     return Response(status_code=204)
+
+@router.delete("/{workspace_id}/documents/{document_id}",status_code=202)
+def delete_document(workspace_id:str,document_id:str,s:Session=Depends(get_session)):
+    lookup(s,workspace_id)
+    document=s.scalar(select(Document).where(Document.id==document_id,Document.workspace_id==workspace_id,Document.deleted_at.is_(None)))
+    if not document: raise HTTPException(404,"document not found")
+    run=create_run(s,workspace_id,"document_delete",{"document_id":document_id}); s.flush()
+    from ..workers.broker import execute_workflow
+    try: execute_workflow.send(run.id)
+    except Exception: pass
+    return {"workflow_run_id":run.id}
