@@ -20,7 +20,9 @@ number of days.
 Document and workspace deletion commands create durable delete workflows. At their cleanup
 checkpoint they idempotently tombstone the workspace-owned relational document, version, and
 chunk rows. Cross-store file/vector cleanup and reconciliation remain dedicated follow-up
-steps, so a partial external cleanup cannot erase the persisted repair history.
+steps. A failed deletion queues a durable `reconcile` repair run; the backend maintenance
+loop also queues one workspace-scoped orphan-reconciliation run per active workspace daily.
+The persisted scan/repair checkpoints make recovery visible before external-store adapters act.
 
 Workflow failure details are limited to a concise exception summary. Credential-like values for
 API keys, tokens, passwords, and authorization headers are redacted before they are persisted

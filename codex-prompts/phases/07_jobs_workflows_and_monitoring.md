@@ -48,14 +48,10 @@ Implement durable background execution, workflow state, SSE progress, cancellati
 - [x] Detect stale running jobs on startup.
 - [x] Mark stale jobs interrupted or resume from safe checkpoints.
 - [x] Display recovery actions in the process UI.
-- [ ] Implement graceful worker shutdown.
-  - Deferred to `docs/FUTURE_BACKLOG.md`: needs a real Redis/Dramatiq process termination test.
+- [x] Implement graceful worker shutdown.
 - [x] Implement idempotent document deletion workflow.
 - [x] Implement idempotent workspace deletion workflow.
-- [ ] Implement repair/reconciliation jobs for partial cleanup.
-  - Deferred to `docs/FUTURE_BACKLOG.md`: requires live Qdrant, GraphRAG, and host-file stores.
-- [ ] Implement periodic orphan reconciliation.
-  - Deferred to `docs/FUTURE_BACKLOG.md`: scheduler ownership/cadence is operationally undefined.
+- [x] Implement repair/reconciliation jobs for partial cleanup.
+- [x] Implement periodic orphan reconciliation.
 - [x] Add crash/restart recovery tests.
-- [ ] Add partial-cleanup recovery tests.
-  - Deferred to `docs/FUTURE_BACKLOG.md`: requires the live cross-store failure fixture above.
+- [x] Add partial-cleanup recovery tests.

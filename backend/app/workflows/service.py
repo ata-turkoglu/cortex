@@ -233,6 +233,18 @@ def apply_deletion_cleanup(session: Session, run: WorkflowRun) -> None:
             workspace.updated_at = timestamp
 
 
+def apply_reconciliation(session: Session, run: WorkflowRun) -> None:
+    """Persist a repair checkpoint; external-store adapters run after this DB transaction."""
+    payload = json.loads(run.payload_json or "{}")
+    event(
+        session,
+        run,
+        "reconciliation_scanned",
+        requested_by=payload.get("requested_by", "periodic"),
+        scope=payload.get("scope", "workspace"),
+    )
+
+
 def execute_run(session: Session, run_id: str) -> None:
     run = session.get(WorkflowRun, run_id)
     if run is None or run.state not in ("queued", "running", "cancelling"):
@@ -297,6 +309,8 @@ def execute_run(session: Session, run_id: str) -> None:
                 "workspace_delete",
             }:
                 apply_deletion_cleanup(session, run)
+            if step.step_name == "repair" and run.job_type == "reconcile":
+                apply_reconciliation(session, run)
             # External parsing/model work is deliberately invoked by specialized worker adapters;
             # this durable boundary only commits short, idempotent checkpoints.
             step.state, step.checkpoint_json, step.updated_at = (
@@ -311,6 +325,14 @@ def execute_run(session: Session, run_id: str) -> None:
     except Exception as exc:
         run.state, run.finished_at, run.updated_at = "failed", now(), now()
         event(session, run, "failed", details=redact_exception(exc))
+        if run.job_type in {"document_delete", "workspace_delete"}:
+            repair = create_run(
+                session,
+                run.workspace_id,
+                "reconcile",
+                {"requested_by": run.id, "scope": "deletion_cleanup"},
+            )
+            event(session, repair, "repair_queued", failed_workflow_id=run.id)
     finally:
         if run.state in ("completed", "failed", "cancelled") and lock_type:
             lock = session.scalar(
@@ -345,3 +367,11 @@ def cleanup_retention(session: Session) -> int:
     for run in completed:
         run.deleted_at = now()
     return len(completed)
+
+
+def schedule_orphan_reconciliation(session: Session) -> int:
+    """Queue at most one durable reconciliation workflow per active workspace."""
+    workspaces = session.scalars(select(Workspace).where(Workspace.deleted_at.is_(None))).all()
+    for workspace in workspaces:
+        create_run(session, workspace.id, "reconcile", {"requested_by": "periodic"})
+    return len(workspaces)

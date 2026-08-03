@@ -4,7 +4,15 @@ from uuid import uuid4
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, Document, QueryStepRun, WorkflowEvent, Workspace, WorkspaceLock
+from app.models import (
+    Base,
+    Document,
+    QueryStepRun,
+    WorkflowEvent,
+    WorkflowRun,
+    Workspace,
+    WorkspaceLock,
+)
 from app.workflows.queries import create_query_run
 from app.workflows.service import (
     cleanup_retention,
@@ -14,6 +22,7 @@ from app.workflows.service import (
     redact_exception,
     request_cancel,
     retry_from_failed_step,
+    schedule_orphan_reconciliation,
 )
 
 
@@ -96,3 +105,27 @@ def test_query_runs_are_persisted_separately_from_background_workflows():
     run = create_query_run(session, workspace_id, "Ankara hakkında ne biliyoruz?")
     assert run.state == "queued"
     assert session.query(QueryStepRun).filter_by(query_run_id=run.id).count() == 3
+
+
+def test_periodic_reconciliation_is_durable_and_idempotent():
+    session, workspace_id = session_with_workspace()
+    assert schedule_orphan_reconciliation(session) == 1
+    run = (
+        session.query(WorkflowRun)
+        .filter_by(workspace_id=workspace_id, job_type="reconcile")
+        .one()
+    )
+    execute_run(session, run.id)
+    assert run.state == "completed"
+    assert any(
+        event.event_type == "reconciliation_scanned" for event in session.query(WorkflowEvent)
+    )
+
+
+def test_failed_deletion_queues_a_durable_repair_workflow():
+    session, workspace_id = session_with_workspace()
+    deletion = create_run(session, workspace_id, "document_delete", {})
+    execute_run(session, deletion.id)
+    repair = session.query(WorkflowRun).filter_by(workspace_id=workspace_id, job_type="reconcile").one()
+    assert deletion.state == "failed"
+    assert repair.state == "queued"

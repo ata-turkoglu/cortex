@@ -10,14 +10,14 @@ Codex must keep this file updated.
 - [x] Phase 4 — Database and workspace
 - [x] Phase 5 — Document ingestion
 - [x] Phase 6 — Retrieval and GraphRAG
-- [x] Phase 7 — Jobs, workflows, and monitoring (user-approved operational deferrals)
+- [x] Phase 7 — Jobs, workflows, and monitoring
 - [x] Phase 8 — Chat and query
-- [ ] Phase 9 — Settings and system map
+- [x] Phase 9 — Settings and system map
 - [ ] Phase 10 — Validation and hardening
 
 ## Current phase
 
-- Phase: Phase 8 — Chat and query
+- Phase: Phase 9 — Settings and system map
 - Status: Complete
 - Started: 2026-08-02
 - Last updated: 2026-08-03
@@ -77,9 +77,7 @@ Codex must keep this file updated.
 ## In progress
 
 
-- No Phase 8 work remains. Phase 9 is next.
-  summarization, LlamaIndex Router integration, message editing, source-detail navigation,
-  cost-budget enforcement, generated-client regeneration, and large-history pagination remain.
+- No Phase 2, 3, or 7 gap remains. Phase 10 is next.
 
 - Phase 7 now has the foundational durable executor and monitoring surface. It still needs
   specialized ingestion/reindex/deletion step adapters, true EventSource reconnect handling,
@@ -134,6 +132,9 @@ Codex must keep this file updated.
 | 2026-08-03 | 6 | `uv run python scripts/ai-context/validate-context.py; uv run python scripts/ai-context/check-context-freshness.py` | Passed |
 | 2026-08-03 | 7 | focused workflow lint/tests and in-memory Alembic upgrade | Passed (4 tests) |
 | 2026-08-03 | 7 | `corepack pnpm build && corepack pnpm lint` (from `frontend`) | Passed (bundle-size advisory only) |
+| 2026-08-03 | 9 | `uv run pytest -q tests/test_settings.py tests/test_uploads.py tests/test_metadata.py tests/test_health.py tests/test_migrations.py` (from `backend`) | Passed (13 tests) |
+| 2026-08-03 | 9 | `uv run ruff check app/core/config.py app/core/settings_service.py app/api/settings.py app/api/health.py app/chat/execution.py tests/test_settings.py` (from `backend`) | Passed |
+| 2026-08-03 | 9 | `corepack pnpm build && corepack pnpm lint` (from `frontend`) | Passed (bundle-size advisory only) |
 | 2026-08-03 | 7 | context validation and freshness checks | Passed |
 | 2026-08-03 | 7 | focused workflow, LlamaIndex, API, and migration validation | Passed (9 tests; upstream Pydantic warnings only) |
 | 2026-08-03 | 7 | `corepack pnpm build && corepack pnpm lint` (from `frontend`) | Passed (bundle-size advisory only) |

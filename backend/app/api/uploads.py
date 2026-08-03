@@ -11,6 +11,7 @@ from ..core.config import get_settings
 from ..core.uploads import UploadValidationError, store_upload
 from ..core.workspaces import WorkspaceContext, WorkspaceNotFoundError
 from ..ingestion.parsers import DocumentParseError, parse_to_markdown
+from ..ingestion.metadata import metadata_extraction_assignment
 from ..ingestion.chunking import chunk_markdown
 from ..ingestion.folders import resolve_folder_path
 from ..ingestion.workflow import create_ingestion_run
@@ -51,6 +52,11 @@ async def upload_files(
         )
         if replacement_document is None:
             raise HTTPException(status_code=404, detail="document not found in workspace")
+    # Snapshot all database-backed routing before file/Docling work.  The transaction is
+    # committed so no filesystem/parser/model operation can hold SQLite locks.
+    upload_root = context.resource_path("uploads")
+    normalized_root = context.resource_path("normalized")
+    session.commit()
     uploaded = []
     for upload in files:
         content = await upload.read(settings.upload_max_bytes + 1)
@@ -64,15 +70,15 @@ async def upload_files(
             )
             if duplicate:
                 raise HTTPException(status_code=409, detail="identical document content already exists")
+            session.commit()
             stored = store_upload(
-                context.resource_path("uploads"),
+                upload_root,
                 upload.filename or "",
                 upload.content_type,
                 content,
                 settings.upload_max_bytes,
             )
             parsed = parse_to_markdown(stored.storage_path, stored.original_filename)
-            normalized_root = context.resource_path("normalized")
             normalized_root.mkdir(parents=True, exist_ok=True)
             normalized_path = normalized_root / f"{uuid4().hex}.md"
             normalized_path.write_text(parsed.markdown, encoding="utf-8", newline="\n")
@@ -125,11 +131,16 @@ async def upload_files(
         )
         document.active_version_id = version.id
         session.add(version)
+        metadata_provider, metadata_model = metadata_extraction_assignment()
         for key, value in {
             "filename": stored.original_filename,
             "mime_type": stored.media_type,
             "source_sha256": stored.sha256,
             "size_bytes": stored.size_bytes,
+            "metadata_extraction_assignment": {
+                "provider": metadata_provider,
+                "model": metadata_model,
+            },
         }.items():
             session.add(
                 DocumentMetadata(

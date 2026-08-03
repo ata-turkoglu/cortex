@@ -1,15 +1,17 @@
+import asyncio
+import contextlib
 import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .api.chat import router as chat_router
 from .api.health import router as health_router
 from .api.settings import router as settings_router
-from .api.workspaces import router as workspaces_router
 from .api.uploads import router as uploads_router
 from .api.workflows import router as workflows_router
-from .api.chat import router as chat_router
+from .api.workspaces import router as workspaces_router
 from .core.errors import ErrorEnvelope
 from .core.logging import configure_logging
 
@@ -17,6 +19,17 @@ from .core.logging import configure_logging
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     configure_logging()
+    from .core.database import SessionLocal
+    from .core.settings_service import load_runtime_settings
+
+    session = SessionLocal()
+    try:
+        load_runtime_settings(session)
+    except Exception:
+        # The app can start before migrations have been applied.
+        pass
+    finally:
+        session.close()
     # Durable stale-job recovery is delegated to the worker before accepting new work.
     from .workers.broker import recover_stale_jobs
 
@@ -25,7 +38,28 @@ async def lifespan(_: FastAPI):
     except Exception:
         # Startup remains available when Redis is intentionally absent in unit tests.
         pass
+    async def maintenance_loop() -> None:
+        from .workers.broker import reconcile_orphans
+
+        while True:
+            try:
+                reconcile_orphans.send()
+            except Exception:
+                pass
+            await asyncio.sleep(24 * 60 * 60)
+
+    maintenance = asyncio.create_task(maintenance_loop())
     yield
+    maintenance.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await maintenance
+    # Stop accepting broker work before the API process exits. Actors checkpoint each step.
+    from .workers.broker import broker
+
+    try:
+        broker.close()
+    except Exception:
+        pass
 
 
 app = FastAPI(
