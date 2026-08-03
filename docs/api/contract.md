@@ -37,3 +37,17 @@ through the Cortex API-client boundary.
 
 `GET /settings/budgets` exposes safe query defaults: Query Expansion and automatic
 quality escalation are disabled unless global configuration explicitly enables them.
+
+`GET /settings` and `PUT /settings` expose the persistent, global-only operational
+configuration. Secrets and connection locations remain environment/credential-store owned.
+Updates are Pydantic validated and model assignments are checked against provider
+capabilities. Changing chunking or embedding settings marks every workspace index as
+`reindex_required` and its GraphRAG projection as `stale`.
+
+`GET /health` returns both a service map and component list. The system map renders these
+live states; an unavailable optional provider is shown as unavailable rather than healthy.
+
+`POST /settings/providers/{provider}/validate` stores a supplied credential in the OS
+credential store and records only safe validation state. `POST /settings/embedding/health`
+tests the configured Ollama embedding adapter and reports its model and vector dimension.
+`POST /settings/setup/complete` records completion of the global first-run wizard.

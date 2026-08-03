@@ -100,7 +100,10 @@ def synthesize_with_openai(query_run_id: str, session_factory) -> None:
         session.close()
     if not snapshot or not allowed or not OpenAIProvider().configured():
         return
-    generated = asyncio.run(OpenAIProvider().generate("gpt-5.6-luna", *snapshot))
+    settings = get_settings()
+    if settings.answer_provider != "openai":
+        return
+    generated = asyncio.run(OpenAIProvider().generate(settings.answer_model, *snapshot))
     session = session_factory()
     try:
         apply_synthesis(
@@ -139,7 +142,7 @@ def summarize_conversation_with_openai(conversation_id: str, session_factory) ->
     )
     generated = asyncio.run(
         provider.generate(
-            "gpt-5.6-luna",
+            get_settings().summary_model,
             "Create a concise factual conversation memory. Do not introduce external facts.",
             transcript,
         )

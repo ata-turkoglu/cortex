@@ -2,11 +2,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="CORTEX_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_prefix="CORTEX_", extra="ignore", validate_assignment=True
+    )
     environment: str = "development"
     database_url: str = "sqlite:///./data/sqlite/cortex.db"
     redis_url: str = "redis://redis:6379/0"
@@ -17,10 +20,14 @@ class Settings(BaseSettings):
     upload_max_bytes: int = 50 * 1024 * 1024
     chunk_token_limit: int = 500
     chunk_overlap_tokens: int = 50
+    allowed_extensions: str = ".md,.txt,.docx,.pdf"
     embedding_provider: str = "ollama"
     embedding_model: str = "qwen3-embedding:0.6b"
     embedding_batch_size: int = 64
     embedding_min_batch_size: int = 1
+    embedding_timeout_seconds: int = 60
+    embedding_keep_alive: str = "5m"
+    embedding_concurrency: int = 2
     dense_top_k: int = 30
     bm25_top_k: int = 30
     fusion_candidate_limit: int = 40
@@ -28,6 +35,8 @@ class Settings(BaseSettings):
     final_evidence_top_k: int = 10
     reranker_model: str | None = None
     reranker_device: str | None = None
+    router_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
+    router_multi_route_threshold: float = Field(default=0.8, ge=0, le=1)
     graphrag_pending_document_threshold: int = 20
     graphrag_update_mode: Literal["manual", "threshold"] = "manual"
     graphrag_max_documents_per_run: int = 500
@@ -38,8 +47,23 @@ class Settings(BaseSettings):
     workflow_graphrag_reindex_concurrency: int = 1
     workflow_deletion_concurrency: int = 1
     workflow_retention_days: int = 30
+    workflow_retry_limit: int = 3
+    workflow_retry_backoff_seconds: int = 5
+    workflow_timeout_seconds: int = 900
+    default_page_size: int = 50
+    health_check_interval_seconds: int = 15
+    sse_reconnect_interval_seconds: int = 3
     conversation_memory_window_messages: int = 12
     answer_style: Literal["concise", "balanced", "detailed"] = "balanced"
+    grounding_required: bool = True
+    metadata_provider: Literal["openai", "anthropic", "ollama"] = "openai"
+    metadata_model: str = "gpt-5.6-luna"
+    answer_provider: Literal["openai", "anthropic", "ollama"] = "openai"
+    answer_model: str = "gpt-5.6-luna"
+    router_provider: Literal["openai", "anthropic", "ollama"] = "openai"
+    router_model: str = "gpt-5.6-luna"
+    summary_provider: Literal["openai", "anthropic", "ollama"] = "openai"
+    summary_model: str = "gpt-5.6-luna"
     query_expansion_enabled: bool = False
     automatic_quality_escalation_enabled: bool = False
     daily_soft_budget_usd: float = 0.0

@@ -12,13 +12,15 @@ export type AFlowEdge = Edge;
 export function AFlowCanvas({
   nodes,
   edges,
+  onNodeClick,
 }: {
   nodes: AFlowNode[];
   edges: AFlowEdge[];
+  onNodeClick?: (id: string) => void;
 }) {
   return (
     <div style={{ height: 360 }}>
-      <ReactFlow nodes={nodes} edges={edges} fitView>
+      <ReactFlow nodes={nodes} edges={edges} fitView onNodeClick={(_, node) => onNodeClick?.(node.id)}>
         <Background />
         <Controls />
       </ReactFlow>

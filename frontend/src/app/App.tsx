@@ -8,6 +8,7 @@ import { ProviderSettingsPage } from "../pages/ProviderSettingsPage";
 import { ASystemMap } from "../flow/ASystemMap";
 import { ProcessesPage } from "../pages/ProcessesPage";
 import { ChatPage } from "../pages/ChatPage";
+import { OperationalSettingsPage } from "../pages/OperationalSettingsPage";
 const routes: Record<string, [string, string]> = {
   "/": ["Dashboard", "Workspace summary and recent activity."],
   "/workspaces": ["Workspaces", "Manage isolated knowledge applications."],
@@ -70,6 +71,13 @@ function ProviderRoute() {
     </APlatformLayout>
   );
 }
+function SettingsRoute() {
+  return (
+    <APlatformLayout title="Settings">
+      <OperationalSettingsPage />
+    </APlatformLayout>
+  );
+}
 function SystemMapRoute() {
   return (
     <APlatformLayout title="System map">
@@ -107,6 +115,8 @@ export function App() {
               <AppearanceRoute />
             ) : path === "/settings/providers" ? (
               <ProviderRoute />
+            ) : path === "/settings" ? (
+              <SettingsRoute />
             ) : path === "/system-map" ? (
               <SystemMapRoute />
             ) : (

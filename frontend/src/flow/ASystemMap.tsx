@@ -1,22 +1,29 @@
 import type { Edge, Node } from "@xyflow/react";
+import { useEffect, useMemo, useState } from "react";
+import { apiClient } from "../api/client";
+import { AInfo } from "../ui/primitives";
 import { AFlowCanvas } from "./AFlowCanvas";
 
-const nodes: Node[] = [
-  { id: "ui", position: { x: 0, y: 80 }, data: { label: "Frontend" } },
-  { id: "api", position: { x: 220, y: 80 }, data: { label: "Backend API" } },
-  { id: "worker", position: { x: 440, y: 0 }, data: { label: "Worker" } },
-  {
-    id: "stores",
-    position: { x: 440, y: 160 },
-    data: { label: "SQLite · Redis · Qdrant" },
-  },
-];
 const edges: Edge[] = [
-  { id: "ui-api", source: "ui", target: "api" },
-  { id: "api-worker", source: "api", target: "worker" },
-  { id: "api-stores", source: "api", target: "stores" },
-  { id: "worker-stores", source: "worker", target: "stores" },
+  { id: "api-worker", source: "backend", target: "worker" },
+  { id: "api-sqlite", source: "backend", target: "sqlite" },
+  { id: "worker-redis", source: "worker", target: "redis" },
+  { id: "worker-qdrant", source: "worker", target: "qdrant" },
 ];
 export function ASystemMap() {
-  return <AFlowCanvas nodes={nodes} edges={edges} />;
+  const [services, setServices] = useState<Record<string, string>>({ backend: "unknown" });
+  const [selected, setSelected] = useState("backend");
+  useEffect(() => {
+    const refresh = () => Promise.all([apiClient.getHealth(), apiClient.diagnostics()]).then(([health, diagnostics]) => setServices({ ...health.services, recovery: diagnostics.workflows.interrupted ? "attention" : "healthy", reconciliation: diagnostics.reconciliation.state })).catch(() => setServices({ backend: "unavailable" }));
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const nodes = useMemo<Node[]>(() => Object.entries(services).map(([id, status], index) => ({
+    id, position: { x: (index % 3) * 220, y: Math.floor(index / 3) * 110 },
+    data: { label: `${id.replace("_", " ")} · ${status}` },
+    style: { borderColor: status === "healthy" || status === "configured" ? "#16a34a" : status === "unavailable" ? "#dc2626" : "#ca8a04", borderWidth: 2 },
+  })), [services]);
+  const visibleEdges = edges.filter((edge) => nodes.some((node) => node.id === edge.source) && nodes.some((node) => node.id === edge.target));
+  return <><AInfo title="System component">{selected.replace("_", " ")}: {services[selected] ?? "unknown"}. Status is refreshed from backend health checks.</AInfo><div className="mt-3"><AFlowCanvas nodes={nodes} edges={visibleEdges} onNodeClick={setSelected} /></div></>;
 }

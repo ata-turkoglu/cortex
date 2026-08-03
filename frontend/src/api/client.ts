@@ -35,7 +35,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 export const apiClient = {
-  getHealth: async () => request<{ status: string }>("/health"),
+  getHealth: async () => request<{ status: string; services: Record<string, string> }>("/health"),
+  getSettings: () => request<{ settings: Record<string, unknown>; global_only: boolean }>("/settings"),
+  updateSettings: (settings: Record<string, unknown>) => request<{ settings: Record<string, unknown>; reindex_required: boolean }>("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) }),
+  providerStatus: () => request<{ providers: { provider: string; configured: boolean }[] }>("/settings/providers"),
+  validateProvider: (provider: "openai" | "anthropic" | "ollama", apiKey?: string) =>
+    request<{ provider: string; status: string }>(`/settings/providers/${provider}/validate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(apiKey ? { api_key: apiKey } : {}) }),
+  embeddingHealth: () => request<{ provider: string; model: string; dimension: number }>("/settings/embedding/health", { method: "POST" }),
+  completeSetup: (dataPath?: string) => request<{ completed: boolean }>("/settings/setup/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data_path: dataPath }) }),
+  resetSettings: () => request<{ settings: Record<string, unknown>; reindex_required: boolean }>("/settings/reset-defaults", { method: "POST" }),
+  diagnostics: () => request<{ windows: { data_path: string; ollama_base_url: string }; workflows: Record<string, number>; reconciliation: { state: string; message: string } }>("/settings/diagnostics"),
+  embeddingStatus: () => request<{ provider: string; model: string; installed: boolean; dimension: number | null; model_digest: string | null; last_benchmark: string | null; requires_full_reindex: boolean }>("/settings/embedding/status"),
+  graphragEstimate: () => request<{ update_mode: string; pending_document_threshold: number; confirmation_threshold_usd: number; requires_confirmation: boolean }>("/settings/graphrag/estimate"),
   listWorkflows: async () => request<WorkflowRun[]>("/workflows"),
   cancelWorkflow: async (id: string) =>
     request<WorkflowRun>(`/workflows/${id}/cancel`, {

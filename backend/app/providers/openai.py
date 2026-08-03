@@ -1,12 +1,13 @@
 import httpx
 
 from ..core.config import get_settings
+from ..core.secrets import SecretStore
 from .base import GeneratedText, ModelCapability
 
 
 class OpenAIProvider:
     def configured(self) -> bool:
-        return bool(get_settings().openai_api_key)
+        return bool(get_settings().openai_api_key or SecretStore().get("openai_api_key"))
 
     async def list_models(self) -> list[ModelCapability]:
         return [
@@ -16,7 +17,7 @@ class OpenAIProvider:
 
     async def generate(self, model: str, instructions: str, input_text: str) -> GeneratedText:
         """Call Responses outside database transactions through a worker-owned adapter."""
-        api_key = get_settings().openai_api_key
+        api_key = get_settings().openai_api_key or SecretStore().get("openai_api_key")
         if not api_key:
             raise RuntimeError("OpenAI is not configured")
         async with httpx.AsyncClient(timeout=60) as client:
