@@ -13,6 +13,15 @@ class ModelCapability:
 class LLMProvider(Protocol):
     async def list_models(self) -> list[ModelCapability]: ...
 
+    async def generate(self, model: str, instructions: str, input_text: str) -> "GeneratedText": ...
+
+
+@dataclass(frozen=True)
+class GeneratedText:
+    text: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
 
 class EmbeddingProvider(Protocol):
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
