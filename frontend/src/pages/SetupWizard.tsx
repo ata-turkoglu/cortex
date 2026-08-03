@@ -1,4 +1,54 @@
 import { useState } from "react";
 import { AButton, ACard, AInfo, AInput, AProgress } from "../ui/primitives";
-const steps = ["Welcome", "Data path", "Service health", "OpenAI", "Anthropic", "Ollama", "Embeddings", "Models", "Budgets", "Validation"];
-export function SetupWizard() { const [step, setStep] = useState(0); const [path, setPath] = useState("D:\\Cortex\\data"); return <ACard title="First-run setup"><AProgress value={((step + 1) / steps.length) * 100} showValue={false} /><p className="mt-3 text-sm">Step {step + 1} of {steps.length}: <strong>{steps[step]}</strong></p>{step === 1 ? <label className="grid gap-1">Windows data path<AInput value={path} onChange={(event) => setPath(event.target.value)} /></label> : <AInfo>{step === 3 ? "API keys are saved by the backend secret store and never displayed after save." : "This UI records configuration intent; service validation is connected in the backend phase."}</AInfo>}<div className="mt-4 flex gap-2"><AButton label="Back" disabled={step === 0} onClick={() => setStep((value) => value - 1)} /><AButton label={step === steps.length - 1 ? "Finish" : "Continue"} onClick={() => setStep((value) => Math.min(value + 1, steps.length - 1))} /></div></ACard>; }
+const steps = [
+  "Welcome",
+  "Data path",
+  "Service health",
+  "OpenAI",
+  "Anthropic",
+  "Ollama",
+  "Embeddings",
+  "Models",
+  "Budgets",
+  "Validation",
+];
+export function SetupWizard() {
+  const [step, setStep] = useState(0);
+  const [path, setPath] = useState("D:\\Cortex\\data");
+  return (
+    <ACard title="First-run setup">
+      <AProgress value={((step + 1) / steps.length) * 100} showValue={false} />
+      <p className="mt-3 text-sm">
+        Step {step + 1} of {steps.length}: <strong>{steps[step]}</strong>
+      </p>
+      {step === 1 ? (
+        <label className="grid gap-1">
+          Windows data path
+          <AInput
+            value={path}
+            onChange={(event) => setPath(event.target.value)}
+          />
+        </label>
+      ) : (
+        <AInfo>
+          {step === 3
+            ? "API keys are saved by the backend secret store and never displayed after save."
+            : "This UI records configuration intent; service validation is connected in the backend phase."}
+        </AInfo>
+      )}
+      <div className="mt-4 flex gap-2">
+        <AButton
+          label="Back"
+          disabled={step === 0}
+          onClick={() => setStep((value) => value - 1)}
+        />
+        <AButton
+          label={step === steps.length - 1 ? "Finish" : "Continue"}
+          onClick={() =>
+            setStep((value) => Math.min(value + 1, steps.length - 1))
+          }
+        />
+      </div>
+    </ACard>
+  );
+}

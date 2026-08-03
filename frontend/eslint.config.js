@@ -20,13 +20,22 @@ export default tseslint.config(
           paths: [
             { name: "primereact/button", message: "Use Cortex UI adapters." },
             { name: "primereact/dialog", message: "Use Cortex UI adapters." },
-            { name: "primereact/datatable", message: "Use Cortex UI adapters." },
-            { name: "lucide-react", message: "Use AIcon and the icon registry." },
-            { name: "@xyflow/react", message: "Use AFlowCanvas." }
-          ]
-        }
-      ]
-    }
+            {
+              name: "primereact/datatable",
+              message: "Use Cortex UI adapters.",
+            },
+            {
+              name: "lucide-react",
+              message: "Use AIcon and the icon registry.",
+            },
+            { name: "@xyflow/react", message: "Use AFlowCanvas." },
+          ],
+        },
+      ],
+    },
   },
-  { files: ["src/ui/**", "src/icons/**", "src/flow/**"], rules: { "no-restricted-imports": "off" } }
+  {
+    files: ["src/ui/**", "src/icons/**", "src/flow/**"],
+    rules: { "no-restricted-imports": "off" },
+  },
 );

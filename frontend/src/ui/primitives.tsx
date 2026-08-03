@@ -13,7 +13,60 @@ import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
 import type { ReactNode } from "react";
 export const AButton = (props: ButtonProps) => <Button {...props} />;
-export const ADialog = Dialog; export const AInput = InputText; export const ATextarea = InputTextarea; export const ACheckbox = Checkbox; export const ASelect = Dropdown; export const AProgress = ProgressBar; export const ASkeleton = Skeleton; export const ABadge = Tag; export const AToast = Toast; export const ATooltip = Tooltip; export const ATable = DataTable; export const AColumn = Column;
-export const ACard = ({ title, children }: { title?: string; children: ReactNode }) => <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:bg-slate-900">{title && <h2 className="mb-3 text-lg font-semibold">{title}</h2>}{children}</section>;
-export const AInfo = ({ title = "Bilgi", children }: { title?: string; children: ReactNode }) => <aside className="rounded-md border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950"><strong>{title}</strong><div>{children}</div></aside>;
-export const AConfirmDialog = ADialog; export const APaginator = ({ children }: { children?: ReactNode }) => <nav aria-label="Sayfalama">{children}</nav>; export const ADatePicker = AInput; export const ADrawer = ADialog; export const ASplitPanel = ({ children }: { children: ReactNode }) => <div className="grid gap-4 lg:grid-cols-2">{children}</div>; export const ATabs = ({ children }: { children: ReactNode }) => <div role="tablist">{children}</div>; export const AMenu = ({ children }: { children: ReactNode }) => <nav>{children}</nav>; export const ARadio = ACheckbox; export const ASwitch = ACheckbox; export const AFileUpload = () => <input aria-label="Dosya yükle" type="file" />; export const ATree = ({ children }: { children?: ReactNode }) => <div role="tree">{children}</div>;
+export const ADialog = Dialog;
+export const AInput = InputText;
+export const ATextarea = InputTextarea;
+export const ACheckbox = Checkbox;
+export const ASelect = Dropdown;
+export const AProgress = ProgressBar;
+export const ASkeleton = Skeleton;
+export const ABadge = Tag;
+export const AToast = Toast;
+export const ATooltip = Tooltip;
+export const ATable = DataTable;
+export const AColumn = Column;
+export const ACard = ({
+  title,
+  children,
+}: {
+  title?: string;
+  children: ReactNode;
+}) => (
+  <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:bg-slate-900">
+    {title && <h2 className="mb-3 text-lg font-semibold">{title}</h2>}
+    {children}
+  </section>
+);
+export const AInfo = ({
+  title = "Bilgi",
+  children,
+}: {
+  title?: string;
+  children: ReactNode;
+}) => (
+  <aside className="rounded-md border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">
+    <strong>{title}</strong>
+    <div>{children}</div>
+  </aside>
+);
+export const AConfirmDialog = ADialog;
+export const APaginator = ({ children }: { children?: ReactNode }) => (
+  <nav aria-label="Sayfalama">{children}</nav>
+);
+export const ADatePicker = AInput;
+export const ADrawer = ADialog;
+export const ASplitPanel = ({ children }: { children: ReactNode }) => (
+  <div className="grid gap-4 lg:grid-cols-2">{children}</div>
+);
+export const ATabs = ({ children }: { children: ReactNode }) => (
+  <div role="tablist">{children}</div>
+);
+export const AMenu = ({ children }: { children: ReactNode }) => (
+  <nav>{children}</nav>
+);
+export const ARadio = ACheckbox;
+export const ASwitch = ACheckbox;
+export const AFileUpload = () => <input aria-label="Dosya yükle" type="file" />;
+export const ATree = ({ children }: { children?: ReactNode }) => (
+  <div role="tree">{children}</div>
+);

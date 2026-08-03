@@ -1,5 +1,60 @@
 import type { ReactNode } from "react";
 import { APaginator, ATable } from "./primitives";
-export type PageState = { page: number; pageSize: number; total: number; onPageChange: (page: number) => void };
-export function AServerTable({ value, page, children }: { value: Record<string, unknown>[]; page: PageState; children: ReactNode }) { const pages = Math.max(1, Math.ceil(page.total / page.pageSize)); return <><ATable value={value}>{children}</ATable><APaginator><div className="mt-3 flex gap-2 text-sm"><button disabled={page.page === 0} onClick={() => page.onPageChange(page.page - 1)}>Previous</button><span>Page {page.page + 1} / {pages}</span><button disabled={page.page + 1 >= pages} onClick={() => page.onPageChange(page.page + 1)}>Next</button></div></APaginator></>; }
-export function AVirtualList<T>({ items, renderItem }: { items: T[]; renderItem: (item: T, index: number) => ReactNode }) { return <div role="list" className="max-h-96 overflow-auto">{items.map((item, index) => <div role="listitem" key={index}>{renderItem(item, index)}</div>)}</div>; }
+export type PageState = {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+};
+export function AServerTable({
+  value,
+  page,
+  children,
+}: {
+  value: Record<string, unknown>[];
+  page: PageState;
+  children: ReactNode;
+}) {
+  const pages = Math.max(1, Math.ceil(page.total / page.pageSize));
+  return (
+    <>
+      <ATable value={value}>{children}</ATable>
+      <APaginator>
+        <div className="mt-3 flex gap-2 text-sm">
+          <button
+            disabled={page.page === 0}
+            onClick={() => page.onPageChange(page.page - 1)}
+          >
+            Previous
+          </button>
+          <span>
+            Page {page.page + 1} / {pages}
+          </span>
+          <button
+            disabled={page.page + 1 >= pages}
+            onClick={() => page.onPageChange(page.page + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </APaginator>
+    </>
+  );
+}
+export function AVirtualList<T>({
+  items,
+  renderItem,
+}: {
+  items: T[];
+  renderItem: (item: T, index: number) => ReactNode;
+}) {
+  return (
+    <div role="list" className="max-h-96 overflow-auto">
+      {items.map((item, index) => (
+        <div role="listitem" key={index}>
+          {renderItem(item, index)}
+        </div>
+      ))}
+    </div>
+  );
+}
