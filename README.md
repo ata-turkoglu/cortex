@@ -35,6 +35,6 @@ Create the backend environment and install pinned dependencies with uv:
 ```powershell
 cd backend
 uv venv --python 3.11
-uv sync --dev --group graphrag
+uv sync --dev --group query --group retrieval --group graphrag
 uv run pre-commit run --all-files
 ```

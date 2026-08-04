@@ -4,11 +4,33 @@
 import json
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 supports the context tools too.
+    tomllib = None
+
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "reports" / "licenses"
 
 
 def pinned_python_requirements() -> list[str]:
+    pyproject = ROOT / "backend" / "pyproject.toml"
+    if pyproject.exists():
+        source = pyproject.read_text(encoding="utf-8")
+        if tomllib is not None:
+            payload = tomllib.loads(source)
+            project = payload.get("project", {})
+            groups = payload.get("dependency-groups", {})
+            requirements = [*project.get("dependencies", [])]
+            for group in groups.values():
+                requirements.extend(group)
+        else:
+            requirements = [
+                line.strip().strip('",')
+                for line in source.splitlines()
+                if line.lstrip().startswith('"') and "==" in line
+            ]
+        return sorted(set(requirement for requirement in requirements if "==" in requirement))
     return [
         line.strip()
         for requirement in (
@@ -47,7 +69,7 @@ def main() -> int:
             "packages": javascript_packages(),
         },
         "python": {
-            "lockfile": "backend/requirements.lock",
+            "lockfile": "backend/uv.lock",
             "packages": pinned_python_requirements(),
             "status": "requires-license-audit"
             if pinned_python_requirements()
