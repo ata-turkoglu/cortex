@@ -51,3 +51,11 @@ upstream LanceDB store. `GraphRAGQdrantAdapter` is the required custom compatibi
 GraphRAG's canonical artifacts stay under the workspace root and the entity/report/text-unit
 vectors are independently mirrored to Qdrant. Phase 7 will schedule actual index execution
 and Phase 8 will connect these route adapters to the LlamaIndex router.
+
+LanceDB remains a transitive installation in the GraphRAG worker image because Microsoft
+GraphRAG 2.6 declares it as a package dependency. It is neither configured nor invoked by
+Cortex; removing it would require forking or patching upstream GraphRAG and is outside the
+supported compatibility boundary.
+
+Phase 10 tests exercise deferred update snapshots, workspace-filtered mirroring, and the
+separate Local, Global, and DRIFT route contracts without requiring a live provider.

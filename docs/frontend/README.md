@@ -12,3 +12,15 @@ Feature code imports only those abstractions and the generated OpenAPI client.
 The Chat page presents workspace-scoped citations as source actions. Selecting one opens a
 Cortex-owned dialog with the cited chunk and its document-version number; source lookup is
 performed with the active workspace ID so a citation cannot reveal another workspace's content.
+
+`AServerTable` owns paged table controls and `AVirtualList` renders only a visible, overscanned
+window of long lists. Feature code uses these Cortex-owned primitives rather than coupling to a
+particular table or virtualization library.
+
+The Appearance settings page is a PrimeReact theme builder. It loads one of the bundled
+PrimeReact presets and applies persistent browser-local primary and secondary color tokens,
+surface palette, density, typography scale, radius, and animation preferences. These are global
+single-user presentation preferences; they are never workspace settings or server-stored data.
+
+Playwright tests in `frontend/e2e` exercise the running Compose frontend through the browser;
+the test suite requires the Chromium browser installed by Playwright.

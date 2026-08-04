@@ -31,3 +31,7 @@ normalizing line endings; retrieval feature code never owns model-specific prefi
 An incompatible embedding configuration creates one idempotent `dense_reindex` workflow request.
 The new configuration cannot become active until that full replacement workflow marks its dense
 index ready, so old vectors cannot silently serve a changed model or formatting policy.
+
+Phase 10 coverage verifies configuration-fingerprint isolation, dimension rejection, adaptive
+batch recovery, and Turkish plus cross-lingual retrieval smoke cases against the workspace-safe
+Qdrant boundary.

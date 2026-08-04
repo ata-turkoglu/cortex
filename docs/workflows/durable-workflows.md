@@ -55,3 +55,7 @@ text and token counters. Redis failure leaves the original grounded response int
 The summary worker only runs after the configured conversation-memory window is exceeded. It
 uses the assigned Conversation Summary model and writes the compact summary back to the
 workspace-scoped conversation for subsequent provider synthesis.
+
+Phase 10 regression coverage verifies cancellation, retry, stale-run recovery, stage blocking,
+retention cleanup, deletion repair scheduling, and idempotent orphan reconciliation using the
+durable SQLite state machine.

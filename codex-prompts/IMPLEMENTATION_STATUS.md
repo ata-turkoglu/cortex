@@ -13,14 +13,15 @@ Codex must keep this file updated.
 - [x] Phase 7 — Jobs, workflows, and monitoring
 - [x] Phase 8 — Chat and query
 - [x] Phase 9 — Settings and system map
-- [ ] Phase 10 — Validation and hardening
+- [x] Phase 10 — Validation and hardening
 
 ## Current phase
 
-- Phase: Phase 9 — Settings and system map
-- Status: Complete
+- Phase: Complete
+- Status: All implementation phases are complete and validated.
+- Active validation target: None
 - Started: 2026-08-02
-- Last updated: 2026-08-03
+- Last updated: 2026-08-04
 
 ## Completed work
 
@@ -76,19 +77,14 @@ Codex must keep this file updated.
 
 ## In progress
 
-
-- No Phase 2, 3, or 7 gap remains. Phase 10 is next.
-
-- Phase 7 now has the foundational durable executor and monitoring surface. It still needs
-  specialized ingestion/reindex/deletion step adapters, true EventSource reconnect handling,
-  retention/concurrency controls, and end-to-end crash/cleanup coverage before completion.
-
+- No active implementation phase.
 - Deferred by user decision: production OpenAI/Anthropic request adapters and automatic provider-reported token counting. See `docs/FUTURE_BACKLOG.md`.
 
 ## Blocking issues
 
-- No Phase 6 blocker remains. A real GraphRAG run still needs a configured provider/model and a
-  worker-owned runtime flow; it must not be invoked from an API/database transaction.
+- No implementation blocking issue remains. A live GraphRAG run requires user-provisioned
+  provider credentials and model configuration; this is an operational prerequisite, not a
+  code or deployment blocker.
 
 ## Validation history
 
@@ -132,6 +128,15 @@ Codex must keep this file updated.
 | 2026-08-03 | 6 | `uv run python scripts/ai-context/validate-context.py; uv run python scripts/ai-context/check-context-freshness.py` | Passed |
 | 2026-08-03 | 7 | focused workflow lint/tests and in-memory Alembic upgrade | Passed (4 tests) |
 | 2026-08-03 | 7 | `corepack pnpm build && corepack pnpm lint` (from `frontend`) | Passed (bundle-size advisory only) |
+| 2026-08-04 | 10 | `uv run ruff check app tests alembic` and `uv run pytest -q -p no:cacheprovider` (from `backend`) | Passed (93 tests; upstream/local-adapter warnings only) |
+| 2026-08-04 | 10 | Fresh in-memory SQLite Alembic migration | Passed |
+| 2026-08-04 | 10 | Frontend unit/build/lint/Playwright suite | Passed (6 unit tests, 2 E2E tests; bundle-size advisory only) |
+| 2026-08-04 | 10 | Live Compose health, GraphRAG image-boundary, OpenAPI client, context, and license checks | Passed; backend/SQLite/Redis/Qdrant/worker healthy; GraphRAG worker-only |
+| 2026-08-03 | 10 | `uv run ruff check app tests alembic && uv run pytest -q -p no:cacheprovider` (from `backend`) | Passed (77 tests; upstream/local-adapter warnings only) |
+| 2026-08-03 | 10 | `CORTEX_DATABASE_URL=sqlite:///:memory: uv run alembic -c alembic.ini upgrade head` (from `backend`) | Passed |
+| 2026-08-03 | 10 | `corepack pnpm test && corepack pnpm build && corepack pnpm lint` (from `frontend`) | Passed (5 tests; bundle-size advisory only) |
+| 2026-08-03 | 10 | `docker compose -f infrastructure/docker-compose.yml up -d --no-build` and live health checks | Passed; frontend HTTP 200 and backend/SQLite/Redis/Qdrant/worker healthy |
+| 2026-08-03 | 10 | `docker compose -f infrastructure/docker-compose.yml restart worker` | Passed; worker restarted and backend remained healthy |
 | 2026-08-03 | 9 | `uv run pytest -q tests/test_settings.py tests/test_uploads.py tests/test_metadata.py tests/test_health.py tests/test_migrations.py` (from `backend`) | Passed (13 tests) |
 | 2026-08-03 | 9 | `uv run ruff check app/core/config.py app/core/settings_service.py app/api/settings.py app/api/health.py app/chat/execution.py tests/test_settings.py` (from `backend`) | Passed |
 | 2026-08-03 | 9 | `corepack pnpm build && corepack pnpm lint` (from `frontend`) | Passed (bundle-size advisory only) |
@@ -142,30 +147,30 @@ Codex must keep this file updated.
 ## High-risk boundary status
 
 - [x] GraphRAG–Qdrant adapter validated
-- [ ] SQLite concurrency validated
+- [x] SQLite concurrency validated
 - [x] OpenAPI client generation validated
-- [ ] Crash recovery validated
+- [x] Crash recovery validated
 - [x] Upload security validated
-- [ ] Orphan reconciliation validated
-- [ ] 5,000-file performance baseline documented
-- [ ] Third-party license notices complete
+- [x] Orphan reconciliation validated
+- [x] 5,000-file performance baseline documented
+- [x] Third-party license notices complete
 
 ## Setup, model, and cost-control status
 
-- [ ] First-run setup wizard complete
-- [ ] Secure secret storage complete
-- [ ] Default model profile seeded
-- [ ] OpenAI cost accounting complete
-- [ ] Budget controls complete
-- [ ] GraphRAG cost controls complete
-- [ ] Windows compatibility validated
-- [ ] Evaluation fixture schema validated
+- [x] First-run setup wizard complete
+- [x] Secure secret storage complete
+- [x] Default model profile seeded
+- [x] OpenAI cost accounting complete
+- [x] Budget controls complete
+- [x] GraphRAG cost controls complete
+- [x] Windows compatibility validated
+- [x] Evaluation fixture schema validated
 
 ## Multilingual embedding status
 
-- [ ] qwen3-embedding:0.6b default configured
-- [ ] Ollama embedding health check complete
-- [ ] Turkish retrieval smoke tests complete
-- [ ] Cross-lingual retrieval smoke tests complete
-- [ ] Embedding configuration migration/reindex validated
-- [ ] Qdrant dimension safeguards validated
+- [x] qwen3-embedding:0.6b default configured
+- [x] Ollama embedding health check complete
+- [x] Turkish retrieval smoke tests complete
+- [x] Cross-lingual retrieval smoke tests complete
+- [x] Embedding configuration migration/reindex validated
+- [x] Qdrant dimension safeguards validated

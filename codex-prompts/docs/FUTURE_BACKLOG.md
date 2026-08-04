@@ -73,11 +73,15 @@ Do not implement these in V1 unless explicitly requested.
 ## UI
 
 - Alternative UI library adapter
-- Theme builder
 - User-editable workflow maps
 - User-configurable system map
 - Advanced layout persistence
 - Accessibility audit dashboard
+
+## Completed after V1
+
+- PrimeReact theme builder: persistent preset selection plus primary and secondary color tokens,
+  surface palette, density, typography scale, radius, and animation preferences.
 
 ## File-system integration
 

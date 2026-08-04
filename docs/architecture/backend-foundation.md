@@ -27,3 +27,10 @@ database snapshot before Docling/file work; chat/provider, GraphRAG, Qdrant, and
 deletion cleanup run through worker-owned adapters after the session is closed. A failed
 external deletion queues a durable reconciliation workflow rather than extending the original
 transaction.
+
+## Validation hardening
+
+Alembic prepends the backend root to its import path, so the same fresh-database migration
+command works from the local CLI and the container runtime. All FastAPI validation and handled
+HTTP errors use the Cortex error envelope and preserve the response correlation ID; unexpected
+errors remain sanitized server errors.
