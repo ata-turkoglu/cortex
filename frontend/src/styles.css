@@ -5,6 +5,10 @@
   font-family: Inter, system-ui, sans-serif;
   color: #172033;
   background: #f8fafc;
+  --cortex-primary: #4f46e5;
+  --cortex-secondary: #64748b;
+  --primary-color: var(--cortex-primary);
+  --secondary-color: var(--cortex-secondary);
 }
 :root[data-theme="dark"] {
   color: #e5e7eb;
@@ -53,6 +57,28 @@ select {
   max-width: 1500px;
   width: 100%;
   margin: 0 auto;
+}
+.p-button:not(.p-button-secondary):not(.p-button-outlined) {
+  background: var(--cortex-primary);
+  border-color: var(--cortex-primary);
+}
+.p-button.p-button-secondary:not(.p-button-outlined) {
+  background: var(--cortex-secondary);
+  border-color: var(--cortex-secondary);
+}
+.theme-preview {
+  align-items: center;
+  background: var(--cortex-surface, #f8fafc);
+  border: 1px solid color-mix(in srgb, var(--cortex-primary) 22%, transparent);
+  border-radius: var(--cortex-radius);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+.theme-preview > span {
+  font-weight: 600;
+  width: 100%;
 }
 .cortex-nav {
   display: grid;

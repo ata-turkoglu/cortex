@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode, type UIEvent } from "react";
 import { APaginator, ATable } from "./primitives";
 export type PageState = {
   page: number;
@@ -44,17 +44,43 @@ export function AServerTable({
 export function AVirtualList<T>({
   items,
   renderItem,
+  rowHeight = 40,
+  viewportHeight = 384,
 }: {
   items: T[];
   renderItem: (item: T, index: number) => ReactNode;
+  rowHeight?: number;
+  viewportHeight?: number;
 }) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const { start, end } = useMemo(() => {
+    const visibleRows = Math.ceil(viewportHeight / rowHeight);
+    const overscan = 5;
+    const first = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+    return { start: first, end: Math.min(items.length, first + visibleRows + overscan * 2) };
+  }, [items.length, rowHeight, scrollTop, viewportHeight]);
+  const onScroll = (event: UIEvent<HTMLDivElement>) => setScrollTop(event.currentTarget.scrollTop);
   return (
-    <div role="list" className="max-h-96 overflow-auto">
-      {items.map((item, index) => (
-        <div role="listitem" key={index}>
-          {renderItem(item, index)}
-        </div>
-      ))}
+    <div
+      role="list"
+      className="overflow-auto"
+      style={{ height: viewportHeight }}
+      onScroll={onScroll}
+    >
+      <div style={{ height: items.length * rowHeight, position: "relative" }}>
+        {items.slice(start, end).map((item, relativeIndex) => {
+          const index = start + relativeIndex;
+          return (
+            <div
+              role="listitem"
+              key={index}
+              style={{ height: rowHeight, left: 0, position: "absolute", right: 0, top: index * rowHeight }}
+            >
+              {renderItem(item, index)}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

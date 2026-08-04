@@ -1,13 +1,29 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { AppearanceProvider, useAppearance } from "./appearance";
+import { afterEach, describe, expect, it } from "vitest";
+import { AppearanceProvider, useAppearance, useAppearanceStore } from "./appearance";
 function Probe() {
   const appearance = useAppearance();
   return (
-    <button onClick={() => appearance.update({ mode: "dark" })}>dark</button>
+    <button
+      onClick={() =>
+        appearance.update({
+          mode: "dark",
+          preset: "viva-dark",
+          primary: "#112233",
+          secondary: "#445566",
+        })
+      }
+    >
+      dark
+    </button>
   );
 }
 describe("appearance", () => {
+  afterEach(() => {
+    localStorage.clear();
+    useAppearanceStore.getState().reset();
+    document.getElementById("cortex-prime-theme")?.remove();
+  });
   it("applies selected theme", async () => {
     render(
       <AppearanceProvider>
@@ -18,5 +34,9 @@ describe("appearance", () => {
     await waitFor(() =>
       expect(document.documentElement.dataset.theme).toBe("dark"),
     );
+    expect(document.documentElement.style.getPropertyValue("--cortex-primary")).toBe("#112233");
+    expect(document.documentElement.style.getPropertyValue("--cortex-secondary")).toBe("#445566");
+    expect(document.getElementById("cortex-prime-theme")).toHaveAttribute("href", expect.stringContaining("theme.css"));
+    expect(localStorage.getItem("cortex-appearance")).toContain("viva-dark");
   });
 });
