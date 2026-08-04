@@ -1,4 +1,5 @@
 """Cross-store cleanup is deliberately split from short SQLite transactions."""
+
 from dataclasses import dataclass
 from pathlib import Path
 

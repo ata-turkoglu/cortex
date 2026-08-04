@@ -1,4 +1,5 @@
 """Materialize workspace-normalized documents for a deferred GraphRAG index run."""
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,7 +37,9 @@ class GraphRAGInputMaterializer:
         """Collect DB-backed inputs; callers can close the transaction before file I/O."""
         rows = list(
             session.execute(
-                select(DocumentVersion).join(Document).where(
+                select(DocumentVersion)
+                .join(Document)
+                .where(
                     Document.workspace_id == workspace_id,
                     Document.deleted_at.is_(None),
                     DocumentVersion.workspace_id == workspace_id,

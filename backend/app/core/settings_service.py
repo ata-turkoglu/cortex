@@ -2,6 +2,7 @@
 
 Secrets deliberately remain environment/credential-store owned and never enter this table.
 """
+
 import json
 from datetime import UTC, datetime
 
@@ -18,11 +19,18 @@ INDEX_DEPENDENT = {
     "chunk_overlap_tokens",
 }
 PERSISTED_FIELDS = {
-    name for name in Settings.model_fields
+    name
+    for name in Settings.model_fields
     if name
     not in {
-        "openai_api_key", "anthropic_api_key", "database_url", "redis_url", "qdrant_url",
-        "ollama_base_url", "data_path", "environment",
+        "openai_api_key",
+        "anthropic_api_key",
+        "database_url",
+        "redis_url",
+        "qdrant_url",
+        "ollama_base_url",
+        "data_path",
+        "environment",
     }
 }
 

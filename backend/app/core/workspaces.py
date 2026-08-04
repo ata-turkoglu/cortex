@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -50,7 +51,11 @@ class WorkspaceContext:
             raise KeyError(resource_type)
         root = get_settings().data_path.resolve()
         stored_path = Path(value.path)
-        candidate = (root / stored_path).resolve() if not stored_path.is_absolute() else stored_path.resolve()
+        candidate = (
+            (root / stored_path).resolve()
+            if not stored_path.is_absolute()
+            else stored_path.resolve()
+        )
         if candidate != root and root not in candidate.parents:
             raise ValueError("path escapes data root")
         return candidate

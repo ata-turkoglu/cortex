@@ -38,6 +38,7 @@ def execute_workflow(run_id: str) -> None:
     try:
         cleanup_external(snapshot)
     except Exception:
+
         def queue_repair(session):
             repair = create_run(
                 session,
@@ -46,6 +47,7 @@ def execute_workflow(run_id: str) -> None:
                 {"requested_by": run_id, "scope": "external"},
             )
             event(session, repair, "repair_queued", failed_workflow_id=run_id)
+
         run_with_lock_retry(queue_repair)
         raise
 

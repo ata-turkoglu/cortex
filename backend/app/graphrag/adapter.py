@@ -3,6 +3,7 @@
 Canonical Microsoft GraphRAG parquet/json outputs stay under each workspace root. Cortex
 only reads normalized artifacts and mirrors vectors through the Qdrant adapter.
 """
+
 import json
 import subprocess
 import sys

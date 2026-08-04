@@ -3,7 +3,8 @@ import contextlib
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .api.chat import router as chat_router
@@ -38,6 +39,7 @@ async def lifespan(_: FastAPI):
     except Exception:
         # Startup remains available when Redis is intentionally absent in unit tests.
         pass
+
     async def maintenance_loop() -> None:
         from .workers.broker import reconcile_orphans
 
@@ -83,6 +85,26 @@ async def unhandled(request: Request, _):
         correlation_id=getattr(request.state, "correlation_id", "unknown"),
     ).model_dump()
     return JSONResponse(status_code=500, content=body)
+
+
+@app.exception_handler(HTTPException)
+async def handled_http_exception(request: Request, exc: HTTPException):
+    body = ErrorEnvelope(
+        code="request_error",
+        message=str(exc.detail),
+        correlation_id=getattr(request.state, "correlation_id", "unknown"),
+    ).model_dump()
+    return JSONResponse(status_code=exc.status_code, content=body, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, _: RequestValidationError):
+    body = ErrorEnvelope(
+        code="validation_error",
+        message="The request is invalid.",
+        correlation_id=getattr(request.state, "correlation_id", "unknown"),
+    ).model_dump()
+    return JSONResponse(status_code=422, content=body)
 
 
 app.include_router(health_router, prefix="/api/v1")

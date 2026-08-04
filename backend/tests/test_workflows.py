@@ -32,8 +32,12 @@ def session_with_workspace():
     session = sessionmaker(bind=engine)()
     now = datetime.now(UTC)
     workspace = Workspace(
-        id=str(uuid4()), slug="workflows", name="Workflows", state="active",
-        created_at=now, updated_at=now,
+        id=str(uuid4()),
+        slug="workflows",
+        name="Workflows",
+        state="active",
+        created_at=now,
+        updated_at=now,
     )
     session.add(workspace)
     session.commit()
@@ -82,8 +86,13 @@ def test_document_deletion_workflow_is_idempotent():
     session, workspace_id = session_with_workspace()
     timestamp = datetime.now(UTC)
     document = Document(
-        id=str(uuid4()), workspace_id=workspace_id, title="Delete me", content_hash=None,
-        active_version_id=None, created_at=timestamp, updated_at=timestamp,
+        id=str(uuid4()),
+        workspace_id=workspace_id,
+        title="Delete me",
+        content_hash=None,
+        active_version_id=None,
+        created_at=timestamp,
+        updated_at=timestamp,
     )
     session.add(document)
     run = create_run(session, workspace_id, "document_delete", {"document_id": document.id})
@@ -111,9 +120,7 @@ def test_periodic_reconciliation_is_durable_and_idempotent():
     session, workspace_id = session_with_workspace()
     assert schedule_orphan_reconciliation(session) == 1
     run = (
-        session.query(WorkflowRun)
-        .filter_by(workspace_id=workspace_id, job_type="reconcile")
-        .one()
+        session.query(WorkflowRun).filter_by(workspace_id=workspace_id, job_type="reconcile").one()
     )
     execute_run(session, run.id)
     assert run.state == "completed"
@@ -126,6 +133,8 @@ def test_failed_deletion_queues_a_durable_repair_workflow():
     session, workspace_id = session_with_workspace()
     deletion = create_run(session, workspace_id, "document_delete", {})
     execute_run(session, deletion.id)
-    repair = session.query(WorkflowRun).filter_by(workspace_id=workspace_id, job_type="reconcile").one()
+    repair = (
+        session.query(WorkflowRun).filter_by(workspace_id=workspace_id, job_type="reconcile").one()
+    )
     assert deletion.state == "failed"
     assert repair.state == "queued"

@@ -1,4 +1,5 @@
 """The sole Qdrant boundary. All public operations require a workspace id."""
+
 from collections.abc import Iterable
 from dataclasses import dataclass
 from uuid import UUID, uuid5
@@ -80,11 +81,10 @@ class WorkspaceQdrantStore:
         for record in records:
             if len(record.vector) != dimension:
                 raise ValueError("vector dimension does not match active collection")
-            if (
-                resource_type == "chunks"
-                and record.payload.get("embedding_config_hash")
-                not in {None, self.embedding_config_hash}
-            ):
+            if resource_type == "chunks" and record.payload.get("embedding_config_hash") not in {
+                None,
+                self.embedding_config_hash,
+            }:
                 raise ValueError(
                     "record embedding configuration does not match active vector field"
                 )
@@ -140,6 +140,7 @@ class WorkspaceQdrantStore:
 
     def delete_document(self, resource_type: str, document_id: str) -> None:
         from qdrant_client.models import FilterSelector
+
         selector = FilterSelector(
             filter=Filter(
                 must=[

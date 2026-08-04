@@ -16,9 +16,7 @@ def test_ingestion_workflow_hands_normalized_markdown_to_llamaindex():
 
 
 async def run_reindex():
-    return await ReindexWorkflow().run(
-        workspace_id="workspace-a", embedding_config_hash="config-a"
-    )
+    return await ReindexWorkflow().run(workspace_id="workspace-a", embedding_config_hash="config-a")
 
 
 def test_reindex_workflow_requires_workspace_scoped_configuration():

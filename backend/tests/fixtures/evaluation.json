@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "turkish-capital-grounded",
+      "workspace_slug": "evaluation-tr",
+      "route": "hybrid",
+      "documents": ["capital.md"],
+      "facts": ["Ankara is the capital of Türkiye."],
+      "evidence_chunk_ids": ["capital-001"],
+      "answerable": true,
+      "max_latency_ms": 1500,
+      "max_estimated_cost_usd": 0.01
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 """Deferred GraphRAG update planning and transaction-safe execution stages."""
+
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,9 +45,11 @@ def eligible_batch_plan(settings: Settings | None = None) -> GraphRAGBatchPlan:
     active_settings = settings or get_settings()
     return GraphRAGBatchPlan(
         enabled=active_settings.graphrag_use_batch_api,
-        eligible_stages=("entity_extraction", "community_summarization")
-        if active_settings.graphrag_use_batch_api
-        else (),
+        eligible_stages=(
+            ("entity_extraction", "community_summarization")
+            if active_settings.graphrag_use_batch_api
+            else ()
+        ),
     )
 
 

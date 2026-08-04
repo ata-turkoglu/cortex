@@ -53,9 +53,7 @@ class HybridRetriever:
     ) -> RetrievalResult:
         dense = self.dense_search(query_vector, self.limits.dense_top_k)
         sparse = self.sparse_index.search(query, self.limits.bm25_top_k)
-        candidates = reciprocal_rank_fusion(
-            dense, sparse, limit=self.limits.fusion_candidate_limit
-        )
+        candidates = reciprocal_rank_fusion(dense, sparse, limit=self.limits.fusion_candidate_limit)
         if lookup:
             candidates = parent_neighbor_heading(candidates, lookup)
         fallback_reason = None

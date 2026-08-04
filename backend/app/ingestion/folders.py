@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -14,7 +14,7 @@ def resolve_folder_path(session: Session, workspace_id: str, folder_path: str | 
     if not parts or any(part in {".", ".."} or ".." in part for part in parts):
         raise ValueError("invalid folder path")
     parent_id = None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for name in parts:
         folder = session.scalar(
             select(Folder).where(
@@ -26,8 +26,12 @@ def resolve_folder_path(session: Session, workspace_id: str, folder_path: str | 
         )
         if folder is None:
             folder = Folder(
-                id=str(uuid4()), workspace_id=workspace_id, parent_id=parent_id,
-                name=name, created_at=now, updated_at=now,
+                id=str(uuid4()),
+                workspace_id=workspace_id,
+                parent_id=parent_id,
+                name=name,
+                created_at=now,
+                updated_at=now,
             )
             session.add(folder)
             session.flush()

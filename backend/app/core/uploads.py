@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-
 SUPPORTED_EXTENSIONS = {".md", ".txt", ".docx", ".pdf"}
 TEXT_TYPES = {"text/plain", "text/markdown", "application/octet-stream"}
 

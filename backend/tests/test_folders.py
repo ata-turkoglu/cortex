@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -13,8 +13,15 @@ def test_folder_path_is_created_within_its_workspace():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
-    now = datetime.now(timezone.utc)
-    workspace = Workspace(id=str(uuid4()), slug="folders", name="Folders", state="active", created_at=now, updated_at=now)
+    now = datetime.now(UTC)
+    workspace = Workspace(
+        id=str(uuid4()),
+        slug="folders",
+        name="Folders",
+        state="active",
+        created_at=now,
+        updated_at=now,
+    )
     session.add(workspace)
     assert resolve_folder_path(session, workspace.id, "2026/Notlar")
     assert resolve_folder_path(session, workspace.id, "2026/Notlar")

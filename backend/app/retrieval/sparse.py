@@ -1,4 +1,5 @@
 """Persistent bm25s boundary; workspace corpora are never combined."""
+
 import json
 from dataclasses import dataclass
 from pathlib import Path

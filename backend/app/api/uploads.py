@@ -1,6 +1,6 @@
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -10,13 +10,12 @@ from sqlalchemy.orm import Session
 from ..core.config import get_settings
 from ..core.uploads import UploadValidationError, store_upload
 from ..core.workspaces import WorkspaceContext, WorkspaceNotFoundError
-from ..ingestion.parsers import DocumentParseError, parse_to_markdown
-from ..ingestion.metadata import metadata_extraction_assignment
 from ..ingestion.chunking import chunk_markdown
 from ..ingestion.folders import resolve_folder_path
+from ..ingestion.metadata import metadata_extraction_assignment
+from ..ingestion.parsers import DocumentParseError, parse_to_markdown
 from ..ingestion.workflow import create_ingestion_run
-from ..models import Chunk, ChunkRelationship, Document, DocumentVersion
-from ..models import DocumentMetadata
+from ..models import Chunk, ChunkRelationship, Document, DocumentMetadata, DocumentVersion
 from .workspaces import get_session
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/uploads", tags=["uploads"])
@@ -40,7 +39,9 @@ async def upload_files(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if replace_document_id and len(files) != 1:
-        raise HTTPException(status_code=422, detail="a replacement request accepts exactly one file")
+        raise HTTPException(
+            status_code=422, detail="a replacement request accepts exactly one file"
+        )
     replacement_document = None
     if replace_document_id:
         replacement_document = session.scalar(
@@ -69,7 +70,9 @@ async def upload_files(
                 )
             )
             if duplicate:
-                raise HTTPException(status_code=409, detail="identical document content already exists")
+                raise HTTPException(
+                    status_code=409, detail="identical document content already exists"
+                )
             session.commit()
             stored = store_upload(
                 upload_root,
@@ -88,7 +91,7 @@ async def upload_files(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:
             await upload.close()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if replace_document_id:
             document = replacement_document
             next_version = (
@@ -144,9 +147,15 @@ async def upload_files(
         }.items():
             session.add(
                 DocumentMetadata(
-                    id=str(uuid4()), workspace_id=workspace_id, document_id=document.id,
-                    document_version_id=version.id, key=key, value_json=json.dumps(value),
-                    origin="system", created_at=now, updated_at=now,
+                    id=str(uuid4()),
+                    workspace_id=workspace_id,
+                    document_id=document.id,
+                    document_version_id=version.id,
+                    key=key,
+                    value_json=json.dumps(value),
+                    origin="system",
+                    created_at=now,
+                    updated_at=now,
                 )
             )
         chunk_rows = []
@@ -166,7 +175,7 @@ async def upload_files(
             )
             chunk_rows.append(chunk)
         session.add_all(chunk_rows)
-        for previous, following in zip(chunk_rows, chunk_rows[1:]):
+        for previous, following in zip(chunk_rows, chunk_rows[1:], strict=False):
             session.add(
                 ChunkRelationship(
                     id=str(uuid4()),
@@ -193,6 +202,7 @@ async def upload_files(
     session.flush()
     # Send only after rows are flushed; Redis may be unavailable during local tests.
     from ..workers.broker import execute_workflow
+
     for item in uploaded:
         try:
             execute_workflow.send(item["workflow_run_id"])

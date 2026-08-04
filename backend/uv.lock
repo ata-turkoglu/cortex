@@ -556,9 +556,13 @@ dev = [
     { name = "ruff" },
 ]
 graphrag = [
-    { name = "bm25s" },
     { name = "graphrag" },
+]
+query = [
     { name = "llama-index-core" },
+]
+retrieval = [
+    { name = "bm25s" },
     { name = "sentence-transformers" },
 ]
 
@@ -586,10 +590,10 @@ dev = [
     { name = "pytest", specifier = "==8.3.4" },
     { name = "ruff", specifier = "==0.9.10" },
 ]
-graphrag = [
+graphrag = [{ name = "graphrag", specifier = "==2.6.0" }]
+query = [{ name = "llama-index-core", specifier = "==0.12.32" }]
+retrieval = [
     { name = "bm25s", specifier = "==0.3.9" },
-    { name = "graphrag", specifier = "==2.6.0" },
-    { name = "llama-index-core", specifier = "==0.12.32" },
     { name = "sentence-transformers", specifier = "==3.4.1" },
 ]
 

@@ -1,4 +1,5 @@
 """Configured Qdrant client factory; retrieval owns all workspace-scoped operations."""
+
 from functools import lru_cache
 
 from qdrant_client import QdrantClient

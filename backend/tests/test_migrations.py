@@ -1,9 +1,9 @@
 """Migration tests use an isolated, empty SQLite database."""
 
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+from pathlib import Path
 
 
 def test_migrations_apply_from_empty_database(tmp_path):
@@ -47,5 +47,8 @@ def test_workspace_migration_preserves_phase_three_data(tmp_path):
     )
     assert upgraded.returncode == 0, upgraded.stderr
     connection = sqlite3.connect(database)
-    assert connection.execute("SELECT value FROM schema_metadata WHERE key = 'phase'").fetchone()[0] == "three"
+    assert (
+        connection.execute("SELECT value FROM schema_metadata WHERE key = 'phase'").fetchone()[0]
+        == "three"
+    )
     connection.close()

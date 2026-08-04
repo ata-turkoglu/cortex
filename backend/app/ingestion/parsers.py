@@ -32,4 +32,6 @@ def parse_to_markdown(path: Path, filename: str) -> ParsedDocument:
     markdown = markdown.replace("\r\n", "\n").replace("\r", "\n")
     if not markdown.strip():
         raise DocumentParseError("document did not contain extractable text")
-    return ParsedDocument(markdown=markdown, content_hash=hashlib.sha256(markdown.encode()).hexdigest())
+    return ParsedDocument(
+        markdown=markdown, content_hash=hashlib.sha256(markdown.encode()).hexdigest()
+    )

@@ -1,4 +1,5 @@
 """REST and SSE surface for persistent workflow monitoring and commands."""
+
 # ruff: noqa: B008  # FastAPI dependency injection intentionally uses parameter defaults.
 
 import asyncio
@@ -131,9 +132,7 @@ def inspect(run_id: str, session: Session = Depends(get_session)):  # noqa: B008
 
 
 @router.post("/{run_id}/cancel", response_model=WorkflowRead)
-def cancel(  # noqa: B008
-    run_id: str, _: WorkflowCommand, session: Session = Depends(get_session)
-):
+def cancel(run_id: str, _: WorkflowCommand, session: Session = Depends(get_session)):  # noqa: B008
     run = session.get(WorkflowRun, run_id)
     if not run:
         raise HTTPException(404, "workflow not found")
@@ -141,9 +140,7 @@ def cancel(  # noqa: B008
 
 
 @router.post("/{run_id}/retry", response_model=WorkflowRead)
-def retry(  # noqa: B008
-    run_id: str, _: WorkflowCommand, session: Session = Depends(get_session)
-):
+def retry(run_id: str, _: WorkflowCommand, session: Session = Depends(get_session)):  # noqa: B008
     run = session.get(WorkflowRun, run_id)
     if not run:
         raise HTTPException(404, "workflow not found")

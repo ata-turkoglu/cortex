@@ -3,6 +3,7 @@
 Weights are loaded only from the local Sentence Transformers cache. Cortex never
 downloads a reranker during a retrieval request.
 """
+
 from dataclasses import replace
 from typing import Protocol
 

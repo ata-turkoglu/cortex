@@ -3,6 +3,7 @@
 The actor invokes durable checkpoints; these definitions own the in-memory handoff boundary so
 Docling-normalized Markdown never leaks into API or storage adapters as a LlamaIndex detail.
 """
+
 from llama_index.core import Document as LlamaDocument
 from llama_index.core.workflow import StartEvent, StopEvent, Workflow, step
 

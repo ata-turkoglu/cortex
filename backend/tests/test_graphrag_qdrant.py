@@ -38,9 +38,7 @@ def test_canonical_graph_outputs_are_mirrored_to_workspace_isolated_qdrant(tmp_p
     root.mkdir(parents=True)
     for resource_type in ("entities", "reports", "text_units"):
         (root / f"{resource_type}.json").write_text(
-            json.dumps(
-                [{"id": resource_type, "text": f"{resource_type} text", "attributes": {}}]
-            ),
+            json.dumps([{"id": resource_type, "text": f"{resource_type} text", "attributes": {}}]),
             encoding="utf-8",
         )
 

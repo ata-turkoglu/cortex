@@ -1,30 +1,43 @@
 from datetime import datetime
+
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-class Base(DeclarativeBase): pass
+
+class Base(DeclarativeBase):
+    pass
+
+
 class GlobalSettings(Base):
     __tablename__ = "global_settings"
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     value_json: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class ProviderConnection(Base):
     __tablename__ = "provider_connections"
     provider: Mapped[str] = mapped_column(String(64), primary_key=True)
     validation_json: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class ModelAssignment(Base):
     __tablename__ = "model_assignments"
     layer: Mapped[str] = mapped_column(String(64), primary_key=True)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class SetupState(Base):
     __tablename__ = "setup_state"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
     state_json: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class Workspace(Base):
     __tablename__ = "workspaces"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -35,24 +48,38 @@ class Workspace(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class WorkspaceResource(Base):
-    __tablename__ = "workspace_resources"; __table_args__ = (UniqueConstraint("workspace_id","resource_type","logical_name"),)
+    __tablename__ = "workspace_resources"
+    __table_args__ = (UniqueConstraint("workspace_id", "resource_type", "logical_name"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(64), nullable=False)
     logical_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    backend_name: Mapped[str | None] = mapped_column(String(255)); path: Mapped[str | None] = mapped_column(Text)
-    active: Mapped[bool] = mapped_column(nullable=False, default=True); created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    backend_name: Mapped[str | None] = mapped_column(String(255))
+    path: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class WorkspaceIndexState(Base):
-    __tablename__="workspace_index_states"
+    __tablename__ = "workspace_index_states"
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
-    dense_state: Mapped[str] = mapped_column(String(32), default="empty"); sparse_state: Mapped[str] = mapped_column(String(32), default="empty")
-    embedding_config_hash: Mapped[str|None] = mapped_column(String(128)); indexed_at: Mapped[datetime|None] = mapped_column(DateTime); updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    dense_state: Mapped[str] = mapped_column(String(32), default="empty")
+    sparse_state: Mapped[str] = mapped_column(String(32), default="empty")
+    embedding_config_hash: Mapped[str | None] = mapped_column(String(128))
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class GraphRagState(Base):
-    __tablename__="graphrag_states"
+    __tablename__ = "graphrag_states"
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
-    state: Mapped[str] = mapped_column(String(32), default="not_indexed"); pending_document_count: Mapped[int] = mapped_column(Integer, default=0)
-    graph_root: Mapped[str] = mapped_column(Text, nullable=False); updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), default="not_indexed")
+    pending_document_count: Mapped[int] = mapped_column(Integer, default=0)
+    graph_root: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class GraphRagStageReport(Base):
@@ -121,7 +148,9 @@ class Chunk(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), nullable=False)
-    document_version_id: Mapped[str] = mapped_column(ForeignKey("document_versions.id"), nullable=False)
+    document_version_id: Mapped[str] = mapped_column(
+        ForeignKey("document_versions.id"), nullable=False
+    )
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(128), nullable=False)

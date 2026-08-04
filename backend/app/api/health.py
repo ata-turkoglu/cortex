@@ -57,8 +57,12 @@ async def health():
         probe(settings.ollama_base_url + "/api/tags"),
     )
     services = {
-        "backend": "healthy", "sqlite": sqlite_status, "redis": redis_status, "qdrant": qdrant,
-        "ollama": ollama, "worker": "healthy" if redis_status == "healthy" else "unknown",
+        "backend": "healthy",
+        "sqlite": sqlite_status,
+        "redis": redis_status,
+        "qdrant": qdrant,
+        "ollama": ollama,
+        "worker": "healthy" if redis_status == "healthy" else "unknown",
         "openai": "configured" if OpenAIProvider().configured() else "not-configured",
         "anthropic": "configured" if AnthropicProvider().configured() else "not-configured",
         "graphrag": "available" if importlib.util.find_spec("graphrag") else "not-installed",

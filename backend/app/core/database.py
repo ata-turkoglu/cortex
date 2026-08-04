@@ -1,8 +1,10 @@
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 
 from sqlalchemy import create_engine, event
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -10,6 +12,9 @@ from .config import get_settings
 
 settings = get_settings()
 T = TypeVar("T")
+database_url = make_url(settings.database_url)
+if database_url.drivername.startswith("sqlite") and database_url.database not in {None, ":memory:"}:
+    Path(database_url.database).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
 engine = create_engine(
     settings.database_url,
     connect_args={"check_same_thread": False, "timeout": settings.sqlite_busy_timeout_ms / 1000},

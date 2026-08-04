@@ -3,8 +3,10 @@
 Revision ID: 0007_graphrag_stage_reports
 Revises: 0006_retrieval_embedding_state
 """
-from alembic import op
+
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0007_graphrag_stage_reports"
 down_revision = "0006_retrieval_embedding_state"

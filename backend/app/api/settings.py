@@ -160,9 +160,7 @@ def reset_defaults(session: Annotated[Session, Depends(get_session)]):
 @router.get("/settings/diagnostics")
 def diagnostics(session: Annotated[Session, Depends(get_session)]):
     counts = dict(
-        session.execute(
-            select(WorkflowRun.state, func.count()).group_by(WorkflowRun.state)
-        ).all()
+        session.execute(select(WorkflowRun.state, func.count()).group_by(WorkflowRun.state)).all()
     )
     return {
         "windows": {

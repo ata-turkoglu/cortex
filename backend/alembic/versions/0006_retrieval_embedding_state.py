@@ -3,8 +3,10 @@
 Revision ID: 0006_retrieval_embedding_state
 Revises: 0005_document_metadata
 """
-from alembic import op
+
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0006_retrieval_embedding_state"
 down_revision = "0005_document_metadata"

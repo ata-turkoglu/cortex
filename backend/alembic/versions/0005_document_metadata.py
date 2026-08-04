@@ -4,8 +4,9 @@ Revision ID: 0005_document_metadata
 Revises: 0004_document_version_upload_metadata
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0005_document_metadata"
 down_revision = "0004_document_version_upload_metadata"
@@ -27,7 +28,11 @@ def upgrade():
         sa.Column("updated_at", sa.DateTime, nullable=False),
         sa.UniqueConstraint("document_id", "key", "origin"),
     )
-    op.create_index("ix_document_metadata_workspace_document", "document_metadata", ["workspace_id", "document_id"])
+    op.create_index(
+        "ix_document_metadata_workspace_document",
+        "document_metadata",
+        ["workspace_id", "document_id"],
+    )
 
 
 def downgrade():

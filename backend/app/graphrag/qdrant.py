@@ -1,4 +1,5 @@
 """GraphRAG-specific vector mirror built on the workspace-safe Qdrant boundary."""
+
 from collections.abc import Iterable
 
 from qdrant_client import QdrantClient

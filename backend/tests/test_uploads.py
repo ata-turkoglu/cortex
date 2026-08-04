@@ -16,7 +16,11 @@ def test_store_upload_normalizes_name_and_hashes_text(tmp_path):
         ("../escape.txt", "text/plain", b"unsafe"),
         ("tool.exe", "application/octet-stream", b"unsafe"),
         ("report.pdf", "application/pdf", b"not a PDF"),
-        ("report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", b"bad"),
+        (
+            "report.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            b"bad",
+        ),
     ],
 )
 def test_store_upload_rejects_unsafe_or_invalid_content(tmp_path, filename, media_type, content):

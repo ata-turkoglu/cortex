@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 
@@ -39,7 +39,7 @@ class UsageLedger:
             input_tokens,
             output_tokens,
             estimated_cost_usd,
-            datetime.now(timezone.utc),
+            datetime.now(UTC),
         )
         self.records.append(record)
         statement = text(

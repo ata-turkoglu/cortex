@@ -1,4 +1,5 @@
 """Durable query-run records, intentionally separate from background workflow runs."""
+
 from datetime import UTC, datetime
 from uuid import uuid4
 
