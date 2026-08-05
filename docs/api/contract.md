@@ -10,6 +10,13 @@ Workspace CRUD is exposed at `/api/v1/workspaces`. Creation atomically seeds res
 index-state records. Deletion is a soft delete; cross-store cleanup is deferred to the
 idempotent deletion workflow.
 
+`GET /api/v1/overview` provides aggregate dashboard counts and recent documents without
+exposing source contents. Workspace-scoped catalogue views use
+`GET /workspaces/{workspace_id}/overview`, `GET /workspaces/{workspace_id}/documents`, and
+`GET /workspaces/{workspace_id}/documents/{document_id}`. The detail endpoint returns the
+normalized source only for its owning workspace; document deletion remains the existing
+durable workflow command.
+
 Workflow commands are exposed under `/api/v1/workflows`: `POST /` creates a durable run,
 `GET /` and `GET /{id}` restore state, `POST /{id}/cancel` requests safe-boundary cancellation,
 and `POST /{id}/retry` resumes from the failed step. `GET /{id}/events` is an SSE stream with

@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from .api.catalog import router as catalog_router
 from .api.chat import router as chat_router
 from .api.health import router as health_router
 from .api.settings import router as settings_router
@@ -110,6 +111,7 @@ async def validation_error(request: Request, _: RequestValidationError):
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(workspaces_router, prefix="/api/v1")
+app.include_router(catalog_router, prefix="/api/v1")
 app.include_router(uploads_router, prefix="/api/v1")
 app.include_router(workflows_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
