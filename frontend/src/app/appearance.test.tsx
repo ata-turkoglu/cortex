@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppearanceProvider, useAppearance, useAppearanceStore } from "./appearance";
+import { AButton } from "../components/ui";
 function Probe() {
   const appearance = useAppearance();
   return (
-    <button
+    <AButton
+      label="dark"
       onClick={() =>
         appearance.update({
           mode: "dark",
@@ -13,9 +15,7 @@ function Probe() {
           secondary: "#445566",
         })
       }
-    >
-      dark
-    </button>
+    />
   );
 }
 describe("appearance", () => {

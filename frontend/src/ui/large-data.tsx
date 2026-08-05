@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode, type UIEvent } from "react";
-import { APaginator, ATable } from "./primitives";
+import { AButton, APaginator, ATable } from "../components/ui";
 export type PageState = {
   page: number;
   pageSize: number;
@@ -21,21 +21,23 @@ export function AServerTable({
       <ATable value={value}>{children}</ATable>
       <APaginator>
         <div className="mt-3 flex gap-2 text-sm">
-          <button
+          <AButton
+            label="Previous"
+            text
+            size="small"
             disabled={page.page === 0}
             onClick={() => page.onPageChange(page.page - 1)}
-          >
-            Previous
-          </button>
+          />
           <span>
             Page {page.page + 1} / {pages}
           </span>
-          <button
+          <AButton
+            label="Next"
+            text
+            size="small"
             disabled={page.page + 1 >= pages}
             onClick={() => page.onPageChange(page.page + 1)}
-          >
-            Next
-          </button>
+          />
         </div>
       </APaginator>
     </>

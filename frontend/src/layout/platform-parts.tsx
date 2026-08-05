@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AProgress } from "../ui/primitives";
+import { AProgress } from "../components/ui";
 import { AIcon } from "../icons/AIcon";
 export const ASidebar = ({ children }: { children: ReactNode }) => (
   <aside className="cortex-sidebar">{children}</aside>

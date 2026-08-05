@@ -1,10 +1,11 @@
-import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, type ReactNode } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import laraDarkIndigo from "primereact/resources/themes/lara-dark-indigo/theme.css?url";
 import laraDarkTeal from "primereact/resources/themes/lara-dark-teal/theme.css?url";
 import laraLightIndigo from "primereact/resources/themes/lara-light-indigo/theme.css?url";
 import laraLightTeal from "primereact/resources/themes/lara-light-teal/theme.css?url";
+import sagaBlue from "primereact/resources/themes/saga-blue/theme.css?url";
 import vivaDark from "primereact/resources/themes/viva-dark/theme.css?url";
 import vivaLight from "primereact/resources/themes/viva-light/theme.css?url";
 
@@ -14,6 +15,7 @@ export type PrimeThemePreset =
   | "lara-dark-indigo"
   | "lara-light-teal"
   | "lara-dark-teal"
+  | "saga-blue"
   | "viva-light"
   | "viva-dark";
 export type Appearance = {
@@ -29,13 +31,13 @@ export type Appearance = {
 };
 const defaults: Appearance = {
   mode: "system",
-  preset: "lara-light-indigo",
-  primary: "#4f46e5",
-  secondary: "#64748b",
+  preset: "saga-blue",
+  primary: "#5e81ac",
+  secondary: "#4c566a",
   surface: "slate",
   radius: "md",
   density: "comfortable",
-  fontScale: "md",
+  fontScale: "sm",
   animations: true,
 };
 type AppearanceState = Appearance & {
@@ -47,6 +49,7 @@ export const primeThemePresets: Record<PrimeThemePreset, string> = {
   "lara-dark-indigo": laraDarkIndigo,
   "lara-light-teal": laraLightTeal,
   "lara-dark-teal": laraDarkTeal,
+  "saga-blue": sagaBlue,
   "viva-light": vivaLight,
   "viva-dark": vivaDark,
 };
@@ -70,7 +73,7 @@ function resolvedTheme(mode: ThemeMode): "light" | "dark" {
 }
 export function AppearanceProvider({ children }: { children: ReactNode }) {
   const state = useAppearanceStore();
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     let themeLink = document.getElementById("cortex-prime-theme") as HTMLLinkElement | null;
     if (!themeLink) {
@@ -89,7 +92,9 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     root.style.setProperty("--secondary-color-text", "#ffffff");
     root.style.setProperty(
       "--cortex-surface",
-      state.surface === "slate" ? "#f8fafc" : "#fafafa",
+      resolvedTheme(state.mode) === "dark"
+        ? state.surface === "slate" ? "#171d29" : "#18181b"
+        : state.surface === "slate" ? "#f8fafc" : "#fafafa",
     );
     root.style.setProperty(
       "--cortex-radius",

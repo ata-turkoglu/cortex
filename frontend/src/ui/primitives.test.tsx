@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ACard, AInfo } from "./primitives";
+import { ACard, AInfo } from "../components/ui";
 describe("Cortex UI abstractions", () => {
   it("renders card and explanatory information", () => {
     render(

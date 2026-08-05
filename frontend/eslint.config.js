@@ -35,7 +35,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/ui/**", "src/icons/**", "src/flow/**"],
+    files: ["src/ui/**", "src/components/ui/**", "src/icons/**", "src/flow/**"],
     rules: { "no-restricted-imports": "off" },
   },
 );

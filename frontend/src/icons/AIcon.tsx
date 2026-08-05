@@ -3,12 +3,15 @@ import {
   Bot,
   ChartNoAxesCombined,
   CircleHelp,
+  ChevronLeft,
+  ChevronRight,
   Database,
   FileText,
   FolderOpen,
   GitBranch,
   HeartPulse,
   LayoutDashboard,
+  Menu,
   MessageSquare,
   Network,
   PanelsTopLeft,
@@ -35,6 +38,9 @@ export const icons = {
   provider: Bot,
   routes: GitBranch,
   metrics: ChartNoAxesCombined,
+  menu: Menu,
+  sidebarCollapse: ChevronLeft,
+  sidebarExpand: ChevronRight,
 } satisfies Record<string, LucideIcon>;
 export type IconName = keyof typeof icons;
 export function AIcon({
