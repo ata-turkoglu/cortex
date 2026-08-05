@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -8,12 +8,17 @@ from app.main import app
 from app.models import Base
 
 
+def enable_foreign_keys(connection, _):
+    connection.execute("PRAGMA foreign_keys=ON")
+
+
 def test_workspace_api_creates_its_isolated_resource_records():
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    event.listen(engine, "connect", enable_foreign_keys)
     Base.metadata.create_all(engine)
     session_local = sessionmaker(bind=engine)
 
@@ -43,6 +48,7 @@ def test_catalogue_endpoints_are_workspace_scoped():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    event.listen(engine, "connect", enable_foreign_keys)
     Base.metadata.create_all(engine)
     session_local = sessionmaker(bind=engine)
 

@@ -70,6 +70,10 @@ def create(payload: WorkspaceCreate, s: Session = Depends(get_session)):
         id=str(uuid4()), **payload.model_dump(), state="active", created_at=now, updated_at=now
     )
     s.add(w)
+    # The dependent state tables only declare foreign-key columns, not ORM relationships.
+    # Flush the workspace explicitly so SQLite foreign-key enforcement cannot observe a child
+    # row before its parent insert has been issued.
+    s.flush()
     base = f"workspaces/{w.id}"
     for typ, name, path in [
         ("qdrant_chunks", "cortex_chunks", None),
@@ -92,7 +96,6 @@ def create(payload: WorkspaceCreate, s: Session = Depends(get_session)):
         )
     s.add(WorkspaceIndexState(workspace_id=w.id, updated_at=now))
     s.add(GraphRagState(workspace_id=w.id, graph_root=f"{base}/graphrag", updated_at=now))
-    s.flush()
     return w
 
 
