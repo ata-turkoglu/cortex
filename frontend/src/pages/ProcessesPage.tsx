@@ -6,7 +6,7 @@ import {
   type AFlowEdge,
   type AFlowNode,
 } from "../flow/AFlowCanvas";
-import { AButton, ACard, ADialog, AInfo } from "../ui/primitives";
+import { AButton, ACard, ADialog, AInfo } from "../components/ui";
 
 const activeStates = new Set(["queued", "running", "cancelling"]);
 export function ProcessesPage() {

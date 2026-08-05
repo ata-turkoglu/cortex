@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiClient } from "../api/client";
-import { ABadge, ACard, AInfo } from "../ui/primitives";
+import { ABadge, ACard, AInfo } from "../components/ui";
 
 export function ProviderSettingsPage() {
   const [providers, setProviders] = useState<{ provider: string; configured: boolean }[]>([]);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiClient } from "../api/client";
-import { AButton, AConfirmDialog, AInfo } from "../ui/primitives";
+import { AButton, AConfirmDialog, AInfo } from "../components/ui";
 export function GraphRAGConfirmationDialog() {
   const [visible, setVisible] = useState(false);
   const [estimate, setEstimate] = useState<{ update_mode: string; pending_document_threshold: number; confirmation_threshold_usd: number; requires_confirmation: boolean }>();

@@ -1,5 +1,13 @@
 import { primeThemePresets, useAppearance } from "../app/appearance";
-import { AButton, ACard, AInfo, ASelect } from "../ui/primitives";
+import {
+  AButton,
+  ACard,
+  ACheckbox,
+  AColorPicker,
+  AInfo,
+  ALabel,
+  ASelect,
+} from "../components/ui";
 
 const presetOptions = Object.keys(primeThemePresets);
 export function AppearanceSettingsPage() {
@@ -8,93 +16,98 @@ export function AppearanceSettingsPage() {
     <ACard title="Görünüm">
       <div className="grid max-w-xl gap-4">
         <AInfo title="PrimeReact theme builder">
-          Preset, renk ve yüzey seçimleri bu tarayıcıda kalıcıdır. Birincil ve ikincil
-          renkler Cortex bileşenleri ile PrimeReact düğmelerinde kullanılır.
+          Preset, renk ve yüzey seçimleri bu tarayıcıda kalıcıdır. Birincil ve
+          ikincil renkler Cortex bileşenleri ile PrimeReact düğmelerinde
+          kullanılır.
         </AInfo>
-        <label>
+        <ALabel>
           PrimeReact preset
           <ASelect
             value={appearance.preset}
             options={presetOptions}
             onChange={(event) => appearance.update({ preset: event.value })}
           />
-        </label>
-        <label>
+        </ALabel>
+        <ALabel>
           Tema
           <ASelect
             value={appearance.mode}
             options={["light", "dark", "system"]}
             onChange={(event) => appearance.update({ mode: event.value })}
           />
-        </label>
-        <label>
+        </ALabel>
+        <ALabel>
           Birincil renk
-          <input
+          <AColorPicker
             aria-label="Birincil renk"
-            type="color"
-            value={appearance.primary}
+            value={appearance.primary.replace("#", "")}
             onChange={(event) =>
-              appearance.update({ primary: event.target.value })
+              appearance.update({ primary: `#${event.value}` })
             }
           />
-        </label>
-        <label>
+        </ALabel>
+        <ALabel>
           İkincil renk
-          <input
+          <AColorPicker
             aria-label="İkincil renk"
-            type="color"
-            value={appearance.secondary}
-            onChange={(event) => appearance.update({ secondary: event.target.value })}
+            value={appearance.secondary.replace("#", "")}
+            onChange={(event) =>
+              appearance.update({ secondary: `#${event.value}` })
+            }
           />
-        </label>
+        </ALabel>
         <div className="theme-preview" aria-label="Tema önizlemesi">
           <span>Önizleme</span>
           <AButton label="Birincil eylem" />
           <AButton label="İkincil eylem" severity="secondary" />
         </div>
-        <label>
+        <ALabel>
           Yüzey paleti
           <ASelect
             value={appearance.surface}
             options={["slate", "zinc"]}
             onChange={(event) => appearance.update({ surface: event.value })}
           />
-        </label>
-        <label>
+        </ALabel>
+        <ALabel>
           Köşe yarıçapı
           <ASelect
             value={appearance.radius}
             options={["sm", "md", "lg"]}
             onChange={(event) => appearance.update({ radius: event.value })}
           />
-        </label>
-        <label>
+        </ALabel>
+        <ALabel>
           Yoğunluk
           <ASelect
             value={appearance.density}
             options={["compact", "comfortable"]}
             onChange={(event) => appearance.update({ density: event.value })}
           />
-        </label>
-        <label>
+        </ALabel>
+        <ALabel>
           Yazı ölçeği
           <ASelect
             value={appearance.fontScale}
             options={["sm", "md", "lg"]}
             onChange={(event) => appearance.update({ fontScale: event.value })}
           />
-        </label>
-        <label>
-          <input
-            type="checkbox"
+        </ALabel>
+        <div className="flex items-center gap-2">
+          <ACheckbox
+            inputId="appearance-animations"
             checked={appearance.animations}
             onChange={(event) =>
-              appearance.update({ animations: event.target.checked })
+              appearance.update({ animations: Boolean(event.checked) })
             }
-          />{" "}
-          Animasyonlar
-        </label>
-        <AButton label="Varsayılan görünümü geri yükle" outlined onClick={appearance.reset} />
+          />
+          <ALabel className="a-label--inline" htmlFor="appearance-animations">Animasyonlar</ALabel>
+        </div>
+        <AButton
+          label="Varsayılan görünümü geri yükle"
+          outlined
+          onClick={appearance.reset}
+        />
       </div>
     </ACard>
   );

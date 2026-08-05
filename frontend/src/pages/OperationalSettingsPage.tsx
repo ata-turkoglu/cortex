@@ -1,17 +1,198 @@
 import { useEffect, useState } from "react";
 import { apiClient } from "../api/client";
-import { AButton, ACard, AInfo, AInput, ASelect } from "../ui/primitives";
+import {
+  AButton,
+  ACard,
+  AInfo,
+  AInput,
+  ALabel,
+  ASelect,
+} from "../components/ui";
 
 const providers = ["openai", "anthropic", "ollama"];
 export function OperationalSettingsPage() {
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [notice, setNotice] = useState("");
-  const [diagnostics, setDiagnostics] = useState<{ windows: { data_path: string; ollama_base_url: string }; workflows: Record<string, number>; reconciliation: { state: string; message: string } }>();
-  const [embedding, setEmbedding] = useState<{ installed: boolean; dimension: number | null; model: string }>();
-  useEffect(() => { void apiClient.getSettings().then((data) => setValues(data.settings)).catch(() => setNotice("Settings service is unavailable.")); void apiClient.diagnostics().then(setDiagnostics); void apiClient.embeddingStatus().then(setEmbedding); }, []);
-  const set = (key: string, value: unknown) => setValues({ ...values, [key]: value });
-  const field = (key: string, label: string) => <label className="grid gap-1" key={key}>{label}<AInput value={String(values[key] ?? "")} onChange={(event) => set(key, Number(event.target.value))} /></label>;
-  const assignment = (layer: string, label: string) => <div className="grid grid-cols-2 gap-2" key={layer}><label>{label} provider<ASelect value={String(values[`${layer}_provider`] ?? "openai")} options={providers} onChange={(event) => set(`${layer}_provider`, event.value)} /></label><label>{label} model<AInput value={String(values[`${layer}_model`] ?? "")} onChange={(event) => set(`${layer}_model`, event.target.value)} /></label></div>;
-  const save = () => { const changed = values.embedding_model !== undefined && values.embedding_model !== "qwen3-embedding:0.6b"; if (changed && !window.confirm("Changing embedding settings requires a full dense reindex. Continue?")) return; void apiClient.updateSettings({ ...values, embedding_change_confirmed: changed }).then((result) => setNotice(result.reindex_required ? "Saved. Workspaces were marked for reindexing." : "Saved.")).catch(() => setNotice("Settings were rejected; check model/provider compatibility.")); };
-  return <div className="grid gap-4"><ACard title="Global operational settings"><AInfo>These settings apply to every workspace. Embedding or chunking changes require a full reindex.</AInfo><div className="mt-4 grid max-w-2xl grid-cols-2 gap-4">{field("upload_max_bytes", "Maximum upload bytes")}{field("dense_top_k", "Dense retrieval top-k")}{field("bm25_top_k", "BM25 retrieval top-k")}{field("final_evidence_top_k", "Final evidence top-k")}{field("graphrag_pending_document_threshold", "GraphRAG pending threshold")}{field("workflow_retention_days", "Workflow retention days")}{field("conversation_memory_window_messages", "Conversation memory messages")}<label>Answer style<ASelect value={String(values.answer_style ?? "balanced")} options={["concise", "balanced", "detailed"]} onChange={(event) => set("answer_style", event.value)} /></label></div></ACard><ACard title="Model assignments"><AInfo>Assignments are global and checked against provider capabilities before saving.</AInfo><div className="mt-4 grid max-w-3xl gap-3">{assignment("metadata", "Metadata extraction")}{assignment("answer", "Answer generation")}{assignment("router", "Query router")}{assignment("summary", "Conversation summary")}{assignment("embedding", "Embeddings")}</div></ACard><ACard title="Embedding controls"><AInfo>{embedding ? `${embedding.model}: ${embedding.installed ? "installed" : "missing"}; dimensions: ${embedding.dimension ?? "run health test"}; digest/version: unavailable until provider reports it.` : "Loading model status…"} Changing it requires full dense reindexing.</AInfo><div className="mt-3 grid grid-cols-2 gap-4">{field("embedding_batch_size", "Batch size")}{field("embedding_timeout_seconds", "Timeout seconds")}{field("embedding_concurrency", "Concurrency")}<label>Keep alive<AInput value={String(values.embedding_keep_alive ?? "5m")} onChange={(event) => set("embedding_keep_alive", event.target.value)} /></label></div><AButton className="mt-3" label="Run embedding health test" onClick={() => void apiClient.embeddingHealth().then((result) => { setEmbedding({ installed: true, model: result.model, dimension: result.dimension }); setNotice(`Embedding healthy: ${result.model}, ${result.dimension} dimensions.`); }).catch(() => setNotice("Embedding health test failed."))} /></ACard><ACard title="Windows and workflow diagnostics"><AInfo>{diagnostics ? `Data: ${diagnostics.windows.data_path}; Ollama: ${diagnostics.windows.ollama_base_url}; interrupted: ${diagnostics.workflows.interrupted}; failed: ${diagnostics.workflows.failed}. ${diagnostics.reconciliation.message}` : "Loading diagnostics…"}</AInfo></ACard><div className="flex items-center gap-3"><AButton label="Save settings" onClick={save} /><AButton label="Reset defaults" outlined onClick={() => void apiClient.resetSettings().then((result) => { setValues(result.settings); setNotice("Defaults restored."); })} /><span className="text-sm">{notice}</span></div></div>;
+  const [diagnostics, setDiagnostics] = useState<{
+    windows: { data_path: string; ollama_base_url: string };
+    workflows: Record<string, number>;
+    reconciliation: { state: string; message: string };
+  }>();
+  const [embedding, setEmbedding] = useState<{
+    installed: boolean;
+    dimension: number | null;
+    model: string;
+  }>();
+  useEffect(() => {
+    void apiClient
+      .getSettings()
+      .then((data) => setValues(data.settings))
+      .catch(() => setNotice("Settings service is unavailable."));
+    void apiClient.diagnostics().then(setDiagnostics);
+    void apiClient.embeddingStatus().then(setEmbedding);
+  }, []);
+  const set = (key: string, value: unknown) =>
+    setValues({ ...values, [key]: value });
+  const field = (key: string, label: string) => (
+    <ALabel className="grid gap-1" key={key}>
+      {label}
+      <AInput
+        value={String(values[key] ?? "")}
+        onChange={(event) => set(key, Number(event.target.value))}
+      />
+    </ALabel>
+  );
+  const assignment = (layer: string, label: string) => (
+    <div className="grid grid-cols-2 gap-2" key={layer}>
+      <ALabel>
+        {label} provider
+        <ASelect
+          value={String(values[`${layer}_provider`] ?? "openai")}
+          options={providers}
+          onChange={(event) => set(`${layer}_provider`, event.value)}
+        />
+      </ALabel>
+      <ALabel>
+        {label} model
+        <AInput
+          value={String(values[`${layer}_model`] ?? "")}
+          onChange={(event) => set(`${layer}_model`, event.target.value)}
+        />
+      </ALabel>
+    </div>
+  );
+  const save = () => {
+    const changed =
+      values.embedding_model !== undefined &&
+      values.embedding_model !== "qwen3-embedding:0.6b";
+    if (
+      changed &&
+      !window.confirm(
+        "Changing embedding settings requires a full dense reindex. Continue?",
+      )
+    )
+      return;
+    void apiClient
+      .updateSettings({ ...values, embedding_change_confirmed: changed })
+      .then((result) =>
+        setNotice(
+          result.reindex_required
+            ? "Saved. Workspaces were marked for reindexing."
+            : "Saved.",
+        ),
+      )
+      .catch(() =>
+        setNotice(
+          "Settings were rejected; check model/provider compatibility.",
+        ),
+      );
+  };
+  return (
+    <div className="grid gap-4">
+      <ACard title="Global operational settings">
+        <AInfo>
+          These settings apply to every workspace. Embedding or chunking changes
+          require a full reindex.
+        </AInfo>
+        <div className="mt-4 grid max-w-2xl grid-cols-2 gap-4">
+          {field("upload_max_bytes", "Maximum upload bytes")}
+          {field("dense_top_k", "Dense retrieval top-k")}
+          {field("bm25_top_k", "BM25 retrieval top-k")}
+          {field("final_evidence_top_k", "Final evidence top-k")}
+          {field(
+            "graphrag_pending_document_threshold",
+            "GraphRAG pending threshold",
+          )}
+          {field("workflow_retention_days", "Workflow retention days")}
+          {field(
+            "conversation_memory_window_messages",
+            "Conversation memory messages",
+          )}
+          <ALabel>
+            Answer style
+            <ASelect
+              value={String(values.answer_style ?? "balanced")}
+              options={["concise", "balanced", "detailed"]}
+              onChange={(event) => set("answer_style", event.value)}
+            />
+          </ALabel>
+        </div>
+      </ACard>
+      <ACard title="Model assignments">
+        <AInfo>
+          Assignments are global and checked against provider capabilities
+          before saving.
+        </AInfo>
+        <div className="mt-4 grid max-w-3xl gap-3">
+          {assignment("metadata", "Metadata extraction")}
+          {assignment("answer", "Answer generation")}
+          {assignment("router", "Query router")}
+          {assignment("summary", "Conversation summary")}
+          {assignment("embedding", "Embeddings")}
+        </div>
+      </ACard>
+      <ACard title="Embedding controls">
+        <AInfo>
+          {embedding
+            ? `${embedding.model}: ${embedding.installed ? "installed" : "missing"}; dimensions: ${embedding.dimension ?? "run health test"}; digest/version: unavailable until provider reports it.`
+            : "Loading model status…"}{" "}
+          Changing it requires full dense reindexing.
+        </AInfo>
+        <div className="mt-3 grid grid-cols-2 gap-4">
+          {field("embedding_batch_size", "Batch size")}
+          {field("embedding_timeout_seconds", "Timeout seconds")}
+          {field("embedding_concurrency", "Concurrency")}
+          <ALabel>
+            Keep alive
+            <AInput
+              value={String(values.embedding_keep_alive ?? "5m")}
+              onChange={(event) =>
+                set("embedding_keep_alive", event.target.value)
+              }
+            />
+          </ALabel>
+        </div>
+        <AButton
+          className="mt-3"
+          label="Run embedding health test"
+          onClick={() =>
+            void apiClient
+              .embeddingHealth()
+              .then((result) => {
+                setEmbedding({
+                  installed: true,
+                  model: result.model,
+                  dimension: result.dimension,
+                });
+                setNotice(
+                  `Embedding healthy: ${result.model}, ${result.dimension} dimensions.`,
+                );
+              })
+              .catch(() => setNotice("Embedding health test failed."))
+          }
+        />
+      </ACard>
+      <ACard title="Windows and workflow diagnostics">
+        <AInfo>
+          {diagnostics
+            ? `Data: ${diagnostics.windows.data_path}; Ollama: ${diagnostics.windows.ollama_base_url}; interrupted: ${diagnostics.workflows.interrupted}; failed: ${diagnostics.workflows.failed}. ${diagnostics.reconciliation.message}`
+            : "Loading diagnostics…"}
+        </AInfo>
+      </ACard>
+      <div className="flex items-center gap-3">
+        <AButton label="Save settings" onClick={save} />
+        <AButton
+          label="Reset defaults"
+          outlined
+          onClick={() =>
+            void apiClient.resetSettings().then((result) => {
+              setValues(result.settings);
+              setNotice("Defaults restored.");
+            })
+          }
+        />
+        <span className="text-sm">{notice}</span>
+      </div>
+    </div>
+  );
 }

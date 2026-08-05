@@ -5,16 +5,17 @@ import {
   type ChatMessage,
   type Conversation,
   type QueryDebug,
+  type Workspace,
 } from "../api/client";
 import {
   AButton,
   ACard,
   ADialog,
   AInfo,
-  AInput,
+  ALabel,
   ASelect,
   ATextarea,
-} from "../ui/primitives";
+} from "../components/ui";
 
 type Mode = "automatic" | "document_search" | "deep_analysis";
 type Source = {
@@ -25,6 +26,7 @@ type Source = {
 
 export function ChatPage() {
   const [workspaceId, setWorkspaceId] = useState("");
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [active, setActive] = useState<Conversation>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -34,6 +36,9 @@ export function ChatPage() {
   const [source, setSource] = useState<Source>();
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    apiClient.listWorkspaces().then((items) => { setWorkspaces(items); if (!workspaceId && items[0]) setWorkspaceId(items[0].id); }).catch(() => setError("Çalışma alanları alınamadı."));
+  }, [workspaceId]);
   useEffect(() => {
     if (!workspaceId) return;
     apiClient
@@ -104,13 +109,10 @@ export function ChatPage() {
     <>
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         <ACard title="Workspace and conversations">
-          <label>
-            Workspace ID{" "}
-            <AInput
-              value={workspaceId}
-              onChange={(event) => setWorkspaceId(event.target.value)}
-            />
-          </label>
+          <ALabel>
+            Çalışma alanı
+            <ASelect value={workspaceId} onChange={(event) => setWorkspaceId(event.value)} options={workspaces.map((workspace) => ({ label: workspace.name, value: workspace.id }))} placeholder="Çalışma alanı seçin" />
+          </ALabel>
           <div className="mt-3">
             <AButton
               label="New conversation"
@@ -142,7 +144,9 @@ export function ChatPage() {
                 <strong>{message.role === "user" ? "You" : "Cortex"}</strong>
                 <p className="whitespace-pre-wrap">{message.content}</p>
                 {message.metadata.inference === true && (
-                  <small className="text-amber-700">Inference from cited evidence</small>
+                  <small className="text-amber-700">
+                    Inference from cited evidence
+                  </small>
                 )}
                 {message.citations.map((citation) => (
                   <AButton

@@ -1,7 +1,7 @@
 import type { Edge, Node } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/client";
-import { AInfo } from "../ui/primitives";
+import { AInfo } from "../components/ui";
 import { AFlowCanvas } from "./AFlowCanvas";
 
 const edges: Edge[] = [

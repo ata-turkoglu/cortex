@@ -1,5 +1,5 @@
 import type { ActiveJob } from "../app/jobs";
-import { ADialog, AProgress } from "../ui/primitives";
+import { ADialog, AProgress } from "../components/ui";
 export function AWorkflowDialog({
   jobs,
   visible,
