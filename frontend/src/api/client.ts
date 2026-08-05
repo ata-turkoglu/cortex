@@ -28,6 +28,11 @@ export type WorkflowEvent = {
 export type Conversation = components["schemas"]["ConversationRead"];
 export type ChatMessage = components["schemas"]["MessageRead"];
 export type QueryDebug = components["schemas"]["QueryDebug"];
+export type Workspace = components["schemas"]["WorkspaceRead"];
+export type CatalogDocument = components["schemas"]["DocumentRead"];
+export type WorkspaceOverview = components["schemas"]["WorkspaceOverview"];
+export type DashboardOverview = components["schemas"]["DashboardOverview"];
+export type DocumentDetail = components["schemas"]["DocumentDetail"];
 const base = "/api/v1";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${base}${path}`, init);
@@ -35,6 +40,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 export const apiClient = {
+  listWorkspaces: () => request<Workspace[]>("/workspaces"),
+  createWorkspace: (name: string, slug: string, description?: string) => request<Workspace>("/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, slug, description: description || null }) }),
+  deleteWorkspace: (workspaceId: string) => request<void>(`/workspaces/${workspaceId}`, { method: "DELETE" }),
+  overview: () => request<DashboardOverview>("/overview"),
+  workspaceOverview: (workspaceId: string) => request<WorkspaceOverview>(`/workspaces/${workspaceId}/overview`),
+  listDocuments: (workspaceId: string) => request<CatalogDocument[]>(`/workspaces/${workspaceId}/documents`),
+  documentDetails: (workspaceId: string, documentId: string) => request<DocumentDetail>(`/workspaces/${workspaceId}/documents/${documentId}`),
+  upload: async (workspaceId: string, files: File[]) => {
+    const data = new FormData(); files.forEach((file) => data.append("files", file));
+    return request<{ uploads: { document_id: string; workflow_run_id: string; filename: string; chunk_count: number }[] }>(`/workspaces/${workspaceId}/uploads`, { method: "POST", body: data });
+  },
+  deleteDocument: (workspaceId: string, documentId: string) => request<{ workflow_run_id: string }>(`/workspaces/${workspaceId}/documents/${documentId}`, { method: "DELETE" }),
   getHealth: async () => request<{ status: string; services: Record<string, string> }>("/health"),
   getSettings: () => request<{ settings: Record<string, unknown>; global_only: boolean }>("/settings"),
   updateSettings: (settings: Record<string, unknown>) => request<{ settings: Record<string, unknown>; reindex_required: boolean }>("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) }),

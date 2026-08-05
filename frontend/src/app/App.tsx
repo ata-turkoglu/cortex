@@ -1,29 +1,28 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import type { ReactNode } from "react";
 import { APlatformLayout } from "../layout/APlatformLayout";
 import { AppearanceSettingsPage } from "../pages/AppearanceSettingsPage";
 import { CostControls } from "../pages/CostControls";
-import { PagePlaceholder } from "../pages/PagePlaceholder";
 import { SetupWizard } from "../pages/SetupWizard";
 import { ProviderSettingsPage } from "../pages/ProviderSettingsPage";
 import { ASystemMap } from "../flow/ASystemMap";
 import { ProcessesPage } from "../pages/ProcessesPage";
 import { ChatPage } from "../pages/ChatPage";
 import { OperationalSettingsPage } from "../pages/OperationalSettingsPage";
+import { FailedJobsPage } from "../pages/FailedJobsPage";
+import { DashboardPage, DocumentDetailPage, DocumentsPage, GraphPage, HealthPage, UploadPage, WorkspaceOverviewPage, WorkspacesPage } from "../pages/WorkspacePages";
 const routes: Record<string, [string, string]> = {
-  "/": ["Dashboard", "Workspace summary and recent activity."],
-  "/workspaces": ["Workspaces", "Manage isolated knowledge applications."],
-  "/workspace/:workspaceId": ["Workspace", "Workspace overview."],
-  "/documents": ["Documents", "Server-side paginated document list."],
-  "/documents/:documentId": [
-    "Document details",
-    "Versions and source details.",
-  ],
-  "/upload": ["Upload", "Secure document intake."],
-  "/chat": ["Chat", "Grounded querying experience."],
-  "/conversations": ["Conversations", "Saved conversations."],
+  "/": ["Dashboard", ""],
+  "/workspaces": ["Çalışma alanları", ""],
+  "/workspace/:workspaceId": ["Çalışma alanı", ""],
+  "/documents": ["Belgeler", ""],
+  "/documents/:documentId": ["Belge", ""],
+  "/upload": ["Yükle", ""],
+  "/chat": ["Sohbet", ""],
+  "/conversations": ["Sohbetler", ""],
   "/processes": ["Processes", "Background workflows and diagnostics."],
   "/failed-jobs": ["Failed jobs", "Sanitized technical details."],
-  "/graph": ["Graph explorer", "Knowledge graph visualization."],
+  "/graph": ["Graf", ""],
   "/system-map": ["System map", "Component and data-flow map."],
   "/settings": ["Settings", "Global configuration."],
   "/settings/providers": [
@@ -34,15 +33,8 @@ const routes: Record<string, [string, string]> = {
     "Appearance",
     "Theme and accessibility preferences.",
   ],
-  "/health": ["Health", "Service statuses."],
+  "/health": ["Sistem sağlığı", ""],
 };
-function RoutedPage({ title, detail }: { title: string; detail: string }) {
-  return (
-    <APlatformLayout title={title}>
-      <PagePlaceholder title={title} detail={detail} />
-    </APlatformLayout>
-  );
-}
 function AppearanceRoute() {
   return (
     <APlatformLayout title="Appearance">
@@ -99,15 +91,27 @@ function ChatRoute() {
     </APlatformLayout>
   );
 }
+function ContentRoute({ title, children }: { title: string; children: ReactNode }) {
+  return <APlatformLayout title={title}>{children}</APlatformLayout>;
+}
 export function App() {
   return (
     <Routes>
-      {Object.entries(routes).map(([path, [title, detail]]) => (
+      {Object.entries(routes).map(([path, [title]]) => (
         <Route
           key={path}
           path={path}
           element={
-            path === "/chat" ? (
+            path === "/" ? <ContentRoute title={title}><DashboardPage /></ContentRoute>
+            : path === "/workspaces" ? <ContentRoute title={title}><WorkspacesPage /></ContentRoute>
+            : path === "/workspace/:workspaceId" ? <ContentRoute title={title}><WorkspaceOverviewPage /></ContentRoute>
+            : path === "/documents" ? <ContentRoute title={title}><DocumentsPage /></ContentRoute>
+            : path === "/documents/:documentId" ? <ContentRoute title={title}><DocumentDetailPage /></ContentRoute>
+            : path === "/upload" ? <ContentRoute title={title}><UploadPage /></ContentRoute>
+            : path === "/graph" ? <ContentRoute title={title}><GraphPage /></ContentRoute>
+            : path === "/health" ? <ContentRoute title={title}><HealthPage /></ContentRoute>
+            : path === "/failed-jobs" ? <ContentRoute title={title}><FailedJobsPage /></ContentRoute>
+            : path === "/chat" || path === "/conversations" ? (
               <ChatRoute />
             ) : path === "/processes" ? (
               <ProcessesRoute />
@@ -119,9 +123,7 @@ export function App() {
               <SettingsRoute />
             ) : path === "/system-map" ? (
               <SystemMapRoute />
-            ) : (
-              <RoutedPage title={title} detail={detail} />
-            )
+            ) : <Navigate to="/" replace />
           }
         />
       ))}
