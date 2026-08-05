@@ -1,6 +1,7 @@
 import {
   Background,
   Controls,
+  MiniMap,
   ReactFlow,
   type Edge,
   type Node,
@@ -13,15 +14,20 @@ export function AFlowCanvas({
   nodes,
   edges,
   onNodeClick,
+  height = 460,
+  showMiniMap = false,
 }: {
   nodes: AFlowNode[];
   edges: AFlowEdge[];
   onNodeClick?: (id: string) => void;
+  height?: number;
+  showMiniMap?: boolean;
 }) {
   return (
-    <div style={{ height: 360 }}>
+    <div style={{ height }}>
       <ReactFlow nodes={nodes} edges={edges} fitView onNodeClick={(_, node) => onNodeClick?.(node.id)}>
         <Background />
+        {showMiniMap && <MiniMap />}
         <Controls />
       </ReactFlow>
     </div>
