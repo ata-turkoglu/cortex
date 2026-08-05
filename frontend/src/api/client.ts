@@ -36,7 +36,10 @@ export type DocumentDetail = components["schemas"]["DocumentDetail"];
 const base = "/api/v1";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${base}${path}`, init);
-  if (!response.ok) throw new Error("Process request failed");
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { message?: string } | null;
+    throw new Error(body?.message ?? "İstek tamamlanamadı.");
+  }
   return response.json() as Promise<T>;
 }
 export const apiClient = {
