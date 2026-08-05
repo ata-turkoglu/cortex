@@ -18,6 +18,10 @@ with the mounted repository layout. The root workspace and `frontend` package ea
 `node_modules` volume so host-created pnpm symlinks never point to Windows-only paths inside the
 Linux container.
 
+Vite proxies browser requests beginning with `/api` to the API service. Host development defaults
+to `http://localhost:4000`; Compose sets `VITE_API_PROXY_TARGET=http://backend:8000` so browser
+requests served on port 3000 never incorrectly target the Vite port.
+
 The Dockerfile has two build targets. `runtime` is the API image and installs only the `query`
 group. `worker` inherits it and installs `retrieval` plus `graphrag`; this is where GraphRAG's
 heavy transitive dependencies, including LanceDB, PyArrow, spaCy, Torch, and Graspologic reside.
