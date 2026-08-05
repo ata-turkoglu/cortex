@@ -6,7 +6,7 @@ import { ASystemMap } from "./ASystemMap";
 describe("ASystemMap", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("renders live health and switches workflow tabs", async () => {
+  it("renders live health and switches detailed map tabs", async () => {
     vi.spyOn(apiClient, "getHealth").mockResolvedValue({
       status: "healthy",
       services: { backend: "healthy", worker: "healthy" },
@@ -18,8 +18,12 @@ describe("ASystemMap", () => {
     });
     render(<ASystemMap />);
     await waitFor(() => expect(screen.getAllByText(/backend/).length).toBeGreaterThan(0));
-    expect(screen.getAllByText(/recovery/).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText(/recovery/).length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole("tab", { name: "Belge akışı" }));
     expect(screen.getByText("Docling normalizasyonu")).toBeInTheDocument();
+    expect(screen.getByText("Sürüm kararı")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Sorgu akışı" }));
+    expect(screen.getAllByText("Dense retrieval").length).toBeGreaterThan(0);
+    expect(screen.getByText("Graph DRIFT")).toBeInTheDocument();
   });
 });
