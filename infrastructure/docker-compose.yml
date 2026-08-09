@@ -18,6 +18,9 @@ services:
       CORTEX_REDIS_URL: redis://redis:6379/0
       CORTEX_QDRANT_URL: http://qdrant:6333
       CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      CORTEX_SECRET_STORE_PATH: /data/secrets
+      CORTEX_OPENAI_API_KEY: ${CORTEX_OPENAI_API_KEY:-}
+      CORTEX_ANTHROPIC_API_KEY: ${CORTEX_ANTHROPIC_API_KEY:-}
     volumes: ["../data:/data"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: [redis, qdrant]
@@ -30,6 +33,9 @@ services:
       CORTEX_REDIS_URL: redis://redis:6379/0
       CORTEX_QDRANT_URL: http://qdrant:6333
       CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      CORTEX_SECRET_STORE_PATH: /data/secrets
+      CORTEX_OPENAI_API_KEY: ${CORTEX_OPENAI_API_KEY:-}
+      CORTEX_ANTHROPIC_API_KEY: ${CORTEX_ANTHROPIC_API_KEY:-}
     volumes: ["../data:/data"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: [redis, qdrant]

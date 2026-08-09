@@ -9,8 +9,20 @@ Uploads validate size, extension and MIME type; normalize filenames; prevent tra
 use unique storage names and checksums; and return structured errors for unsupported,
 corrupt, or encrypted files. Uploaded content is never executed.
 
+An uploaded file is a source container. During DOCX normalization, Word heading levels are
+reasserted in Markdown so every Word Heading 2 becomes exactly `##`. Markdown level-2 headings
+are the only logical-document boundary signal; archive-code prefixes are never interpreted by
+the splitter. Each `##` section creates a first-class `logical_documents` row before chunking,
+using the heading text as its code and title and retaining its type, original source name, page
+range, and normalized segment.
+Chunks reference both the source container/version and their logical document; chunk adjacency
+never crosses a logical-document boundary. Explicit DOCX page breaks are retained as page-range
+metadata, while DOCX files without fixed page breaks leave page values unset.
+
 V1 does not watch arbitrary external folders. Files enter only through upload or replacement
-flows; a later re-upload is the mechanism for detecting changed source content.
+flows; a later re-upload is the mechanism for detecting changed source content. Duplicate
+protection applies only to active document versions, so a completed soft-delete does not prevent
+the same source content from being uploaded again.
 
 Startup identifies stale running work; jobs become interrupted or resume from a safe
 checkpoint. Deletions are idempotent workflows, and partial cleanup schedules reconciliation

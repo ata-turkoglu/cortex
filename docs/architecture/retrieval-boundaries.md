@@ -28,6 +28,15 @@ The Ollama adapter calls `/api/embed` and exposes a lightweight embedding health
 query/document preparation is kept inside that adapter and preserves Turkish Unicode while
 normalizing line endings; retrieval feature code never owns model-specific prefixes.
 
+Entity/document-list questions are planned as `entity_document_lookup` with `needs_list=true`.
+Their chunk candidates are ranked with an exact-phrase preference, grouped by `document_id`, and
+returned as unique document matches that retain ordered matching chunks. Answer context is formed
+as document blocks with document code, title, page, original source, and document type; synthesis
+emits one concise row and one citation per document instead of passage dumps.
+Here `document_id` is the logical-document ID when a source container was split; evidence also
+retains `source_document_id` and `source_original`. Retrieval therefore labels a hit `B-2/i`
+rather than `MERTER B.docx`, while source inspection can still navigate back to the DOCX.
+
 An incompatible embedding configuration creates one idempotent `dense_reindex` workflow request.
 The new configuration cannot become active until that full replacement workflow marks its dense
 index ready, so old vectors cannot silently serve a changed model or formatting policy.

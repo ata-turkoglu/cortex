@@ -21,7 +21,7 @@ Codex must keep this file updated.
 - Status: All implementation phases are complete and validated.
 - Active validation target: None
 - Started: 2026-08-02
-- Last updated: 2026-08-04
+- Last updated: 2026-08-08
 
 ## Completed work
 
@@ -74,6 +74,29 @@ Codex must keep this file updated.
   selector, worker-owned OpenAI Responses synthesis and conversation summary calls, inference
   labels, memory-window summaries, source-details dialog, message pagination, soft-budget
   pausing, token/cost recording, query-latency capture, and generated OpenAPI Chat types.
+- Added entity-document lookup planning and synthesis: Turkish/English document-list questions
+  now set `entity_document_lookup` and `needs_list`, exact entity matches are prioritized, chunks
+  are grouped into unique document results with identity metadata, and answers emit one concise
+  row and citation per document.
+- Updated the System Map query flow with the document-list intent decision and unique-document
+  grouping branch. The Processes page remains unchanged because the feature uses the existing
+  persisted `route`, `retrieve`, and `synthesize` query steps.
+- Completed the multi-document DOCX ingestion audit and correction. DOCX Word Heading 2 styles
+  are normalized to Markdown `##`, and the splitter uses only those headings—never archive-code
+  prefixes—to create first-class logical documents with code/title/type/source/page metadata;
+  chunks cannot cross logical boundaries; GraphRAG materializes one input per logical document
+  and resolves entity
+  provenance through text units; retrieval returns logical codes; and a workspace-scoped
+  ingestion diagnostics endpoint exposes the source-to-retrieval trace. Ingestion workflow v3
+  and the System Map/Processes flows include the logical-document checkpoint.
+- Completed the worker-owned GraphRAG query protocol. The API persists and submits a durable
+  QueryRun through Redis/Dramatiq, while the GraphRAG-capable worker resolves persisted selected
+  settings, executes Local/Global/DRIFT outside a SQLite write transaction, and records the final
+  native answer, evidence, trace, and stage usage. Bounded API waits fail safely without allowing
+  a late worker result to overwrite a terminal timeout; GraphRAG final answers bypass synthesis.
+- Updated the System Map with the durable GraphRAG query boundary, explicit-fallback path,
+  optional default-off claims, algorithmic community detection, and user-selected community report
+  generation.
 
 ## In progress
 
@@ -90,6 +113,11 @@ Codex must keep this file updated.
 
 | Date | Phase | Command | Result |
 | ---- | ----- | ------- | ------ |
+| 2026-08-08 | 8 | `uv run ruff check app tests alembic` and `uv run pytest -q -p no:cacheprovider` (from `backend`) | Passed (106 tests; upstream/local-adapter warnings only) |
+| 2026-08-08 | 8 | `python scripts/ai-context/validate-context.py` and `git diff --check` | Passed |
+| 2026-08-08 | 8 | `corepack pnpm test -- ASystemMap.test.tsx`, `corepack pnpm build`, and `corepack pnpm lint` (from `frontend`) | Passed (6 tests; bundle-size advisory only) |
+| 2026-08-08 | 5-8 | `uv run ruff check app tests alembic`, `uv run pytest -q -p no:cacheprovider`, in-memory Alembic upgrade, and `uv lock --check --offline` (from `backend`) | Passed (112 tests; upstream/local-adapter warnings only) |
+| 2026-08-08 | 2 | `corepack pnpm test`, `corepack pnpm build`, and `corepack pnpm lint` (from `frontend`) | Passed (6 tests; bundle-size advisory only) |
 | 2026-08-02 | 1 | `python scripts/ai-context/generate-adapters.py` | Passed |
 | 2026-08-02 | 1 | `python scripts/ai-context/validate-context.py` | Passed |
 | 2026-08-02 | 1 | `python scripts/ai-context/check-context-freshness.py` | Passed |

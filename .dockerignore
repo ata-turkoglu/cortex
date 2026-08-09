@@ -1,0 +1,49 @@
+# The backend Dockerfile uses an allowlist below. Keep all local files out of the
+# build context unless the running image needs them.
+**
+
+# Runtime source and migration files required by the backend and worker targets.
+!backend/
+!backend/Dockerfile
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/alembic.ini
+!backend/app/
+!backend/app/**
+!backend/alembic/
+!backend/alembic/**
+
+# Explicitly document common local/generated exclusions for future context changes.
+.git
+.gitignore
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.cache
+**/node_modules
+**/dist
+**/build
+**/.next
+**/coverage
+**/*.log
+**/*.tmp
+.env
+.env.*
+
+# Persistent or generated runtime data is mounted at /data by Compose; it never
+# belongs in an image or its build context.
+data/
+backend/data/
+backend/storage/
+backend/uploads/
+backend/models/
+backend/backups/
+backend/artifacts/
+backend/output/
+backend/cache/
+backend/tmp/

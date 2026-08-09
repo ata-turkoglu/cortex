@@ -14,8 +14,9 @@ idempotent deletion workflow.
 exposing source contents. Workspace-scoped catalogue views use
 `GET /workspaces/{workspace_id}/overview`, `GET /workspaces/{workspace_id}/documents`, and
 `GET /workspaces/{workspace_id}/documents/{document_id}`. The detail endpoint returns the
-normalized source only for its owning workspace; document deletion remains the existing
-durable workflow command.
+normalized source only for its owning workspace. When its normalized file is unavailable,
+it returns the same persisted logical-document Markdown in ordinal order; document deletion
+remains the existing durable workflow command.
 
 Workflow commands are exposed under `/api/v1/workflows`: `POST /` creates a durable run,
 `GET /` and `GET /{id}` restore state, `POST /{id}/cancel` requests safe-boundary cancellation,
@@ -28,7 +29,8 @@ diagnostics; it does not return source document content or unredacted exceptions
 workspace is marked deleting. `DELETE /api/v1/workspaces/{workspace_id}/documents/{document_id}`
 returns `202` with its durable workflow run ID.
 
-Chat is scoped beneath `/api/v1/workspaces/{workspace_id}`. Conversations, messages, and
+Chat is scoped beneath `/api/v1/workspaces/{workspace_id}`. Conversations can be soft-deleted
+with `DELETE /conversations/{id}` within their owning workspace. Conversations, messages, and
 query-debug lookups are all filtered by that workspace. `POST /conversations/{id}/messages`
 accepts `automatic`, `document_search`, or `deep_analysis`, persists route/debug state in a
 query run, and returns an evidence-backed assistant message. Citations carry document,
@@ -37,6 +39,19 @@ returns routes, reason, confidence, answer state, latency, and persisted token/c
 `PATCH /conversations/{conversation_id}/messages/{message_id}` only permits editing a user
 message in its owning workspace/conversation. `GET /sources/{chunk_id}` returns source content
 and document-version metadata only when the chunk belongs to the requested workspace.
+
+Document-list language in Turkish or English is planned as `entity_document_lookup`; its answer
+contains one row and one citation per unique document, plus page and document type when available.
+
+`GET /workspaces/{workspace_id}/ingestion-diagnostics/{source_document_id}` returns the active
+source DOCX, its logical documents, inherited chunk/page metadata, matching GraphRAG entity and
+text-unit nodes, and—when `query` is supplied—the logical documents returned by retrieval. The
+diagnostic is read-only and workspace-scoped.
+
+`GET /workspaces/{workspace_id}/graph` returns a bounded, read-only projection of that
+workspace's canonical GraphRAG entity and relationship artifacts for the graph explorer. It
+never reads another workspace's graph root and limits the response to 150 entities and 300
+relationships.
 
 The generated frontend OpenAPI schema includes the Chat request, conversation, message,
 citation, and query-debug models. Chat feature code consumes those generated component types
@@ -50,11 +65,26 @@ configuration. Secrets and connection locations remain environment/credential-st
 Updates are Pydantic validated and model assignments are checked against provider
 capabilities. Changing chunking or embedding settings marks every workspace index as
 `reindex_required` and its GraphRAG projection as `stale`.
+GraphRAG exposes separate local Ollama or OpenAI API provider/model assignments for extraction,
+claims, community reports, and Local, Global, and DRIFT query methods. Entity and relationship
+extraction share Microsoft GraphRAG's single upstream `extract_graph` stage. Changing any of
+these assignments marks the GraphRAG projection stale without invalidating dense or sparse
+retrieval indexes.
 
 `GET /health` returns both a service map and component list. The system map renders these
 live states; an unavailable optional provider is shown as unavailable rather than healthy.
 
 `POST /settings/providers/{provider}/validate` stores a supplied credential in the OS
-credential store and records only safe validation state. `POST /settings/embedding/health`
+credential store and records only safe validation state. In Docker, when the host OS
+credential store is unavailable, credentials are encrypted in the mounted `/data/secrets`
+fallback store; environment variables remain supported for non-interactive deployments.
+`GET /settings/providers` queries the configured OpenAI credential against `/v1/models` and
+exposes only the accessible chat and embedding model IDs to the settings UI.
+`POST /settings/embedding/health`
 tests the configured Ollama embedding adapter and reports its model and vector dimension.
 `POST /settings/setup/complete` records completion of the global first-run wizard.
+`POST /settings/ollama/models/pull` starts an explicitly user-requested Ollama download and
+returns an operation ID; `GET /settings/ollama/models/pull/{operation_id}` reports its streamed
+progress. Cortex never pulls a model automatically.
+`GET /settings/ollama/catalog` exposes selectable entries from the official Ollama library,
+with a small local fallback catalogue when the library is unavailable.

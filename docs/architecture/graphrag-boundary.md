@@ -20,14 +20,20 @@ workspace root, explicit configuration path, and one of the `standard`, `fast`,
 remain separate adapter calls. The runner is worker-owned: it must never execute inside an API
 request or a database transaction.
 
-`GraphRAGInputMaterializer` copies only active normalized document versions from one workspace
-into that workspace's GraphRAG `input` root. It validates every normalized path against the
-configured data root and does not read another workspace's rows. Worker code can materialize this
-manifest before a deferred index/update execution without holding a database transaction open.
+`GraphRAGInputMaterializer` writes one input Markdown file per active logical document, not one
+per uploaded source container. Each input carries logical ID, document code, title, type, source
+filename, page range, and its normalized segment, so GraphRAG text units and extracted entities
+retain the `B-2/i -> MERTER B.docx` provenance chain. Legacy versions without logical rows retain
+the safe one-input-per-version fallback. The materializer remains workspace-isolated and worker
+code can write its collected snapshot without holding a database transaction open. Each write
+replaces prior generated Markdown inputs, preventing an old source-level file from being indexed
+alongside its logical-document replacements.
 
 `GraphRAGAdapter.initialize()` invokes the supported GraphRAG `init` command only for that
 workspace root and records the resulting `settings.yaml` for the later worker-owned index call.
-It does not configure or reveal provider secrets.
+It aligns the generated chat-model placeholder with Cortex's configured answer model, but never
+writes provider secrets: the worker passes the configured OpenAI credential to the GraphRAG CLI
+only through `GRAPHRAG_API_KEY` in the subprocess environment.
 
 Deferred updates have three explicit stages: prepare the workspace snapshot and mark the graph
 indexing in SQLite; run input materialization, GraphRAG index, and NetworkX rebuild with no
@@ -59,3 +65,25 @@ supported compatibility boundary.
 
 Phase 10 tests exercise deferred update snapshots, workspace-filtered mirroring, and the
 separate Local, Global, and DRIFT route contracts without requiring a live provider.
+
+## V1 query execution and settings
+
+Every GraphRAG stage resolves its provider/model from the user-controlled stage setting and is
+written to its own generated GraphRAG model entry; no execution model is substituted. Claim
+extraction is optional and disabled by default. Community clustering is algorithmic, while the
+community setting governs report generation.
+
+Selected Local, Global, and DRIFT chat routes execute through the worker-owned workspace GraphRAG adapter.
+The native GraphRAG answer is final and carries route/provider/model/duration metadata; the
+regular Cortex synthesis worker skips it. Hybrid fallback is an explicit global policy and is off
+by default. DRIFT has configurable conservative depth, follow-up, primer, concurrency, and
+maximum-call limits. CLI usage fields unavailable from GraphRAG remain null in Cortex reports.
+The native GraphRAG artifacts and Qdrant mirror remain duplicated intentionally for V1.
+
+In Docker, the API never imports GraphRAG execution modules or invokes the GraphRAG CLI. It writes
+a durable `QueryRun`, submits its ID through Redis/Dramatiq, and waits only for the configured
+bounded chat window. The worker resolves persisted global settings, validates the workspace graph
+root, executes the selected route, and writes the final answer, evidence, trace, and usage record
+back to that query run. A worker failure or timeout is a controlled result; Hybrid fallback remains
+an explicit policy. Cancellation is cooperative: a query already executing in GraphRAG cannot be
+hard-interrupted by Dramatiq, but queued/timed-out work is marked terminal and never synthesized.

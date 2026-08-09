@@ -17,6 +17,24 @@ have independent worker concurrency caps. A run that exceeds its cap remains que
 `blocked` event. Completed runs are soft-deleted by the retention actor after the configured
 number of days.
 
+A GraphRAG reindex performs real worker-owned work, outside a SQLite transaction: it snapshots
+the workspace documents, materializes GraphRAG inputs, runs the canonical GraphRAG index and
+NetworkX projection, then mirrors entity/report/text-unit artifacts to Qdrant. Each stage writes
+its checkpoint only after that stage completes; failures leave the graph state `stale` and the
+workflow `failed` rather than reporting a synthetic completion.
+
+Upload ingestion v3 commits its workflow run and initial checkpoints (`parse`, `normalize`,
+logical-document detection, `chunk`, and `index`) before dispatching to Dramatiq. Logical-document
+detection is completed synchronously before chunks are written, while the durable step model keeps
+the same safe transaction boundary. A worker therefore never observes a queued
+run without its durable state; queued runs created by an earlier version are backfilled before
+execution.
+
+For DOCX input, normalization preserves Word heading levels and makes every Word Heading 2 an
+exact Markdown `##` heading. Logical-document detection splits only on these level-2 headings;
+heading text is opaque and no archive-code prefix is recognized. Metadata is persisted for each
+logical document before its independent chunk set is created.
+
 Document and workspace deletion commands create durable delete workflows. At their cleanup
 checkpoint they idempotently tombstone the workspace-owned relational document, version, and
 chunk rows. Cross-store file/vector cleanup and reconciliation remain dedicated follow-up
@@ -36,11 +54,22 @@ fingerprint before specialized worker adapters run.
 Query runs use separate `query_runs` and `query_step_runs` records rather than background
 workflow tables. Phase 8 can therefore persist route, retrieval, and synthesis progress without
 changing the job-monitoring lifecycle.
+Entity-document lookup remains inside those same `route`, `retrieve`, and `synthesize` query
+steps: intent detection occurs during route, unique-document grouping during retrieve, and the
+concise document table during synthesize. It does not add a Processes-page workflow schema.
 
 Chat query runs persist selector decision, confidence, fallback explanation, answer state,
 latency, and token/cost fields. When a GraphRAG route cannot produce normalized
 workspace-scoped evidence, the query falls back to Hybrid Search and records that fallback
 rather than presenting ungrounded output.
+
+GraphRAG fallback is now an explicit global policy and defaults off. Selected native Local,
+Global, and DRIFT routes retain GraphRAG's final answer and bypass the normal synthesis actor.
+
+GraphRAG chat uses the durable query-run record as its worker job protocol. The API commits that
+record before submitting its ID to the existing Redis/Dramatiq worker, then polls bounded shared
+SQLite state for the final result. The worker owns the Microsoft GraphRAG dependency and CLI;
+the API image remains lightweight and dependency-safe.
 
 `app.chat.router` owns the LlamaIndex `QueryEngineTool` catalog and the descriptions for
 Hybrid, GraphRAG Local, Global, and DRIFT paths. It restricts selection to V1-approved route

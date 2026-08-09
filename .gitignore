@@ -44,7 +44,7 @@ data/sqlite/
 # Local configuration and IDE files
 .env
 .env.*
-!.env.example
+infrastructure/.env
 .vscode/
 .idea/
 *.log
