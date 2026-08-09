@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { apiClient } from "../api/client";
-import { AButton, ACard, AInfo, AInput, ALabel, AProgress } from "../components/ui";
+import { AButton, ACard, AInfoPanel, AInput, ALabel, AProgress } from "../components/ui";
 
 const steps = [
   "Welcome",
@@ -48,10 +48,10 @@ export function SetupWizard() {
         </ALabel>
       ) : step === 3 ? (
         <div className="grid gap-2">
-          <AInfo>
+          <AInfoPanel>
             OpenAI is the production default. The key is stored in the OS
             credential store and never returned.
-          </AInfo>
+          </AInfoPanel>
           <AInput
             type="password"
             value={openAiKey}
@@ -62,23 +62,23 @@ export function SetupWizard() {
         </div>
       ) : step === 4 ? (
         <div className="grid gap-2">
-          <AInfo>
+          <AInfoPanel>
             Ollama is optional. Cortex will not download models. Missing
             embedding model command:{" "}
             <code>ollama pull qwen3-embedding:0.6b</code>
-          </AInfo>
+          </AInfoPanel>
           <AButton label="Test Ollama availability" onClick={testOllama} />
         </div>
       ) : step === 5 ? (
-        <AInfo>
+        <AInfoPanel>
           Default embedding: Ollama qwen3-embedding:0.6b. Changing it later
           requires full dense reindexing.
-        </AInfo>
+        </AInfoPanel>
       ) : (
-        <AInfo>
+        <AInfoPanel>
           Global settings, health checks, budgets, and model assignments can be
           revised after setup.
-        </AInfo>
+        </AInfoPanel>
       )}
       <div className="mt-4 flex items-center gap-2">
         <AButton

@@ -4,7 +4,7 @@ import {
   ACard,
   ACheckbox,
   AColorPicker,
-  AInfo,
+  AInfoPanel,
   ALabel,
   ASelect,
 } from "../components/ui";
@@ -15,11 +15,11 @@ export function AppearanceSettingsPage() {
   return (
     <ACard title="Görünüm">
       <div className="grid max-w-xl gap-4">
-        <AInfo title="PrimeReact theme builder">
+        <AInfoPanel title="PrimeReact theme builder">
           Preset, renk ve yüzey seçimleri bu tarayıcıda kalıcıdır. Birincil ve
           ikincil renkler Cortex bileşenleri ile PrimeReact düğmelerinde
           kullanılır.
-        </AInfo>
+        </AInfoPanel>
         <ALabel>
           PrimeReact preset
           <ASelect

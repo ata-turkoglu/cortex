@@ -33,6 +33,38 @@ export type CatalogDocument = components["schemas"]["DocumentRead"];
 export type WorkspaceOverview = components["schemas"]["WorkspaceOverview"];
 export type DashboardOverview = components["schemas"]["DashboardOverview"];
 export type DocumentDetail = components["schemas"]["DocumentDetail"];
+export type ProviderName = "openai" | "anthropic" | "ollama";
+export type ModelCapability = {
+  provider: ProviderName;
+  model: string;
+  chat: boolean;
+  embeddings: boolean;
+  digest: string | null;
+};
+export type ProviderStatus = {
+  providers: { provider: ProviderName; configured: boolean; base_url?: string }[];
+  capabilities: Record<ProviderName, ModelCapability[]>;
+};
+export type OllamaPullOperation = {
+  operation_id: string;
+  model: string;
+  status: "running" | "completed" | "failed";
+  completed: number;
+  total: number;
+  error: string | null;
+};
+export type OllamaCatalogModel = {
+  name: string;
+  description: string;
+  capabilities: string[];
+  sizes: string[];
+  kind?: "llm" | "embedding";
+};
+export type GraphExplorer = {
+  state: string;
+  nodes: { id: string; label: string; description: string; attributes: Record<string, string> }[];
+  edges: { id: string; source: string; target: string; label: string | null }[];
+};
 const base = "/api/v1";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${base}${path}`, init);
@@ -40,6 +72,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await response.json().catch(() => null) as { message?: string } | null;
     throw new Error(body?.message ?? "İstek tamamlanamadı.");
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 export const apiClient = {
@@ -48,6 +81,7 @@ export const apiClient = {
   deleteWorkspace: (workspaceId: string) => request<void>(`/workspaces/${workspaceId}`, { method: "DELETE" }),
   overview: () => request<DashboardOverview>("/overview"),
   workspaceOverview: (workspaceId: string) => request<WorkspaceOverview>(`/workspaces/${workspaceId}/overview`),
+  graph: (workspaceId: string) => request<GraphExplorer>(`/workspaces/${workspaceId}/graph`),
   listDocuments: (workspaceId: string) => request<CatalogDocument[]>(`/workspaces/${workspaceId}/documents`),
   documentDetails: (workspaceId: string, documentId: string) => request<DocumentDetail>(`/workspaces/${workspaceId}/documents/${documentId}`),
   upload: async (workspaceId: string, files: File[]) => {
@@ -58,9 +92,12 @@ export const apiClient = {
   getHealth: async () => request<{ status: string; services: Record<string, string> }>("/health"),
   getSettings: () => request<{ settings: Record<string, unknown>; global_only: boolean }>("/settings"),
   updateSettings: (settings: Record<string, unknown>) => request<{ settings: Record<string, unknown>; reindex_required: boolean }>("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) }),
-  providerStatus: () => request<{ providers: { provider: string; configured: boolean }[] }>("/settings/providers"),
-  validateProvider: (provider: "openai" | "anthropic" | "ollama", apiKey?: string) =>
+  providerStatus: () => request<ProviderStatus>("/settings/providers"),
+  validateProvider: (provider: ProviderName, apiKey?: string) =>
     request<{ provider: string; status: string }>(`/settings/providers/${provider}/validate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(apiKey ? { api_key: apiKey } : {}) }),
+  pullOllamaModel: (model: string) => request<OllamaPullOperation>("/settings/ollama/models/pull", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) }),
+  ollamaPullStatus: (operationId: string) => request<OllamaPullOperation>(`/settings/ollama/models/pull/${operationId}`),
+  ollamaCatalog: () => request<{ models: OllamaCatalogModel[] }>("/settings/ollama/catalog"),
   embeddingHealth: () => request<{ provider: string; model: string; dimension: number }>("/settings/embedding/health", { method: "POST" }),
   completeSetup: (dataPath?: string) => request<{ completed: boolean }>("/settings/setup/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data_path: dataPath }) }),
   resetSettings: () => request<{ settings: Record<string, unknown>; reindex_required: boolean }>("/settings/reset-defaults", { method: "POST" }),
@@ -68,6 +105,13 @@ export const apiClient = {
   embeddingStatus: () => request<{ provider: string; model: string; installed: boolean; dimension: number | null; model_digest: string | null; last_benchmark: string | null; requires_full_reindex: boolean }>("/settings/embedding/status"),
   graphragEstimate: () => request<{ update_mode: string; pending_document_threshold: number; confirmation_threshold_usd: number; requires_confirmation: boolean }>("/settings/graphrag/estimate"),
   listWorkflows: async () => request<WorkflowRun[]>("/workflows"),
+  workflow: (id: string) => request<WorkflowRun>(`/workflows/${id}`),
+  createWorkflow: (workspaceId: string, jobType: "graphrag_reindex") =>
+    request<WorkflowRun>("/workflows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: workspaceId, job_type: jobType }),
+    }),
   cancelWorkflow: async (id: string) =>
     request<WorkflowRun>(`/workflows/${id}/cancel`, {
       method: "POST",
@@ -94,6 +138,8 @@ export const apiClient = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
     }),
+  deleteConversation: (workspaceId: string, conversationId: string) =>
+    request<void>(`/workspaces/${workspaceId}/conversations/${conversationId}`, { method: "DELETE" }),
   listMessages: (workspaceId: string, conversationId: string, limit = 50, offset = 0) =>
     request<ChatMessage[]>(
       `/workspaces/${workspaceId}/conversations/${conversationId}/messages?limit=${limit}&offset=${offset}`,

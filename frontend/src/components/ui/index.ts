@@ -17,6 +17,7 @@ export * from "./AColumn";
 export * from "./ACard";
 export * from "./AInfo";
 export * from "./AConfirmDialog";
+export * from "./AConfirmationProvider";
 export * from "./APaginator";
 export * from "./ADatePicker";
 export * from "./ADrawer";

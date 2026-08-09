@@ -1,5 +1,6 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
+import { ATabs } from "../components/ui";
 import { APlatformLayout } from "../layout/APlatformLayout";
 import { AppearanceSettingsPage } from "../pages/AppearanceSettingsPage";
 import { CostControls } from "../pages/CostControls";
@@ -35,11 +36,34 @@ const routes: Record<string, [string, string]> = {
   ],
   "/health": ["Sistem sağlığı", ""],
 };
+function SettingsRoute({ title, children }: { title: string; children: ReactNode }) {
+  const { pathname } = useLocation();
+  const tabs = [
+    ["/settings", "Genel"],
+    ["/settings/providers", "Sağlayıcılar"],
+    ["/settings/appearance", "Görünüm"],
+    ["/settings/costs", "Maliyet"],
+  ] as const;
+  return (
+    <APlatformLayout title={title}>
+      <div className="page-stack">
+        <ATabs aria-label="Ayar bölümleri">
+          {tabs.map(([to, label]) => (
+            <Link key={to} to={to} role="tab" aria-selected={pathname === to} className={pathname === to ? "is-active" : undefined}>
+              {label}
+            </Link>
+          ))}
+        </ATabs>
+        {children}
+      </div>
+    </APlatformLayout>
+  );
+}
 function AppearanceRoute() {
   return (
-    <APlatformLayout title="Appearance">
+    <SettingsRoute title="Appearance">
       <AppearanceSettingsPage />
-    </APlatformLayout>
+    </SettingsRoute>
   );
 }
 function SetupRoute() {
@@ -51,23 +75,23 @@ function SetupRoute() {
 }
 function CostRoute() {
   return (
-    <APlatformLayout title="Cost controls">
+    <SettingsRoute title="Cost controls">
       <CostControls />
-    </APlatformLayout>
+    </SettingsRoute>
   );
 }
 function ProviderRoute() {
   return (
-    <APlatformLayout title="Providers and models">
+    <SettingsRoute title="Providers and models">
       <ProviderSettingsPage />
-    </APlatformLayout>
+    </SettingsRoute>
   );
 }
-function SettingsRoute() {
+function OperationalSettingsRoute() {
   return (
-    <APlatformLayout title="Settings">
+    <SettingsRoute title="Settings">
       <OperationalSettingsPage />
-    </APlatformLayout>
+    </SettingsRoute>
   );
 }
 function SystemMapRoute() {
@@ -77,17 +101,45 @@ function SystemMapRoute() {
     </APlatformLayout>
   );
 }
-function ProcessesRoute() {
+function WorkflowRoute({ title, children }: { title: string; children: ReactNode }) {
+  const { pathname } = useLocation();
   return (
-    <APlatformLayout title="Processes">
-      <ProcessesPage />
+    <APlatformLayout title={title}>
+      <div className="page-stack">
+        <ATabs aria-label="Süreç bölümleri">
+          <Link to="/processes" role="tab" aria-selected={pathname === "/processes"} className={pathname === "/processes" ? "is-active" : undefined}>Süreçler</Link>
+          <Link to="/failed-jobs" role="tab" aria-selected={pathname === "/failed-jobs"} className={pathname === "/failed-jobs" ? "is-active" : undefined}>Başarısız işler</Link>
+        </ATabs>
+        {children}
+      </div>
     </APlatformLayout>
   );
 }
-function ChatRoute() {
+function ProcessesRoute() {
   return (
-    <APlatformLayout title="Chat">
-      <ChatPage />
+    <WorkflowRoute title="Processes">
+      <ProcessesPage />
+    </WorkflowRoute>
+  );
+}
+function FailedJobsRoute() {
+  return (
+    <WorkflowRoute title="Failed jobs">
+      <FailedJobsPage />
+    </WorkflowRoute>
+  );
+}
+function ChatRoute({ title }: { title: string }) {
+  const { pathname } = useLocation();
+  return (
+    <APlatformLayout title={title}>
+      <div className="page-stack page-stack--chat">
+        <ATabs aria-label="Sohbet bölümleri">
+          <Link to="/chat" role="tab" aria-selected={pathname === "/chat"} className={pathname === "/chat" ? "is-active" : undefined}>Sohbet</Link>
+          <Link to="/conversations" role="tab" aria-selected={pathname === "/conversations"} className={pathname === "/conversations" ? "is-active" : undefined}>Sohbet geçmişi</Link>
+        </ATabs>
+        <ChatPage />
+      </div>
     </APlatformLayout>
   );
 }
@@ -110,17 +162,17 @@ export function App() {
             : path === "/upload" ? <ContentRoute title={title}><UploadPage /></ContentRoute>
             : path === "/graph" ? <ContentRoute title={title}><GraphPage /></ContentRoute>
             : path === "/health" ? <ContentRoute title={title}><HealthPage /></ContentRoute>
-            : path === "/failed-jobs" ? <ContentRoute title={title}><FailedJobsPage /></ContentRoute>
-            : path === "/chat" || path === "/conversations" ? (
-              <ChatRoute />
-            ) : path === "/processes" ? (
+            : path === "/failed-jobs" ? <FailedJobsRoute />
+            : path === "/chat" ? <ChatRoute title="Chat" />
+            : path === "/conversations" ? <Navigate to="/chat" replace />
+            : path === "/processes" ? (
               <ProcessesRoute />
             ) : path === "/settings/appearance" ? (
               <AppearanceRoute />
             ) : path === "/settings/providers" ? (
               <ProviderRoute />
             ) : path === "/settings" ? (
-              <SettingsRoute />
+              <OperationalSettingsRoute />
             ) : path === "/system-map" ? (
               <SystemMapRoute />
             ) : <Navigate to="/" replace />

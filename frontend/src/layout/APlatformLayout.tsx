@@ -9,14 +9,16 @@ type NavItem = { to: string; label: string; icon: IconName };
 const navigation: NavItem[] = [
   { to: "/", label: "Dashboard", icon: "dashboard" },
   { to: "/workspaces", label: "Çalışma Alanları", icon: "workspaces" },
-  { to: "/documents", label: "Belgeler", icon: "documents" },
   { to: "/upload", label: "Yükle", icon: "upload" },
-  { to: "/chat", label: "Sohbet", icon: "chat" },
-  { to: "/processes", label: "Süreçler", icon: "jobs" },
+  { to: "/documents", label: "Belgeler", icon: "documents" },
   { to: "/graph", label: "Graf", icon: "graph" },
-  { to: "/system-map", label: "Sistem Haritası", icon: "system" },
+  { to: "/chat", label: "Sohbet", icon: "chat" },
 ];
-const bottomNavigation: NavItem[] = [{ to: "/settings", label: "Ayarlar", icon: "settings" }];
+const bottomNavigation: NavItem[] = [
+  { to: "/processes", label: "Süreçler", icon: "jobs" },
+  { to: "/system-map", label: "Sitemap", icon: "system" },
+  { to: "/settings", label: "Ayarlar", icon: "settings" },
+];
 
 export function APlatformLayout({ title, children }: { title: string; children: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
@@ -42,8 +44,8 @@ export function APlatformLayout({ title, children }: { title: string; children: 
   }, [setJobs]);
 
   const renderNavigation = (items: NavItem[]) => items.map((item) => (
-    <NavLink key={item.to} to={item.to} className={location.pathname === item.to ? "active" : undefined}
-      aria-current={location.pathname === item.to ? "page" : undefined} title={!expanded ? item.label : undefined}
+    <NavLink key={item.to} to={item.to} className={location.pathname === item.to || (item.to !== "/" && location.pathname.startsWith(`${item.to}/`)) ? "active" : undefined}
+      aria-current={location.pathname === item.to || (item.to !== "/" && location.pathname.startsWith(`${item.to}/`)) ? "page" : undefined} title={!expanded ? item.label : undefined}
       onClick={() => setMobileOpen(false)}>
       <AIcon name={item.icon} size={18} />
       {!expanded ? null : <span>{item.label}</span>}
@@ -65,7 +67,7 @@ export function APlatformLayout({ title, children }: { title: string; children: 
         <strong className="platform-header__brand">Cortex</strong>
         <div className="platform-header__page"><strong>{title}</strong><small>{location.pathname}</small></div>
         <AButton className="cortex-active-jobs" text onClick={() => window.location.assign("/processes")} aria-label="Aktif işler" label={jobs.length ? `${jobs.length} aktif iş` : "İş yok"} />
-        <span title="Sistem sağlıklı" className="flex items-center gap-1 text-sm text-green-600"><AIcon name="health" size={17} /> Sağlıklı</span>
+        <span title="Sistem sağlıklı" className="cortex-system-health" data-state="healthy"><AIcon name="health" size={17} /> Sağlıklı</span>
         {jobs.length > 0 && <AProgress value={jobs[0].progress ?? undefined} showValue={false} style={{ width: 96, height: 7 }} />}
       </header>
       <div className={`app-shell${expanded ? "" : " is-sidebar-collapsed"}${mobileOpen ? " is-sidebar-mobile-open" : ""}`}>

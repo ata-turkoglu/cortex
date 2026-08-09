@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiClient, type WorkflowRun } from "../api/client";
-import { AButton, ACard, ADialog, AInfo } from "../components/ui";
+import { AButton, ACard, ADialog, AInfoPanel } from "../components/ui";
 
 const recoverableStates = new Set(["failed", "interrupted"]);
 
@@ -26,7 +26,7 @@ export function FailedJobsPage() {
   return <div className="page-stack">
     <section className="page-hero compact"><div><p className="eyebrow">Kurtarma merkezi</p><h1>Başarısız işler</h1><p>Yalnızca güvenli checkpoint’ten sürdürülebilen işler listelenir.</p></div><AButton label="Yenile" severity="secondary" onClick={() => void refresh()} /></section>
     {error && <p role="alert">{error}</p>}
-    <ACard title="Kurtarılabilir işler">{runs.length ? <div className="document-table">{runs.map((run) => <div key={run.id}><div><strong>{run.job_type}</strong><span>{run.recovery_state || run.state} · {new Date(run.updated_at).toLocaleString("tr-TR")}</span></div><div className="flex gap-2"><AButton label="Ayrıntı" text onClick={() => void showDetails(run)} /><AButton label="Yeniden dene" onClick={() => void apiClient.retryWorkflow(run.id).then(refresh)} /></div></div>)}</div> : <AInfo title="Kurtarma gerektiren iş yok">Başarısız veya kesintiye uğramış süreç bulunmuyor.</AInfo>}</ACard>
+    <ACard title="Kurtarılabilir işler">{runs.length ? <div className="document-table">{runs.map((run) => <div key={run.id}><div><strong>{run.job_type}</strong><span>{run.recovery_state || run.state} · {new Date(run.updated_at).toLocaleString("tr-TR")}</span></div><div className="flex gap-2"><AButton label="Ayrıntı" text onClick={() => void showDetails(run)} /><AButton label="Yeniden dene" onClick={() => void apiClient.retryWorkflow(run.id).then(refresh)} /></div></div>)}</div> : <AInfoPanel title="Kurtarma gerektiren iş yok">Başarısız veya kesintiye uğramış süreç bulunmuyor.</AInfoPanel>}</ACard>
     <ADialog header="Teknik süreç ayrıntıları" visible={Boolean(selected)} onHide={() => setSelected(null)}><pre className="document-preview">{details}</pre></ADialog>
   </div>;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiClient } from "../api/client";
-import { AButton, ACard, AInfo, AInput, ALabel } from "../components/ui";
+import { AButton, ACard, AInfoPanel, AInput, ALabel } from "../components/ui";
 import { GraphRAGConfirmationDialog } from "./GraphRAGConfirmationDialog";
 export function CostControls() {
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -21,10 +21,10 @@ export function CostControls() {
   );
   return (
     <ACard title="Cost controls">
-      <AInfo title="Budget warning">
+      <AInfoPanel title="Budget warning">
         Queued cost-incurring work pauses at the daily soft budget. GraphRAG
         stays manual unless explicitly configured.
-      </AInfo>
+      </AInfoPanel>
       <div className="mt-4 grid max-w-xl grid-cols-2 gap-3">
         {field("daily_soft_budget_usd", "Daily soft budget (USD)")}
         {field("monthly_soft_budget_usd", "Monthly soft budget (USD)")}

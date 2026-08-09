@@ -34,11 +34,8 @@ export function ASystemHealth({ healthy = true }: { healthy?: boolean }) {
   return (
     <span
       title={healthy ? "System healthy" : "System requires attention"}
-      className={
-        healthy
-          ? "flex items-center gap-1 text-sm text-green-600"
-          : "flex items-center gap-1 text-sm text-red-600"
-      }
+      className="cortex-system-health"
+      data-state={healthy ? "healthy" : "attention"}
     >
       <AIcon name="health" size={17} />
       {healthy ? "Healthy" : "Attention"}
