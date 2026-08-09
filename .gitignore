@@ -32,6 +32,7 @@ backend/.mypy_cache/
 # Runtime data: retain empty directories with .gitkeep only
 data/*
 !data/.gitkeep
+backend/data/
 data/uploads/
 data/normalized/
 data/indexes/
@@ -44,7 +45,8 @@ data/sqlite/
 # Local configuration and IDE files
 .env
 .env.*
-infrastructure/.env
+!.env.example
+/notes
 .vscode/
 .idea/
 *.log
