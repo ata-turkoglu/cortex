@@ -58,7 +58,20 @@ async def mirror_graph_outputs(
         raise ValueError("GraphRAG mirror workspace does not match canonical graph workspace")
     mirrored: dict[str, int] = {}
     for resource_type in sorted(VECTOR_RESOURCE_TYPES):
-        artifacts = graph.load_artifacts(resource_type)
+        artifacts = [
+            GraphArtifact(
+                artifact.artifact_id,
+                artifact.resource_type,
+                artifact.text,
+                {
+                    **artifact.attributes,
+                    "logical_document_ids": ",".join(
+                        graph.logical_document_ids_for(artifact)
+                    ),
+                },
+            )
+            for artifact in graph.load_artifacts(resource_type)
+        ]
         if not artifacts:
             mirrored[resource_type] = 0
             continue

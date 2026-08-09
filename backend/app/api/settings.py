@@ -1,6 +1,9 @@
+import asyncio
 import json
+import re
 from datetime import UTC, datetime
 from typing import Annotated, Literal
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
-from ..core.secrets import SecretStore
+from ..core.secrets import SecretStore, SecretStoreUnavailable
 from ..core.settings_service import PERSISTED_FIELDS, load_runtime_settings, save_settings
 from ..models import ProviderConnection, SetupState, WorkflowRun
 from ..providers.anthropic import AnthropicProvider
@@ -20,6 +23,45 @@ from ..providers.openai import OpenAIProvider
 from .workspaces import get_session
 
 router = APIRouter(tags=["settings"])
+model_pull_operations: dict[str, dict[str, object]] = {}
+FALLBACK_OLLAMA_CATALOG = [
+    {
+        "name": "qwen3:4b",
+        "description": "Balanced local language model for general tasks.",
+        "capabilities": ["chat"],
+        "sizes": ["4B"],
+    },
+    {
+        "name": "qwen3:8b",
+        "description": "Higher-quality local language model for complex tasks.",
+        "capabilities": ["chat"],
+        "sizes": ["8B"],
+    },
+    {
+        "name": "llama3.2:3b",
+        "description": "Compact general-purpose local language model.",
+        "capabilities": ["chat"],
+        "sizes": ["3B"],
+    },
+    {
+        "name": "gemma3:4b",
+        "description": "Multimodal-capable local language model.",
+        "capabilities": ["chat"],
+        "sizes": ["4B"],
+    },
+    {
+        "name": "qwen3-embedding:0.6b",
+        "description": "Embedding model for semantic retrieval.",
+        "capabilities": ["embedding"],
+        "sizes": ["0.6B"],
+    },
+    {
+        "name": "bge-m3",
+        "description": "Multilingual embedding model for retrieval.",
+        "capabilities": ["embedding"],
+        "sizes": [],
+    },
+]
 
 
 Provider = Literal["openai", "anthropic", "ollama"]
@@ -45,6 +87,28 @@ class SettingsUpdate(BaseModel):
     router_multi_route_threshold: float | None = Field(default=None, ge=0, le=1)
     graphrag_pending_document_threshold: int | None = Field(default=None, ge=1)
     graphrag_update_mode: Literal["manual", "threshold"] | None = None
+    graphrag_provider: Literal["openai", "ollama"] | None = None
+    graphrag_model: str | None = Field(default=None, min_length=1)
+    graphrag_extraction_provider: Literal["openai", "ollama"] | None = None
+    graphrag_extraction_model: str | None = Field(default=None, min_length=1)
+    graphrag_claims_provider: Literal["openai", "ollama"] | None = None
+    graphrag_claims_model: str | None = Field(default=None, min_length=1)
+    graphrag_claims_enabled: bool | None = None
+    graphrag_community_provider: Literal["openai", "ollama"] | None = None
+    graphrag_community_model: str | None = Field(default=None, min_length=1)
+    graphrag_local_provider: Literal["openai", "ollama"] | None = None
+    graphrag_local_model: str | None = Field(default=None, min_length=1)
+    graphrag_global_provider: Literal["openai", "ollama"] | None = None
+    graphrag_global_model: str | None = Field(default=None, min_length=1)
+    graphrag_drift_provider: Literal["openai", "ollama"] | None = None
+    graphrag_drift_model: str | None = Field(default=None, min_length=1)
+    graphrag_drift_n_depth: int | None = Field(default=None, ge=1, le=5)
+    graphrag_drift_k_followups: int | None = Field(default=None, ge=1, le=20)
+    graphrag_drift_primer_folds: int | None = Field(default=None, ge=1, le=10)
+    graphrag_drift_concurrency: int | None = Field(default=None, ge=1, le=16)
+    graphrag_drift_max_llm_calls: int | None = Field(default=None, ge=1, le=100)
+    graphrag_query_fallback_to_hybrid: bool | None = None
+    graphrag_query_wait_seconds: int | None = Field(default=None, ge=1, le=60)
     workflow_ingestion_concurrency: int | None = Field(default=None, ge=1)
     workflow_dense_reindex_concurrency: int | None = Field(default=None, ge=1)
     workflow_graphrag_reindex_concurrency: int | None = Field(default=None, ge=1)
@@ -67,6 +131,8 @@ class SettingsUpdate(BaseModel):
     router_model: str | None = None
     summary_provider: Provider | None = None
     summary_model: str | None = None
+    query_expansion_provider: Provider | None = None
+    query_expansion_model: str | None = None
     daily_soft_budget_usd: float | None = Field(default=None, ge=0)
     monthly_soft_budget_usd: float | None = Field(default=None, ge=0)
     budget_warning_percent: int | None = Field(default=None, ge=1, le=100)
@@ -90,6 +156,16 @@ class SetupCompleteRequest(BaseModel):
     data_path: str | None = None
 
 
+class OllamaModelPullRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def valid_model_name(self):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*", self.model):
+            raise ValueError("invalid Ollama model name")
+        return self
+
+
 async def _capabilities() -> dict[str, list[object]]:
     try:
         ollama = await OllamaProvider().list_models()
@@ -104,7 +180,23 @@ async def _capabilities() -> dict[str, list[object]]:
 
 async def _validate_assignments(patch: dict[str, object]) -> None:
     capabilities = await _capabilities()
-    for layer in ("embedding", "metadata", "answer", "router", "summary"):
+    for layer in (
+        "embedding",
+        "metadata",
+        "answer",
+        "router",
+        "summary",
+        "query_expansion",
+        "graphrag",
+        "graphrag_extraction",
+        "graphrag_claims",
+        "graphrag_community",
+        "graphrag_local",
+        "graphrag_global",
+        "graphrag_drift",
+    ):
+        if layer == "graphrag_claims" and patch.get("graphrag_claims_enabled") is False:
+            continue
         provider, model = patch.get(f"{layer}_provider"), patch.get(f"{layer}_model")
         if not provider and not model:
             continue
@@ -197,7 +289,10 @@ async def validate_provider(
     session: Annotated[Session, Depends(get_session)],
 ):
     if payload.api_key:
-        SecretStore().set(f"{provider}_api_key", payload.api_key)
+        try:
+            SecretStore().set(f"{provider}_api_key", payload.api_key)
+        except SecretStoreUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
     if provider == "ollama":
         try:
             await OllamaProvider().list_models()
@@ -316,3 +411,108 @@ async def ollama_models():
         "missing_default_command": "ollama pull qwen3-embedding:0.6b",
         "warning": "Small local chat models are experimental and not production defaults.",
     }
+
+
+def _catalog_text(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", value)).strip()
+
+
+def _catalog_values(card: str, attribute: str) -> list[str]:
+    return [
+        _catalog_text(match)
+        for match in re.findall(rf"<span {attribute}[^>]*>([\s\S]*?)</span>", card)
+    ]
+
+
+def _catalog_from_html(html: str, kind: str) -> list[dict[str, object]]:
+    models = []
+    for card in re.findall(r"<li x-test-model[\s\S]*?</li>", html):
+        match = re.search(r'href="/library/([^"\'#?/]+)', card)
+        if not match:
+            continue
+        description = re.search(r'<p class="max-w-lg[^>]*>([\s\S]*?)</p>', card)
+        models.append(
+            {
+                "name": match.group(1),
+                "description": (
+                    _catalog_text(description.group(1))
+                    if description
+                    else "Ollama Library model"
+                ),
+                "capabilities": _catalog_values(card, "x-test-capability"),
+                "sizes": _catalog_values(card, "x-test-size"),
+                "kind": kind,
+            }
+        )
+    return models
+
+
+@router.get("/settings/ollama/catalog")
+async def ollama_catalog():
+    """Discover selectable models from the official Ollama library; retain local fallbacks."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            popular, embeddings = await asyncio.gather(
+                client.get("https://ollama.com/library?sort=popular"),
+                client.get("https://ollama.com/library?q=embed"),
+            )
+        popular.raise_for_status()
+        embeddings.raise_for_status()
+        discovered = _catalog_from_html(popular.text, "llm") + _catalog_from_html(
+            embeddings.text, "embedding"
+        )
+        by_name = {str(item["name"]): item for item in discovered}
+        for item in FALLBACK_OLLAMA_CATALOG:
+            by_name.setdefault(str(item["name"]), item)
+        return {"models": sorted(by_name.values(), key=lambda item: str(item["name"]))}
+    except httpx.HTTPError:
+        return {"models": FALLBACK_OLLAMA_CATALOG}
+
+
+async def _pull_ollama_model(operation_id: str, model: str) -> None:
+    """Track a user-started Ollama pull without holding a database transaction open."""
+    operation = model_pull_operations[operation_id]
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "POST",
+                get_settings().ollama_base_url + "/api/pull",
+                json={"name": model, "stream": True},
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    update = json.loads(line)
+                    if error := update.get("error"):
+                        raise RuntimeError(str(error))
+                    operation["completed"] = int(update.get("completed") or operation["completed"])
+                    operation["total"] = int(update.get("total") or operation["total"])
+        operation["status"] = "completed"
+    except (httpx.HTTPError, RuntimeError, json.JSONDecodeError) as exc:
+        operation["status"] = "failed"
+        operation["error"] = str(exc)
+
+
+@router.post("/settings/ollama/models/pull", status_code=202)
+async def pull_ollama_model(payload: OllamaModelPullRequest):
+    model = payload.model.strip()
+    operation_id = str(uuid4())
+    model_pull_operations[operation_id] = {
+        "operation_id": operation_id,
+        "model": model,
+        "status": "running",
+        "completed": 0,
+        "total": 0,
+        "error": None,
+    }
+    asyncio.create_task(_pull_ollama_model(operation_id, model))
+    return model_pull_operations[operation_id]
+
+
+@router.get("/settings/ollama/models/pull/{operation_id}")
+def ollama_model_pull_status(operation_id: str):
+    operation = model_pull_operations.get(operation_id)
+    if not operation:
+        raise HTTPException(404, "Ollama model download was not found")
+    return operation

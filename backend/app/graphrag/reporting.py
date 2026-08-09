@@ -14,13 +14,17 @@ def record_stage_usage(
     workspace_id: str,
     *,
     stage: str,
-    input_tokens: int,
-    output_tokens: int,
-    estimated_cost_usd: float,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    estimated_cost_usd: float | None = None,
     provider: str | None = None,
     model: str | None = None,
+    request_count: int | None = None,
+    duration_ms: int | None = None,
+    query_run_id: str | None = None,
 ) -> GraphRagStageReport:
-    if min(input_tokens, output_tokens, estimated_cost_usd) < 0:
+    values = (input_tokens, output_tokens, estimated_cost_usd, request_count, duration_ms)
+    if any(value is not None and value < 0 for value in values):
         raise ValueError("GraphRAG usage values cannot be negative")
     report = GraphRagStageReport(
         id=str(uuid4()),
@@ -31,6 +35,9 @@ def record_stage_usage(
         estimated_cost_usd=estimated_cost_usd,
         provider=provider,
         model=model,
+        request_count=request_count,
+        duration_ms=duration_ms,
+        query_run_id=query_run_id,
         created_at=datetime.now(UTC),
     )
     session.add(report)
@@ -44,4 +51,4 @@ def stage_cost_total(session: Session, workspace_id: str, stage: str) -> float:
             GraphRagStageReport.stage == stage,
         )
     )
-    return sum(report.estimated_cost_usd for report in reports)
+    return sum(report.estimated_cost_usd or 0.0 for report in reports)

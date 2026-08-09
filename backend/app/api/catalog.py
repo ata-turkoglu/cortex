@@ -6,7 +6,15 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Chunk, Document, DocumentVersion, GraphRagState, Workspace, WorkspaceIndexState
+from ..models import (
+    Chunk,
+    Document,
+    DocumentVersion,
+    GraphRagState,
+    LogicalDocument,
+    Workspace,
+    WorkspaceIndexState,
+)
 from .workspaces import get_session, lookup
 
 router = APIRouter(tags=["catalog"])
@@ -163,6 +171,18 @@ def document_detail(workspace_id: str, document_id: str, session: Session = Depe
             content = Path(version.normalized_path).read_text(encoding="utf-8")
         except OSError:
             content = None
+    if content is None and version:
+        logical_contents = session.scalars(
+            select(LogicalDocument.normalized_content)
+            .where(
+                LogicalDocument.workspace_id == workspace_id,
+                LogicalDocument.document_version_id == version.id,
+                LogicalDocument.deleted_at.is_(None),
+            )
+            .order_by(LogicalDocument.ordinal)
+        ).all()
+        if logical_contents:
+            content = "\n\n".join(logical_contents)
     return DocumentDetail(
         **document_read(document, version).model_dump(),
         chunk_count=count,

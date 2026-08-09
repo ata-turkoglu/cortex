@@ -48,6 +48,46 @@ def test_duplicate_source_hash_is_isolated_by_workspace():
     assert session.query(DocumentVersion).count() == 2
 
 
+def test_soft_deleted_source_hash_can_be_reuploaded_in_the_same_workspace():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    now = datetime.now(UTC)
+    workspace = Workspace(
+        id=str(uuid4()),
+        slug="reupload",
+        name="Reupload",
+        state="active",
+        created_at=now,
+        updated_at=now,
+    )
+    deleted_document = Document(
+        id=str(uuid4()),
+        workspace_id=workspace.id,
+        title="old.txt",
+        created_at=now,
+        updated_at=now,
+        deleted_at=now,
+    )
+    deleted_version = DocumentVersion(
+        id=str(uuid4()), workspace_id=workspace.id, document_id=deleted_document.id,
+        version_number=1, source_hash="same-content", source_path="old", source_filename="old.txt",
+        size_bytes=1, state="deleted", created_at=now, deleted_at=now,
+    )
+    active_document = Document(
+        id=str(uuid4()), workspace_id=workspace.id, title="new.txt", created_at=now, updated_at=now
+    )
+    active_version = DocumentVersion(
+        id=str(uuid4()), workspace_id=workspace.id, document_id=active_document.id,
+        version_number=1, source_hash="same-content", source_path="new", source_filename="new.txt",
+        size_bytes=1, state="uploaded", created_at=now,
+    )
+    session.add_all([workspace, deleted_document, deleted_version, active_document, active_version])
+    session.commit()
+
+    assert session.query(DocumentVersion).count() == 2
+
+
 def test_changed_content_creates_a_new_version_for_the_same_document():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

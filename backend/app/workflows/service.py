@@ -14,6 +14,7 @@ from ..models import (
     Chunk,
     Document,
     DocumentVersion,
+    LogicalDocument,
     WorkflowDefinition,
     WorkflowEvent,
     WorkflowRun,
@@ -25,9 +26,9 @@ from ..models import (
 DEFINITIONS = {
     "ingestion": (
         "document-ingestion",
-        "2",
+        "3",
         "Document ingestion",
-        ("parse", "normalize", "chunk", "index"),
+        ("parse", "normalize", "logical_documents", "chunk", "index"),
     ),
     "dense_reindex": (
         "dense-reindex",
@@ -223,6 +224,10 @@ def apply_deletion_cleanup(session: Session, run: WorkflowRun) -> None:
             select(DocumentVersion).where(DocumentVersion.document_id == document.id)
         ):
             version.deleted_at = version.deleted_at or timestamp
+        for logical in session.scalars(
+            select(LogicalDocument).where(LogicalDocument.source_document_id == document.id)
+        ):
+            logical.deleted_at = logical.deleted_at or timestamp
         for chunk in session.scalars(select(Chunk).where(Chunk.document_id == document.id)):
             chunk.deleted_at = chunk.deleted_at or timestamp
     if run.job_type == "workspace_delete":
@@ -243,6 +248,38 @@ def apply_reconciliation(session: Session, run: WorkflowRun) -> None:
         requested_by=payload.get("requested_by", "periodic"),
         scope=payload.get("scope", "workspace"),
     )
+
+
+def backfill_missing_steps(session: Session, run: WorkflowRun) -> list[WorkflowStepRun]:
+    """Repair queued runs created before step rows became mandatory."""
+    steps = session.scalars(
+        select(WorkflowStepRun)
+        .where(WorkflowStepRun.workflow_run_id == run.id)
+        .order_by(WorkflowStepRun.created_at)
+    ).all()
+    if steps or run.job_type not in DEFINITIONS:
+        return steps
+    timestamp = now()
+    session.add_all(
+        WorkflowStepRun(
+            id=str(uuid4()),
+            workspace_id=run.workspace_id,
+            workflow_run_id=run.id,
+            step_name=step_name,
+            state="pending",
+            retry_count=0,
+            checkpoint_json=None,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        for step_name in DEFINITIONS[run.job_type][3]
+    )
+    session.flush()
+    return session.scalars(
+        select(WorkflowStepRun)
+        .where(WorkflowStepRun.workflow_run_id == run.id)
+        .order_by(WorkflowStepRun.created_at)
+    ).all()
 
 
 def execute_run(session: Session, run_id: str) -> None:
@@ -274,6 +311,19 @@ def execute_run(session: Session, run_id: str) -> None:
                 WorkspaceLock.workspace_id == run.workspace_id, WorkspaceLock.lock_type == lock_type
             )
         )
+        if held:
+            owner = session.get(WorkflowRun, held.workflow_run_id)
+            if owner is None or owner.state in {
+                "completed",
+                "failed",
+                "cancelled",
+                "interrupted",
+            }:
+                # A process may stop after acquiring its workspace lock. Its
+                # terminal/recovered run can no longer safely own that lock.
+                session.delete(held)
+                session.flush()
+                held = None
         if held and held.workflow_run_id != run.id:
             event(session, run, "blocked", lock_type=lock_type)
             return
@@ -290,11 +340,7 @@ def execute_run(session: Session, run_id: str) -> None:
     run.state, run.updated_at = "running", now()
     event(session, run, "started")
     try:
-        steps = session.scalars(
-            select(WorkflowStepRun)
-            .where(WorkflowStepRun.workflow_run_id == run.id)
-            .order_by(WorkflowStepRun.created_at)
-        ).all()
+        steps = backfill_missing_steps(session, run)
         for step in steps:
             if step.state == "completed":
                 continue

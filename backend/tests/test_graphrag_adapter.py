@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from app.graphrag.adapter import GraphRAGAdapter, GraphRoute
 from app.graphrag.input import GraphRAGInputMaterializer
 from app.graphrag.llamaindex import GraphRAGQueryEngine
@@ -74,6 +76,64 @@ def test_graph_adapter_delegates_index_and_distinct_routes_to_upstream_runner(tm
     assert local.evidence[0].content == "local: Ankara"
     assert global_result.evidence[0].content == "global: Türkiye"
     assert drift.evidence[0].content == "drift: Neden?"
+
+
+def test_runner_keeps_the_actionable_tail_of_a_graphrag_failure(monkeypatch, tmp_path):
+    from app.graphrag.adapter import GraphRAGExecutionError, MicrosoftGraphRAGRunner
+
+    class Completed:
+        returncode = 1
+        stdout = ""
+        stderr = "traceback start\n" + ("x" * 2000) + "\nValueError: actionable cause"
+
+    monkeypatch.setattr("app.graphrag.adapter.SecretStore.get", lambda *_: "configured")
+    monkeypatch.setattr(
+        "app.graphrag.adapter.subprocess.run", lambda *_args, **_kwargs: Completed()
+    )
+    with pytest.raises(GraphRAGExecutionError, match="ValueError: actionable cause") as error:
+        MicrosoftGraphRAGRunner()._run(["index"], tmp_path)
+    assert "traceback start" not in str(error.value)
+
+
+def test_graph_adapter_updates_the_generated_model_placeholder_without_storing_secrets(tmp_path):
+    root = tmp_path / "workspace" / "graphrag"
+    root.mkdir(parents=True)
+    config = root / "settings.yaml"
+    config.write_text(
+        "model: gpt-4-turbo-preview\n"
+        "# encoding_model: cl100k_base # automatically set by tiktoken if left undefined\n",
+        encoding="utf-8",
+    )
+
+    class Runner:
+        def index(self, *_):
+            pass
+
+    adapter = GraphRAGAdapter("workspace-a", root, config_path=config, runner=Runner())
+    adapter.index()
+
+    assert "gpt-4-turbo-preview" not in config.read_text(encoding="utf-8")
+    assert "encoding_model: cl100k_base" in config.read_text(encoding="utf-8")
+
+
+def test_graph_adapter_sets_a_concrete_chat_token_limit(tmp_path):
+    root = tmp_path / "workspace" / "graphrag"
+    root.mkdir(parents=True)
+    config = root / "settings.yaml"
+    config.write_text(
+        "models:\n"
+        "  default_chat_model:\n"
+        "    model_supports_json: true # recommended if this is available for your model.\n"
+        "  default_embedding_model:\n",
+        encoding="utf-8",
+    )
+
+    class Runner:
+        def index(self, *_):
+            pass
+
+    GraphRAGAdapter("workspace-a", root, config_path=config, runner=Runner()).index()
+    assert "max_tokens: 4096" in config.read_text(encoding="utf-8")
 
 
 def test_graph_adapter_reads_native_parquet_outputs_without_rewriting_them(tmp_path):

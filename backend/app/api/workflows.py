@@ -88,13 +88,9 @@ def serialize(session: Session, run: WorkflowRun) -> WorkflowRead:
 
 
 def dispatch(run_id: str) -> None:
-    from ..workers.broker import execute_workflow
+    from ..workers.broker import dispatch_workflow
 
-    try:
-        execute_workflow.send(run_id)
-    except Exception:
-        # State remains queued and can be retried when Redis recovers.
-        pass
+    dispatch_workflow(run_id)
 
 
 @router.get("", response_model=list[WorkflowRead])

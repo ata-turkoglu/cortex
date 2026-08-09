@@ -21,7 +21,11 @@ class ExternalCleanupSnapshot:
 
 def snapshot_external_cleanup(session: Session, run_id: str) -> ExternalCleanupSnapshot | None:
     run = session.get(WorkflowRun, run_id)
-    if not run or run.job_type not in {"document_delete", "workspace_delete"}:
+    if (
+        not run
+        or run.state != "completed"
+        or run.job_type not in {"document_delete", "workspace_delete"}
+    ):
         return None
     versions = session.scalars(
         select(DocumentVersion).where(DocumentVersion.workspace_id == run.workspace_id)

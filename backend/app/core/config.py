@@ -42,6 +42,28 @@ class Settings(BaseSettings):
     graphrag_max_documents_per_run: int = 500
     graphrag_cost_warning_usd: float = 0.0
     graphrag_use_batch_api: bool = False
+    graphrag_provider: Literal["openai", "ollama"] = "openai"
+    graphrag_model: str = "gpt-5.6-luna"
+    graphrag_extraction_provider: Literal["openai", "ollama"] = "openai"
+    graphrag_extraction_model: str = "gpt-4.1-mini"
+    graphrag_claims_provider: Literal["openai", "ollama"] = "openai"
+    graphrag_claims_model: str = "gpt-4.1-mini"
+    graphrag_claims_enabled: bool = False
+    graphrag_community_provider: Literal["openai", "ollama"] = "openai"
+    graphrag_community_model: str = "gpt-4.1-mini"
+    graphrag_local_provider: Literal["openai", "ollama"] = "openai"
+    graphrag_local_model: str = "gpt-4.1"
+    graphrag_global_provider: Literal["openai", "ollama"] = "openai"
+    graphrag_global_model: str = "gpt-4.1"
+    graphrag_drift_provider: Literal["openai", "ollama"] = "openai"
+    graphrag_drift_model: str = "gpt-4.1"
+    graphrag_drift_n_depth: int = Field(default=2, ge=1, le=5)
+    graphrag_drift_k_followups: int = Field(default=5, ge=1, le=20)
+    graphrag_drift_primer_folds: int = Field(default=3, ge=1, le=10)
+    graphrag_drift_concurrency: int = Field(default=4, ge=1, le=16)
+    graphrag_drift_max_llm_calls: int = Field(default=16, ge=1, le=100)
+    graphrag_query_fallback_to_hybrid: bool = False
+    graphrag_query_wait_seconds: int = Field(default=20, ge=1, le=60)
     workflow_ingestion_concurrency: int = 2
     workflow_dense_reindex_concurrency: int = 1
     workflow_graphrag_reindex_concurrency: int = 1
@@ -64,6 +86,8 @@ class Settings(BaseSettings):
     router_model: str = "gpt-5.6-luna"
     summary_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     summary_model: str = "gpt-5.6-luna"
+    query_expansion_provider: Literal["openai", "anthropic", "ollama"] = "openai"
+    query_expansion_model: str = "gpt-5.6-luna"
     query_expansion_enabled: bool = False
     automatic_quality_escalation_enabled: bool = False
     daily_soft_budget_usd: float = 0.0

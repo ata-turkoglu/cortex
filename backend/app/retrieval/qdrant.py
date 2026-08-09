@@ -141,6 +141,11 @@ class WorkspaceQdrantStore:
     def delete_document(self, resource_type: str, document_id: str) -> None:
         from qdrant_client.models import FilterSelector
 
+        collection = COLLECTIONS[resource_type]
+        # An unindexed document has no collection to clean up. Treat this as a
+        # successful no-op so deletion remains idempotent across stores.
+        if not self.client.collection_exists(collection):
+            return
         selector = FilterSelector(
             filter=Filter(
                 must=[
@@ -149,7 +154,7 @@ class WorkspaceQdrantStore:
                 ]
             )
         )
-        self.client.delete(COLLECTIONS[resource_type], points_selector=selector, wait=True)
+        self.client.delete(collection, points_selector=selector, wait=True)
 
     def _require_embedding_configuration(self, resource_type: str) -> None:
         if resource_type == "chunks" and not self.embedding_config_hash:

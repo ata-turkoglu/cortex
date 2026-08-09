@@ -102,6 +102,27 @@ def test_document_deletion_workflow_is_idempotent():
     assert run.state == "completed"
 
 
+def test_interrupted_owner_does_not_leave_a_workspace_delete_lock_stuck():
+    session, workspace_id = session_with_workspace()
+    owner = create_run(session, workspace_id, "document_delete", {"document_id": "old"})
+    owner.state = "interrupted"
+    session.add(
+        WorkspaceLock(
+            id=str(uuid4()),
+            workspace_id=workspace_id,
+            lock_type="delete",
+            workflow_run_id=owner.id,
+            acquired_at=datetime.now(UTC),
+        )
+    )
+    next_run = create_run(session, workspace_id, "document_delete", {"document_id": "new"})
+
+    execute_run(session, next_run.id)
+
+    assert next_run.state == "completed"
+    assert not session.query(WorkspaceLock).all()
+
+
 def test_workflow_error_details_redact_secret_values():
     details = redact_exception(RuntimeError("Authorization=Bearer-secret api_key: sk-secret"))
     assert "Bearer-secret" not in details["summary"]
@@ -138,3 +159,13 @@ def test_failed_deletion_queues_a_durable_repair_workflow():
     )
     assert deletion.state == "failed"
     assert repair.state == "queued"
+
+
+def test_workflow_dispatch_keeps_the_durable_run_queued_when_redis_is_unavailable(monkeypatch):
+    from app.workers.broker import dispatch_workflow, execute_workflow
+
+    def unavailable(_run_id: str):
+        raise ConnectionError("redis unavailable")
+
+    monkeypatch.setattr(execute_workflow, "send", unavailable)
+    assert dispatch_workflow("durable-run-id") is False

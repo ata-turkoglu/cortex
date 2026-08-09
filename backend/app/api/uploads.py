@@ -12,10 +12,18 @@ from ..core.uploads import UploadValidationError, store_upload
 from ..core.workspaces import WorkspaceContext, WorkspaceNotFoundError
 from ..ingestion.chunking import chunk_markdown
 from ..ingestion.folders import resolve_folder_path
+from ..ingestion.logical_documents import detect_logical_documents
 from ..ingestion.metadata import metadata_extraction_assignment
 from ..ingestion.parsers import DocumentParseError, parse_to_markdown
 from ..ingestion.workflow import create_ingestion_run
-from ..models import Chunk, ChunkRelationship, Document, DocumentMetadata, DocumentVersion
+from ..models import (
+    Chunk,
+    ChunkRelationship,
+    Document,
+    DocumentMetadata,
+    DocumentVersion,
+    LogicalDocument,
+)
 from .workspaces import get_session
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/uploads", tags=["uploads"])
@@ -64,9 +72,13 @@ async def upload_files(
         try:
             source_hash = hashlib.sha256(content).hexdigest()
             duplicate = session.scalar(
-                select(DocumentVersion.id).where(
+                select(DocumentVersion.id)
+                .join(Document, Document.id == DocumentVersion.document_id)
+                .where(
                     DocumentVersion.workspace_id == workspace_id,
                     DocumentVersion.source_hash == source_hash,
+                    DocumentVersion.deleted_at.is_(None),
+                    Document.deleted_at.is_(None),
                 )
             )
             if duplicate:
@@ -82,6 +94,9 @@ async def upload_files(
                 settings.upload_max_bytes,
             )
             parsed = parse_to_markdown(stored.storage_path, stored.original_filename)
+            logical_drafts = detect_logical_documents(
+                parsed, stored.original_filename, stored.media_type
+            )
             normalized_root.mkdir(parents=True, exist_ok=True)
             normalized_path = normalized_root / f"{uuid4().hex}.md"
             normalized_path.write_text(parsed.markdown, encoding="utf-8", newline="\n")
@@ -134,6 +149,10 @@ async def upload_files(
         )
         document.active_version_id = version.id
         session.add(version)
+        # Document metadata, chunks, and workflow rows reference the document/version
+        # rows.  Flush their parents explicitly because this session disables autoflush
+        # and SQLite enforces foreign keys during each INSERT.
+        session.flush()
         metadata_provider, metadata_model = metadata_extraction_assignment()
         for key, value in {
             "filename": stored.original_filename,
@@ -159,23 +178,64 @@ async def upload_files(
                 )
             )
         chunk_rows = []
-        for draft in chunk_markdown(
-            parsed.markdown, settings.chunk_token_limit, settings.chunk_overlap_tokens
-        ):
-            chunk = Chunk(
+        logical_rows = []
+        chunk_ordinal = 0
+        for logical_draft in logical_drafts:
+            logical = LogicalDocument(
                 id=str(uuid4()),
                 workspace_id=workspace_id,
-                document_id=document.id,
+                source_document_id=document.id,
                 document_version_id=version.id,
-                ordinal=draft.ordinal,
-                content=draft.content,
-                content_hash=hashlib.sha256(draft.content.encode()).hexdigest(),
-                metadata_json=json.dumps({"heading": draft.heading}, ensure_ascii=False),
+                ordinal=logical_draft.ordinal,
+                document_code=logical_draft.document_code,
+                title=logical_draft.title,
+                document_type=logical_draft.document_type,
+                source_original=logical_draft.source_original,
+                page_start=logical_draft.page_start,
+                page_end=logical_draft.page_end,
+                normalized_content=logical_draft.markdown,
                 created_at=now,
             )
-            chunk_rows.append(chunk)
+            session.add(logical)
+            session.flush()
+            logical_rows.append(logical)
+            for draft in chunk_markdown(
+                logical_draft.markdown,
+                settings.chunk_token_limit,
+                settings.chunk_overlap_tokens,
+            ):
+                chunk = Chunk(
+                    id=str(uuid4()),
+                    workspace_id=workspace_id,
+                    document_id=document.id,
+                    document_version_id=version.id,
+                    logical_document_id=logical.id,
+                    ordinal=chunk_ordinal,
+                    content=draft.content,
+                    content_hash=hashlib.sha256(draft.content.encode()).hexdigest(),
+                    metadata_json=json.dumps(
+                        {
+                            "document_id": logical.id,
+                            "source_document_id": document.id,
+                            "document_code": logical.document_code,
+                            "title": logical.title,
+                            "page": logical.page_start or "",
+                            "page_start": logical.page_start or "",
+                            "page_end": logical.page_end or "",
+                            "source_original": logical.source_original,
+                            "document_type": logical.document_type,
+                            "heading": draft.heading,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_at=now,
+                )
+                chunk_rows.append(chunk)
+                chunk_ordinal += 1
         session.add_all(chunk_rows)
         for previous, following in zip(chunk_rows, chunk_rows[1:], strict=False):
+            if previous.logical_document_id != following.logical_document_id:
+                continue
             session.add(
                 ChunkRelationship(
                     id=str(uuid4()),
@@ -196,11 +256,25 @@ async def upload_files(
                 "document_version_id": version.id,
                 "version_number": version.version_number,
                 "chunk_count": len(chunk_rows),
+                "logical_document_count": len(logical_rows),
+                "logical_documents": [
+                    {
+                        "document_id": item.id,
+                        "document_code": item.document_code,
+                        "title": item.title,
+                        "document_type": item.document_type,
+                        "source_original": item.source_original,
+                        "page_start": item.page_start,
+                        "page_end": item.page_end,
+                    }
+                    for item in logical_rows
+                ],
                 "workflow_run_id": workflow_run.id,
             }
         )
-    session.flush()
-    # Send only after rows are flushed; Redis may be unavailable during local tests.
+    # Commit before dispatching: the worker uses a separate SQLite connection and must
+    # be able to read the workflow run and its durable step checkpoints immediately.
+    session.commit()
     from ..workers.broker import execute_workflow
 
     for item in uploaded:

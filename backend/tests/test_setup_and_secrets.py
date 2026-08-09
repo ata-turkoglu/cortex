@@ -57,3 +57,31 @@ def test_secret_store_get_falls_back_when_no_os_keyring_is_available(monkeypatch
         lambda *_: (_ for _ in ()).throw(secrets.KeyringError("unavailable")),
     )
     assert SecretStore().get("openai_api_key") is None
+
+
+def test_secret_store_set_falls_back_when_no_os_keyring_is_available(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        secrets.keyring,
+        "set_password",
+        lambda *_: (_ for _ in ()).throw(secrets.KeyringError("unavailable")),
+    )
+    monkeypatch.setenv("CORTEX_SECRET_STORE_PATH", str(tmp_path))
+    SecretStore().set("openai_api_key", "sk-secret")
+    assert SecretStore().get("openai_api_key") == "sk-secret"
+
+
+def test_secret_store_persists_encrypted_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        secrets.keyring,
+        "set_password",
+        lambda *_: (_ for _ in ()).throw(secrets.KeyringError("unavailable")),
+    )
+    monkeypatch.setattr(
+        secrets.keyring,
+        "get_password",
+        lambda *_: (_ for _ in ()).throw(secrets.KeyringError("unavailable")),
+    )
+    monkeypatch.setenv("CORTEX_SECRET_STORE_PATH", str(tmp_path))
+    SecretStore().set("openai_api_key", "sk-secret")
+    assert SecretStore().get("openai_api_key") == "sk-secret"
+    assert "sk-secret" not in (tmp_path / "values.json").read_text()

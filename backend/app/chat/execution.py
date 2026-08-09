@@ -21,10 +21,19 @@ def synthesis_snapshot(session: Session, query_run_id: str) -> tuple[str, str] |
     if not assistant or not assistant.citations_json or assistant.citations_json == "[]":
         return None
     citations = json.loads(assistant.citations_json)
-    instruction = (
-        "Answer only from the supplied evidence. Do not add external knowledge or unsupported "
-        "claims. Preserve citation markers [1], [2], etc. If evidence is insufficient, say so."
-    )
+    metadata = json.loads(assistant.metadata_json or "{}")
+    if metadata.get("graphrag_final_answer"):
+        return None
+    if metadata.get("intent") == "entity_document_lookup":
+        instruction = (
+            "Return the supplied unique document list without expanding it into summaries. "
+            "Keep exactly one row per document, retain the total, and do not quote long passages."
+        )
+    else:
+        instruction = (
+            "Answer only from the supplied evidence. Do not add external knowledge or unsupported "
+            "claims. Preserve citation markers [1], [2], etc. If evidence is insufficient, say so."
+        )
     evidence = assistant.content
     conversation = session.get(Conversation, run.conversation_id)
     memory = (

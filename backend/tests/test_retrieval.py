@@ -77,6 +77,14 @@ def test_qdrant_workspace_filter_and_point_ids_are_scoped():
     assert first != second
 
 
+def test_qdrant_document_deletion_is_a_noop_when_no_collection_exists():
+    from qdrant_client import QdrantClient
+
+    WorkspaceQdrantStore(QdrantClient(":memory:"), "workspace-a").delete_document(
+        "chunks", "document-a"
+    )
+
+
 def test_qdrant_dense_upsert_and_search_are_workspace_isolated():
     from qdrant_client import QdrantClient
 

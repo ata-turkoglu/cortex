@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -87,9 +87,12 @@ class GraphRagStageReport(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     stage: Mapped[str] = mapped_column(String(64), nullable=False)
-    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    estimated_cost_usd: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    estimated_cost_usd: Mapped[float | None] = mapped_column()
+    request_count: Mapped[int | None] = mapped_column(Integer)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    query_run_id: Mapped[str | None] = mapped_column(String(36))
     provider: Mapped[str | None] = mapped_column(String(64))
     model: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -123,7 +126,16 @@ class Folder(Base):
 
 class DocumentVersion(Base):
     __tablename__ = "document_versions"
-    __table_args__ = (UniqueConstraint("workspace_id", "source_hash"),)
+    __table_args__ = (
+        UniqueConstraint("document_id", "version_number"),
+        Index(
+            "ux_document_versions_workspace_active_source_hash",
+            "workspace_id",
+            "source_hash",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
@@ -141,6 +153,28 @@ class DocumentVersion(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class LogicalDocument(Base):
+    __tablename__ = "logical_documents"
+    __table_args__ = (UniqueConstraint("document_version_id", "ordinal"),)
+
+    id: Mapped[str] = mapped_column(String(72), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    source_document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), nullable=False)
+    document_version_id: Mapped[str] = mapped_column(
+        ForeignKey("document_versions.id"), nullable=False
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    document_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    document_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_original: Mapped[str] = mapped_column(String(512), nullable=False)
+    page_start: Mapped[int | None] = mapped_column(Integer)
+    page_end: Mapped[int | None] = mapped_column(Integer)
+    normalized_content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class Chunk(Base):
     __tablename__ = "chunks"
     __table_args__ = (UniqueConstraint("document_version_id", "ordinal"),)
@@ -150,6 +184,9 @@ class Chunk(Base):
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), nullable=False)
     document_version_id: Mapped[str] = mapped_column(
         ForeignKey("document_versions.id"), nullable=False
+    )
+    logical_document_id: Mapped[str | None] = mapped_column(
+        String(72), ForeignKey("logical_documents.id")
     )
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)

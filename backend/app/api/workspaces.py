@@ -2,7 +2,7 @@ import re
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -105,7 +105,11 @@ def get(workspace_id: str, s: Session = Depends(get_session)):
 
 
 @router.delete("/{workspace_id}", status_code=204)
-def delete(workspace_id: str, s: Session = Depends(get_session)):
+def delete(
+    workspace_id: str,
+    background_tasks: BackgroundTasks,
+    s: Session = Depends(get_session),
+):
     w = lookup(s, workspace_id)
     now = datetime.now(UTC)
     w.deleted_at = now
@@ -113,17 +117,21 @@ def delete(workspace_id: str, s: Session = Depends(get_session)):
     w.updated_at = now
     run = create_run(s, w.id, "workspace_delete")
     s.flush()
-    from ..workers.broker import execute_workflow
+    from ..workers.broker import dispatch_workflow
 
-    try:
-        execute_workflow.send(run.id)
-    except Exception:
-        pass
+    # FastAPI runs background tasks after the response transaction has been
+    # committed, so the worker can always see the queued run in SQLite.
+    background_tasks.add_task(dispatch_workflow, run.id)
     return Response(status_code=204)
 
 
 @router.delete("/{workspace_id}/documents/{document_id}", status_code=202)
-def delete_document(workspace_id: str, document_id: str, s: Session = Depends(get_session)):
+def delete_document(
+    workspace_id: str,
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    s: Session = Depends(get_session),
+):
     lookup(s, workspace_id)
     document = s.scalar(
         select(Document).where(
@@ -136,10 +144,7 @@ def delete_document(workspace_id: str, document_id: str, s: Session = Depends(ge
         raise HTTPException(404, "document not found")
     run = create_run(s, workspace_id, "document_delete", {"document_id": document_id})
     s.flush()
-    from ..workers.broker import execute_workflow
+    from ..workers.broker import dispatch_workflow
 
-    try:
-        execute_workflow.send(run.id)
-    except Exception:
-        pass
+    background_tasks.add_task(dispatch_workflow, run.id)
     return {"workflow_run_id": run.id}

@@ -14,6 +14,13 @@ def test_provider_status_never_returns_secret():
     assert body["providers"][0]["configured"] is False
 
 
+def test_ollama_model_pull_rejects_an_invalid_model_name():
+    response = TestClient(app).post(
+        "/api/v1/settings/ollama/models/pull", json={"model": "bad model!"}
+    )
+    assert response.status_code == 422
+
+
 def test_global_settings_persist_and_apply_to_runtime():
     engine = create_engine("sqlite:///:memory:")
     GlobalSettings.__table__.create(engine)

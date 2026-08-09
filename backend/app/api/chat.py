@@ -1,14 +1,31 @@
 import json
+import time
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..chat.service import ask, create_conversation, edit_message, require_conversation
+from ..chat.service import (
+    ask,
+    backfill_default_conversation_titles,
+    create_conversation,
+    delete_conversation,
+    edit_message,
+    require_conversation,
+)
+from ..core.config import get_settings
 from ..core.database import SessionLocal
-from ..models import Chunk, Conversation, Document, DocumentVersion, Message, QueryRun
+from ..models import (
+    Chunk,
+    Conversation,
+    Document,
+    DocumentVersion,
+    LogicalDocument,
+    Message,
+    QueryRun,
+)
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["chat"])
 
@@ -94,11 +111,13 @@ def list_conversations(  # noqa: B008
     workspace_id: str,
     session: Session = Depends(get_session),  # noqa: B008
 ):
-    return session.scalars(
+    conversations = session.scalars(
         select(Conversation)
         .where(Conversation.workspace_id == workspace_id, Conversation.deleted_at.is_(None))
         .order_by(Conversation.updated_at.desc())
     ).all()
+    backfill_default_conversation_titles(session, conversations)
+    return conversations
 
 
 @router.post("/conversations", response_model=ConversationRead, status_code=status.HTTP_201_CREATED)
@@ -111,6 +130,19 @@ def create(  # noqa: B008
         return create_conversation(session, workspace_id, payload.title)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete(
+    workspace_id: str,
+    conversation_id: str,
+    session: Session = Depends(get_session),  # noqa: B008
+):
+    try:
+        delete_conversation(session, workspace_id, conversation_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageRead])
@@ -150,6 +182,53 @@ def query(  # noqa: B008
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    graph_job = bool(json.loads(answer.metadata_json or "{}").get("graphrag_query_job"))
+    if graph_job:
+        # Commit the durable request before the worker reads it, then wait only for the bounded
+        # synchronous chat window. The API never imports or executes GraphRAG itself.
+        session.commit()
+        try:
+            from ..workers.broker import execute_graphrag_query
+
+            execute_graphrag_query.send(run.id)
+        except Exception:
+            answer.status = "failed"
+            answer.content = "GraphRAG worker is unavailable."
+            metadata = json.loads(answer.metadata_json or "{}")
+            metadata.update(
+                {
+                    "fallback_reason": "worker_unavailable",
+                    "termination_reason": "worker_unavailable",
+                }
+            )
+            answer.metadata_json = json.dumps(metadata)
+            run.state = "failed"
+            session.commit()
+            return message_read(answer)
+        deadline = time.monotonic() + get_settings().graphrag_query_wait_seconds
+        while time.monotonic() < deadline:
+            session.expire_all()
+            completed = session.get(QueryRun, run.id)
+            if completed and completed.state in {"completed", "failed", "cancelled"}:
+                final = session.scalar(
+                    select(Message).where(
+                        Message.query_run_id == run.id, Message.role == "assistant"
+                    )
+                )
+                if final:
+                    return message_read(final)
+            time.sleep(0.1)
+        session.expire_all()
+        timed_out = session.get(QueryRun, run.id)
+        if timed_out and timed_out.state in {"queued", "running"}:
+            timed_out.state = "timed_out"
+            answer.status = "failed"
+            answer.content = "GraphRAG query timed out."
+            metadata = json.loads(answer.metadata_json or "{}")
+            metadata.update({"fallback_reason": "timeout", "termination_reason": "timeout"})
+            answer.metadata_json = json.dumps(metadata)
+            session.commit()
+        return message_read(answer)
     try:
         from ..workers.broker import execute_query_synthesis, summarize_conversation
 
@@ -186,19 +265,25 @@ def source_details(  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ):
     row = session.execute(
-        select(Chunk, Document, DocumentVersion)
+        select(Chunk, Document, DocumentVersion, LogicalDocument)
         .join(Document, Document.id == Chunk.document_id)
         .join(DocumentVersion, DocumentVersion.id == Chunk.document_version_id)
+        .outerjoin(LogicalDocument, LogicalDocument.id == Chunk.logical_document_id)
         .where(Chunk.id == chunk_id, Chunk.workspace_id == workspace_id)
     ).first()
     if not row:
         raise HTTPException(404, "source chunk not found in workspace")
-    chunk, document, version = row
+    chunk, document, version, logical = row
     return {
         "chunk_id": chunk.id,
         "content": chunk.content,
-        "document_id": document.id,
-        "document_title": document.title,
+        "document_id": logical.id if logical else document.id,
+        "document_code": logical.document_code if logical else None,
+        "document_title": logical.title if logical else document.title,
+        "source_document_id": document.id,
+        "source_original": logical.source_original if logical else version.source_filename,
+        "page_start": logical.page_start if logical else None,
+        "page_end": logical.page_end if logical else None,
         "document_version_id": version.id,
         "version_number": version.version_number,
     }

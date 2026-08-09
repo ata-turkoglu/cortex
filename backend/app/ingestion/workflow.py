@@ -6,10 +6,10 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from ..models import WorkflowDefinition, WorkflowRun
+from ..models import WorkflowDefinition, WorkflowRun, WorkflowStepRun
 
 INGESTION_DEFINITION_ID = "document-ingestion"
-INGESTION_DEFINITION_VERSION = "1"
+INGESTION_DEFINITION_VERSION = "3"
 
 
 def create_ingestion_run(
@@ -20,10 +20,18 @@ def create_ingestion_run(
         definition = WorkflowDefinition(
             id=INGESTION_DEFINITION_ID,
             version=INGESTION_DEFINITION_VERSION,
-            name="Document ingestion",
-            definition_json='{"steps":["parse","normalize","chunk","index"]}',
+            name="Document ingestion with logical boundaries",
+            definition_json=(
+                '{"steps":["parse","normalize","logical_documents","chunk","index"]}'
+            ),
         )
         session.add(definition)
+    elif definition.version != INGESTION_DEFINITION_VERSION:
+        definition.version = INGESTION_DEFINITION_VERSION
+        definition.name = "Document ingestion with logical boundaries"
+        definition.definition_json = (
+            '{"steps":["parse","normalize","logical_documents","chunk","index"]}'
+        )
     now = datetime.now(UTC)
     run = WorkflowRun(
         id=str(uuid4()),
@@ -38,4 +46,18 @@ def create_ingestion_run(
         finished_at=None if queued else now,
     )
     session.add(run)
+    session.add_all(
+        WorkflowStepRun(
+            id=str(uuid4()),
+            workspace_id=workspace_id,
+            workflow_run_id=run.id,
+            step_name=step_name,
+            state="pending" if queued else "completed",
+            retry_count=0,
+            checkpoint_json=None if queued else '{"completed": true}',
+            created_at=now,
+            updated_at=now,
+        )
+        for step_name in ("parse", "normalize", "logical_documents", "chunk", "index")
+    )
     return run
