@@ -75,6 +75,14 @@ def begin(session: Session, run_id: str):
         )
     )
     if held:
+        owner = session.get(WorkflowRun, held.workflow_run_id)
+        if owner is None or owner.state in {"completed", "failed", "cancelled", "interrupted"}:
+            # A worker can stop after it claims the GraphRAG lock. Terminal runs
+            # cannot own a lock for a later reindex request.
+            session.delete(held)
+            session.flush()
+            held = None
+    if held:
         event(session, run, "blocked", lock_type="graph")
         return None
     session.add(

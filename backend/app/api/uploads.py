@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
@@ -152,7 +153,18 @@ async def upload_files(
         # Document metadata, chunks, and workflow rows reference the document/version
         # rows.  Flush their parents explicitly because this session disables autoflush
         # and SQLite enforces foreign keys during each INSERT.
-        session.flush()
+        try:
+            session.flush()
+        except IntegrityError as exc:
+            # The pre-insert lookup gives a helpful result for ordinary duplicate
+            # uploads. The database constraint remains the authority when a legacy
+            # database has not migrated yet or concurrent requests race that lookup.
+            session.rollback()
+            stored.storage_path.unlink(missing_ok=True)
+            normalized_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=409, detail="identical document content already exists"
+            ) from exc
         metadata_provider, metadata_model = metadata_extraction_assignment()
         for key, value in {
             "filename": stored.original_filename,

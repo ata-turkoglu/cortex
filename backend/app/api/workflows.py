@@ -115,6 +115,9 @@ def create(payload: WorkflowCreate, session: Session = Depends(get_session)):  #
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     session.flush()
+    # The Dramatiq worker uses a separate SQLite connection. Commit the durable run
+    # before enqueueing it so a fast worker can always load and claim the run.
+    session.commit()
     dispatch(run.id)
     return serialize(session, run)
 
@@ -145,6 +148,8 @@ def retry(run_id: str, _: WorkflowCommand, session: Session = Depends(get_sessio
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     session.flush()
+    # A retry must be visible to the worker before its message is published.
+    session.commit()
     dispatch(run.id)
     return serialize(session, run)
 

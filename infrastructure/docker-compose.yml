@@ -15,6 +15,7 @@ services:
     ports: ["4000:8000"]
     environment:
       CORTEX_DATABASE_URL: sqlite:////data/sqlite/cortex.db
+      CORTEX_DATA_PATH: /data
       CORTEX_REDIS_URL: redis://redis:6379/0
       CORTEX_QDRANT_URL: http://qdrant:6333
       CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
@@ -30,6 +31,7 @@ services:
     command: uv run --frozen --no-sync dramatiq app.workers
     environment:
       CORTEX_DATABASE_URL: sqlite:////data/sqlite/cortex.db
+      CORTEX_DATA_PATH: /data
       CORTEX_REDIS_URL: redis://redis:6379/0
       CORTEX_QDRANT_URL: http://qdrant:6333
       CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434

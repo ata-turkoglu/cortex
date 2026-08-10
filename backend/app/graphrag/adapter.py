@@ -68,9 +68,13 @@ class MicrosoftGraphRAGRunner:
                 raise GraphRAGExecutionError("OpenAI provider credential is not configured")
         else:
             api_key = "ollama"
-        environment = {**os.environ, "GRAPHRAG_API_KEY": api_key}
+        backend_root = str(Path(__file__).resolve().parents[2])
+        python_path = os.pathsep.join(
+            value for value in (backend_root, os.environ.get("PYTHONPATH")) if value
+        )
+        environment = {**os.environ, "GRAPHRAG_API_KEY": api_key, "PYTHONPATH": python_path}
         completed = subprocess.run(
-            [sys.executable, "-m", "graphrag", *arguments],
+            [sys.executable, "-m", "app.graphrag.cli", *arguments],
             cwd=graph_root,
             check=False,
             capture_output=True,
@@ -177,13 +181,19 @@ class GraphRAGAdapter:
         default_chat = dict(models.get("default_chat_model", {}))
         if not default_chat:
             # This preserves compatibility with older/generated minimal settings files.
-            # Every actual stage below still replaces `model` with its own user selection.
             default_chat = {
                 "type": "openai_chat",
                 "auth_type": "api_key",
-                "model": settings.graphrag_extraction_model,
                 "model_supports_json": True,
             }
+        # GraphRAG validates default_chat_model before it reaches stage-specific model IDs.
+        # Never leave the upstream `graphrag init` placeholder (for example
+        # gpt-4-turbo-preview) here: it may be retired or unavailable to the user.
+        default_chat["model"] = settings.graphrag_extraction_model
+        if settings.graphrag_extraction_provider == "ollama":
+            default_chat["api_base"] = f"{settings.ollama_base_url.rstrip('/')}/v1"
+        else:
+            default_chat.pop("api_base", None)
         default_chat["encoding_model"] = "cl100k_base"
         default_chat["max_tokens"] = 4096
         models["default_chat_model"] = default_chat
@@ -221,13 +231,25 @@ class GraphRAGAdapter:
                 "concurrency": settings.graphrag_drift_concurrency,
             }
         )
+        # Cortex materializes one normalized Markdown file per logical document.
+        # GraphRAG's supported `text` loader is extension-agnostic only when its
+        # file pattern is explicit; its generated default otherwise targets .txt.
+        input_settings = configured.setdefault("input", {})
+        input_settings["file_type"] = "text"
+        input_settings["file_pattern"] = r".*\.md\Z"
         embedding = models.get("default_embedding_model")
-        if isinstance(embedding, dict):
-            embedding["model"] = settings.embedding_model
-            if settings.embedding_provider == "ollama":
-                embedding["api_base"] = f"{settings.ollama_base_url.rstrip('/')}/v1"
-            else:
-                embedding.pop("api_base", None)
+        if not isinstance(embedding, dict):
+            embedding = {}
+            models["default_embedding_model"] = embedding
+        embedding["model"] = settings.embedding_model
+        # Ollama embedding model identifiers are not in tiktoken's model map.
+        # GraphRAG only needs a compatible tokenizer for chunk budgeting, so keep
+        # that concern separate from the actual embedding provider/model.
+        embedding["encoding_model"] = "cl100k_base"
+        if settings.embedding_provider == "ollama":
+            embedding["api_base"] = f"{settings.ollama_base_url.rstrip('/')}/v1"
+        else:
+            embedding.pop("api_base", None)
         self.config_path.write_text(
             yaml.safe_dump(configured, allow_unicode=True, sort_keys=False), encoding="utf-8"
         )

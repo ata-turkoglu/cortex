@@ -18,6 +18,16 @@ def test_migrations_apply_from_empty_database(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stderr
+    connection = sqlite3.connect(database)
+    indexes = connection.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'document_versions'"
+    ).fetchall()
+    connection.close()
+    assert any(
+        name == "ux_document_versions_workspace_active_source_hash"
+        and "WHERE deleted_at IS NULL" in sql
+        for name, sql in indexes
+    )
 
 
 def test_workspace_migration_preserves_phase_three_data(tmp_path):

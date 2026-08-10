@@ -39,9 +39,13 @@ def recover_stale_jobs() -> None:
 def execute_workflow(run_id: str) -> None:
     """Execute short durable steps; Dramatiq retry is safe because checkpoints persist."""
     from ..core.database import SessionLocal
+    from ..core.settings_service import load_runtime_settings
 
     session = SessionLocal()
     try:
+        # The API and worker are separate processes. Apply the persisted global
+        # settings in this process before resolving any workflow provider/model.
+        load_runtime_settings(session)
         run = session.get(WorkflowRun, run_id)
         is_graph_reindex = bool(run and run.job_type == "graphrag_reindex")
     finally:

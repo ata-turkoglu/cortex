@@ -50,7 +50,7 @@ COPY --from=backend-builder /app/backend/.venv ./.venv
 COPY --from=backend-builder /app/backend/alembic.ini ./
 COPY --from=backend-builder /app/backend/alembic ./alembic
 COPY --from=backend-builder /app/backend/app ./app
-CMD ["uv", "run", "--frozen", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "alembic upgrade head && exec uv run --frozen --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 
 FROM runtime-base AS worker
 COPY --from=worker-builder /app/backend/.venv ./.venv

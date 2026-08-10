@@ -1,11 +1,26 @@
 import json
+import os
+from io import BytesIO
 
 import pytest
+import yaml
 
 from app.graphrag.adapter import GraphRAGAdapter, GraphRoute
+from app.graphrag.cli import normalize_arrow_values
 from app.graphrag.input import GraphRAGInputMaterializer
 from app.graphrag.llamaindex import GraphRAGQueryEngine
 from app.retrieval.schemas import AnswerState
+
+
+def test_graphrag_cli_normalizes_nested_arrow_arrays_before_writing_parquet():
+    import pandas as pd
+    import pyarrow as pa
+
+    table = pd.DataFrame({"entity_ids": [pa.array(["entity-a", "entity-b"])]})
+    normalized = normalize_arrow_values(table)
+
+    assert normalized.loc[0, "entity_ids"] == ["entity-a", "entity-b"]
+    normalized.to_parquet(BytesIO())
 
 
 def test_graphrag_routes_remain_distinct_and_networkx_is_rebuildable(tmp_path):
@@ -95,6 +110,27 @@ def test_runner_keeps_the_actionable_tail_of_a_graphrag_failure(monkeypatch, tmp
     assert "traceback start" not in str(error.value)
 
 
+def test_runner_adds_the_cortex_package_root_for_the_worker_cli(monkeypatch, tmp_path):
+    from app.graphrag.adapter import MicrosoftGraphRAGRunner
+
+    captured = {}
+
+    class Completed:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr("app.graphrag.adapter.SecretStore.get", lambda *_: "configured")
+    monkeypatch.setattr(
+        "app.graphrag.adapter.subprocess.run",
+        lambda *_args, **kwargs: captured.update(kwargs) or Completed(),
+    )
+
+    MicrosoftGraphRAGRunner()._run(["index"], tmp_path)
+
+    assert captured["env"]["PYTHONPATH"].split(os.pathsep)[0].endswith("backend")
+
+
 def test_graph_adapter_updates_the_generated_model_placeholder_without_storing_secrets(tmp_path):
     root = tmp_path / "workspace" / "graphrag"
     root.mkdir(parents=True)
@@ -133,7 +169,43 @@ def test_graph_adapter_sets_a_concrete_chat_token_limit(tmp_path):
             pass
 
     GraphRAGAdapter("workspace-a", root, config_path=config, runner=Runner()).index()
-    assert "max_tokens: 4096" in config.read_text(encoding="utf-8")
+    configured = yaml.safe_load(config.read_text(encoding="utf-8"))
+    assert configured["models"]["default_chat_model"]["max_tokens"] == 4096
+    assert configured["models"]["default_embedding_model"]["encoding_model"] == "cl100k_base"
+    assert configured["input"] == {"file_type": "text", "file_pattern": r".*\.md\Z"}
+
+
+def test_graph_adapter_replaces_upstream_default_chat_model_with_selected_extraction_model(
+    monkeypatch, tmp_path
+):
+    from app.core.config import Settings
+
+    root = tmp_path / "workspace" / "graphrag"
+    root.mkdir(parents=True)
+    config = root / "settings.yaml"
+    config.write_text(
+        "models:\n  default_chat_model:\n    model: gpt-4-turbo-preview\n",
+        encoding="utf-8",
+    )
+
+    class Runner:
+        def index(self, *_):
+            pass
+
+    monkeypatch.setattr(
+        "app.graphrag.adapter.get_settings",
+        lambda: Settings(
+            graphrag_extraction_provider="ollama",
+            graphrag_extraction_model="selected-local-model",
+            ollama_base_url="http://ollama.example/",
+        ),
+    )
+    GraphRAGAdapter("workspace-a", root, config_path=config, runner=Runner()).index()
+
+    configured = yaml.safe_load(config.read_text(encoding="utf-8"))
+    default_chat = configured["models"]["default_chat_model"]
+    assert default_chat["model"] == "selected-local-model"
+    assert default_chat["api_base"] == "http://ollama.example/v1"
 
 
 def test_graph_adapter_reads_native_parquet_outputs_without_rewriting_them(tmp_path):
