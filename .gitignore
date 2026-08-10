@@ -25,6 +25,8 @@ htmlcov/
 backend/.pytest_cache/
 backend/.coverage
 backend/.mypy_cache/
+backend/.test-tmp-*/
+tmp-pytest-*/
 *.sqlite
 *.sqlite3
 *.db
