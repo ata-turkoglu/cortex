@@ -3,13 +3,22 @@ import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/client";
 import { ACard, AInfoPanel, ATabs } from "../components/ui";
 import { AFlowCanvas } from "./AFlowCanvas";
+import { workflowSchema } from "./workflowSchemas";
 
 type MapTab = "system" | "ingestion" | "query" | "workflows";
 type DetailTab = "description" | "interfaces" | "guarantee";
 type NodeKind = "input" | "service" | "processor" | "decision" | "storage" | "retrieval" | "llm-local" | "llm-api" | "safety" | "worker" | "delivery";
-type MapNodeData = { label: string; description: string; interfaces: string; guarantee: string; kind: NodeKind; layer: string; model?: string };
+const MAP_NODE_WIDTH = 205;
+const MAP_NODE_MIN_HEIGHT = 160;
+const MAP_NODE_HORIZONTAL_GAP = 100;
+const MAP_NODE_VERTICAL_GAP = 80;
+const MAP_GROUP_HORIZONTAL_PADDING = 100;
+const MAP_GROUP_VERTICAL_PADDING = 80;
+type RecordKind = "database" | "file" | "vector" | "cache";
+type MapNodeData = { label: string; description: string; interfaces: string; guarantee: string; kind: NodeKind; layer: string; model?: string; recordKind?: RecordKind };
 type MapNode = Node<MapNodeData, "architecture">;
-type FlowGroupNode = Node<{ label: string }, "flow-group">;
+type FlowGroupVariant = "platform" | "input" | "processing" | "durable" | "dense" | "graphrag" | "query" | "delivery";
+type FlowGroupNode = Node<{ label: string; variant: FlowGroupVariant }, "flow-group">;
 
 const legendGroups: Array<{ label: string; items: Array<{ kind: NodeKind; label: string }> }> = [
   { label: "Uygulama akışı", items: [{ kind: "input", label: "Girdi" }, { kind: "processor", label: "İşleme" }, { kind: "worker", label: "Arka plan" }, { kind: "delivery", label: "Teslim" }] },
@@ -33,6 +42,10 @@ detailedNodePresentation["logical-documents"] = {
   kind: "processor",
   layer: "Mantıksal belge algılama",
 };
+detailedNodePresentation["system-metadata"] = {
+  kind: "storage",
+  layer: "Kalıcı metadata kaydı",
+};
 detailedNodePresentation["checkpoint-logical"] = {
   kind: "storage",
   layer: "Dayanıklı checkpoint",
@@ -41,29 +54,34 @@ const ingestionNodesKey: string = "nodes";
 const ingestionEdgesKey: string = "edges";
 
 function graphragConfigurationNodes(): MapNode[] { return [
-  node("community-detection", 6600, 420, "Community detection", "Graph communities are detected algorithmically from the graph; no LLM model is selected for this step.", "Microsoft GraphRAG clustering", "Community membership is distinct from report generation."),
-  node("claims-optional", 6900, 560, "Optional claim extraction", "Claim extraction is disabled by default and runs only when the user enables it in GraphRAG settings.", "GraphRAG extract_claims", "Disabled settings create no claim-extraction model call."),
-  node("community-reports", 6900, 700, "Community report generation", "Reports use the user-selected community provider and model.", "GraphRAG community_reports", "The selected model is recorded with GraphRAG stage usage."),
+  node("community-detection", 6600, 620, "Community detection", "Graph communities are detected algorithmically from the graph; no LLM model is selected for this step.", "Microsoft GraphRAG clustering", "Community membership is distinct from report generation."),
+  node("claims-optional", 6900, 620, "Optional claim extraction", "Claim extraction is disabled by default and runs only when the user enables it in GraphRAG settings.", "GraphRAG extract_claims", "Disabled settings create no claim-extraction model call."),
+  node("community-reports", 6900, 880, "Community report generation", "Reports use the user-selected community provider and model.", "GraphRAG community_reports", "The selected model is recorded with GraphRAG stage usage."),
 ]; }
+
+function workflowStepIds(jobType: string) {
+  return workflowSchema(jobType)?.steps.map((step) => step.id).join(", ") ?? "versioned";
+}
 
 function importantIndexingNodes(): MapNode[] { return [
   node("index-state", 5700, 320, "İndeks durumu · SQLite", "Belge ingestion tamamlandıktan sonra workspace indeks durumları SQLite’ta ayrı yaşam döngülerinde izlenir.", "SQLite · workspace_index_states / graphrag_states", "İndeks türleri birbirinden bağımsız olarak hazır veya reindex gerekli olabilir."),
   node("dense-trigger", 6000, 80, "Dense reindex gerekli mi?", "Embedding yapılandırması değiştiğinde ya da kullanıcı reindex istediğinde ayrı run planlanır.", "Embedding configuration fingerprint", "Aktif vektörler yeni indeks hazır olmadan değiştirilmez."),
-  node("dense-reindex", 6300, 80, "Dense reindex workflow", "clear vectors, embed, upsert ve activate adımlarını ayrı durable run yürütür.", "dense_reindex", "Workspace index lock ile çakışan dense reindex engellenir."),
+  node("dense-reindex", 6300, 80, "Dense reindex workflow", `${workflowStepIds("dense_reindex")} adımları ayrı durable run yürütür.`, "dense_reindex", "Workspace index lock ile çakışan dense reindex engellenir."),
   node("qdrant-index", 6600, 80, "Qdrant dense vektörleri", "Workspace filtreli aktif dense vektörler Qdrant vector DB’de saklanır.", "Qdrant Vector DB · chunks collection", "Farklı embedding yapılandırmaları aynı aktif alanı paylaşmaz."),
   node("sparse-index", 6000, 320, "bm25s sparse corpus", "Workspace’e özel sparse corpus ve evidence metadata’sı dosya tabanlı cache’de saklanır.", "Filesystem · workspace cache path", "Sparse indeksler workspace’ler arasında paylaşılmaz."),
   node("graphrag-trigger", 6000, 560, "GraphRAG tetikleyicisi", "Manual veya threshold ayarı GraphRAG reindex isteğini belirler.", "GraphRAG workspace state", "Graph güncel değilse grounded cevap olarak kullanılmaz."),
-  node("graphrag-reindex", 6300, 560, "GraphRAG reindex workflow", "snapshot, materialize, index ve mirror adımlarını ayrı durable run yürütür.", "graphrag_reindex", "Workspace graph lock ile çakışan graph işlemleri engellenir."),
+  node("graphrag-reindex", 6300, 560, "GraphRAG reindex workflow", `${workflowStepIds("graphrag_reindex")} adımları ayrı durable run yürütür.`, "graphrag_reindex", "Workspace graph lock ile çakışan graph işlemleri engellenir."),
   node("graphrag-artifacts", 6600, 560, "GraphRAG çalışma verisi", "Kanonik GraphRAG çıktıları workspace dosya alanında Parquet/JSON olarak saklanır; vektörleri Qdrant’a aynalanır.", "Filesystem · GraphRAG root; Qdrant vector mirror", "Local, Global ve DRIFT sorgu yolları bu veriyi kullanır."),
 ]; }
-const importantIndexingEdges: Edge[] = links(["checkpoint-index", "index-state", "ingestion tamamlandı"], ["index-state", "dense-trigger", "ayrı tetikleyici"], ["dense-trigger", "dense-reindex", "reindex gerekirse"], ["dense-reindex", "qdrant-index"], ["index-state", "sparse-index", "workspace corpus"], ["index-state", "graphrag-trigger", "manual / threshold"], ["graphrag-trigger", "graphrag-reindex", "ayrı tetikleyici"], ["graphrag-reindex", "graphrag-artifacts"]);
+const importantIndexingEdges: Edge[] = links(["checkpoint-index", "index-state", "ingestion tamamlandı"], ["index-state", "dense-trigger", "ayrı tetikleyici"], ["dense-trigger", "dense-reindex", "gerekir"], ["dense-trigger", "qdrant-index", "gerekmez"], ["dense-reindex", "qdrant-index"], ["index-state", "sparse-index", "workspace corpus"], ["index-state", "graphrag-trigger", "manual / threshold"], ["graphrag-trigger", "graphrag-reindex", "tetikle"], ["graphrag-trigger", "graphrag-artifacts", "mevcut graph"], ["graphrag-reindex", "graphrag-artifacts"]);
 importantIndexingEdges.push(
   ...links(
     ["graphrag-reindex", "community-detection"],
-    ["graphrag-reindex", "claims-optional", "enabled only"],
+    ["graphrag-reindex", "claims-optional", "opsiyonel"],
     ["community-detection", "community-reports"],
     ["community-reports", "graphrag-artifacts"],
-    ["claims-optional", "graphrag-artifacts"],
+    ["claims-optional", "graphrag-artifacts", "etkin"],
+    ["claims-optional", "community-reports", "atla"],
   ),
 );
 
@@ -177,14 +195,14 @@ const staticMaps: Record<Exclude<MapTab, "system">, { nodes: MapNode[]; edges: E
       node("definition", 640, 360, "Sürümlü workflow tanımı", "Komutun izinli adımları ve retry sınırları seçilir.", "Versioned definitions", "Uygulanan adımlar kayıtlı tanımla tutarlıdır."),
       node("state", 960, 160, "Kalıcı run kaydı", "Run, adım, olay, lock ve recovery state saklanır.", "workflow_runs / workflow_step_runs", "Safe checkpoint’ten retry yapılır."),
       node("lock-decision", 960, 500, "Workspace lock uygun mu?", "Tehlikeli eşzamanlı komutlar için workspace kilidi kontrol edilir.", "Workspace lock record", "Çakışan mutasyonlar aynı anda yürütülmez."),
-      node("redis", 1280, 500, "Redis + Dramatiq", "İş teslimi ve worker çalıştırma sınırı.", "Dramatiq broker", "API yeniden başlasa bile run kaydı korunur."),
-      node("worker", 1600, 500, "Worker", "Ingestion, reindex, GraphRAG ve bakım workflow’larını yürütür.", "Versioned definitions", "Yan etkili adımlar idempotent tasarlanır."),
+      node("workflow-redis", 1450, 500, "Redis + Dramatiq", "İş teslimi ve worker çalıştırma sınırı.", "Dramatiq broker", "API yeniden başlasa bile run kaydı korunur."),
+      node("workflow-worker", 1755, 500, "Worker", "Ingestion, reindex, GraphRAG ve bakım workflow’larını yürütür.", "Versioned definitions", "Yan etkili adımlar idempotent tasarlanır."),
       node("checkpoint", 1920, 300, "Atomik checkpoint", "Başarılı adım sonucu ve sonraki adım atomik kaydedilir.", "Step run + checkpoint", "Yeniden deneme güvenli noktadan başlar."),
       node("retry-decision", 2240, 160, "Retry gerekli mi?", "Hata, retry politikası ve iptal sinyali değerlendirilir.", "Recovery policy", "Terminal hata görünür şekilde kalıcıdır."),
       node("cancel", 2240, 500, "İptal / recovery komutu", "Kullanıcı iptali veya kesilmiş run kurtarma isteği.", "REST recovery command", "İptal checkpoint sınırında uygulanır."),
       node("sse", 2560, 300, "SSE olay akışı", "UI canlı ilerlemeyi izler; bağlantı kesilince geçmişten geri yükler.", "GET /workflows/{id}/events", "Yalnızca gerçekleşen aşamalar gösterilir."),
     ],
-    edges: links(["ui", "api"], ["api", "definition"], ["definition", "state"], ["definition", "lock-decision"], ["lock-decision", "redis", "kilit alındı"], ["lock-decision", "state", "çakışma"], ["redis", "worker"], ["worker", "checkpoint"], ["checkpoint", "retry-decision"], ["retry-decision", "worker", "devam"], ["retry-decision", "sse", "tamamlandı"], ["retry-decision", "cancel", "iptal / hata"], ["cancel", "state"], ["checkpoint", "state"], ["state", "sse"], ["sse", "ui"]),
+    edges: links(["ui", "api"], ["api", "definition"], ["definition", "state"], ["definition", "lock-decision"], ["lock-decision", "workflow-redis", "kilit alındı"], ["lock-decision", "state", "çakışma"], ["workflow-redis", "workflow-worker"], ["workflow-worker", "checkpoint"], ["checkpoint", "retry-decision"], ["retry-decision", "workflow-worker", "devam"], ["retry-decision", "sse", "tamamlandı"], ["retry-decision", "cancel", "iptal / hata"], ["cancel", "state"], ["checkpoint", "state"], ["state", "sse"], ["sse", "ui"]),
   },
 };
 
@@ -208,16 +226,101 @@ staticMaps.query.edges.push(
   ),
 );
 
-function node(id: string, x: number, y: number, label: string, description: string, interfaces: string, guarantee: string): MapNode {
-  return { id, type: "architecture", position: { x, y }, data: { label, description, interfaces, guarantee, ...nodePresentation(id) }, style: { width: 205, zIndex: 1 } };
+function mapNodePosition(id: string, x: number, y: number) {
+  const after = (position: number) => position + MAP_NODE_WIDTH + MAP_NODE_HORIZONTAL_GAP;
+  const below = (position: number) => position + MAP_NODE_MIN_HEIGHT + MAP_NODE_VERTICAL_GAP;
+  const graphIndexPositions: Record<string, { x: number; y: number }> = {
+    "upload-request": { x: 0, y: 360 },
+    "workspace-scope": { x: after(0), y: 360 },
+    "folder-resolution": { x: after(after(0)), y: 360 },
+    "replacement-decision": { x: after(after(after(0))), y: 360 },
+    "file-read": { x: 1400, y: 200 },
+    "upload-validation": { x: 1705, y: 200 },
+    "source-hash": { x: 2010, y: 200 },
+    "content-duplicate": { x: 2315, y: 200 },
+    "source-store": { x: 2620, y: 200 },
+    "text-source-decision": { x: 2925, y: 200 },
+    docling: { x: 3230, y: 80 },
+    "direct-text-read": { x: 3230, y: 400 },
+    normalized: { x: 3535, y: 200 },
+    "document-record": { x: 3840, y: 200 },
+    "version-record": { x: 4145, y: 200 },
+    "logical-documents": { x: 4450, y: 200 },
+    chunks: { x: 4755, y: 200 },
+    relationships: { x: 5060, y: 200 },
+    "system-metadata": { x: 4450, y: 520 },
+    workflow: { x: 5565, y: 400 },
+    "dispatch-decision": { x: 5870, y: 400 },
+    "ingestion-worker": { x: 6175, y: 400 },
+    "checkpoint-parse": { x: 6480, y: 40 },
+    "checkpoint-normalize": { x: 6480, y: below(40) },
+    "checkpoint-logical": { x: 6480, y: below(below(40)) },
+    "checkpoint-chunk": { x: 6480, y: below(below(below(40))) },
+    "checkpoint-index": { x: 6480, y: below(below(below(below(40)))) },
+    "index-state": { x: 6985, y: 260 },
+    "dense-trigger": { x: 6985, y: 20 },
+    "dense-reindex": { x: 7290, y: 20 },
+    "qdrant-index": { x: 7595, y: 20 },
+    "sparse-index": { x: 7290, y: 260 },
+    "graphrag-trigger": { x: 6985, y: 680 },
+    "graphrag-reindex": { x: 7290, y: 680 },
+    "community-detection": { x: 7595, y: 680 },
+    "claims-optional": { x: 7900, y: 680 },
+    "community-reports": { x: 7595, y: 940 },
+    "graphrag-artifacts": { x: 7900, y: 940 },
+    chat: { x: 0, y: 360 },
+    "conversation-context": { x: 320, y: 360 },
+    router: { x: 630, y: 360 },
+    "lookup-intent": { x: 935, y: 360 },
+    hybrid: { x: 1440, y: 120 },
+    dense: { x: 1745, y: 20 },
+    sparse: { x: 1745, y: 280 },
+    fusion: { x: 2050, y: 140 },
+    reranker: { x: 2355, y: 140 },
+    "graph-ready": { x: 1440, y: 620 },
+    "graph-job": { x: 1745, y: 520 },
+    "graph-worker": { x: 2050, y: 520 },
+    "graph-local": { x: 2355, y: 400 },
+    "graph-global": { x: 2355, y: 660 },
+    "graph-drift": { x: 2660, y: 520 },
+    "document-group": { x: 3165, y: 120 },
+    "graph-result": { x: 3165, y: 620 },
+    evidence: { x: 3470, y: 380 },
+    "citation-check": { x: 3775, y: 380 },
+    answer: { x: 4080, y: 380 },
+    "answer-state": { x: 4385, y: 380 },
+    history: { x: 4690, y: 380 },
+    state: { x: 1145, y: 160 },
+    "lock-decision": { x: 1145, y: 500 },
+    checkpoint: { x: 2060, y: 300 },
+    "retry-decision": { x: 2060, y: 40 },
+    cancel: { x: 2060, y: 540 },
+    sse: { x: 2565, y: 300 },
+  };
+  return graphIndexPositions[id] ?? { x, y };
 }
-function links(...pairs: [string, string, string?][]): Edge[] { return pairs.map(([source, target, label]) => ({ id: `${source}-${target}`, source, target, label, animated: true, style: { stroke: "var(--cortex-secondary)", strokeWidth: 1.5 }, labelStyle: { fill: "var(--cortex-muted)", fontSize: 11, fontWeight: 650 }, labelBgStyle: { fill: "var(--cortex-surface)", fillOpacity: 0.92 } })); }
+
+function recordKind(interfaces: string): RecordKind | undefined {
+  if (/Qdrant/i.test(interfaces)) return "vector";
+  if (/cache/i.test(interfaces)) return "cache";
+  if (/Filesystem|Parquet|JSON/i.test(interfaces)) return "file";
+  if (/SQLite|workflow_runs|QueryRun persistence/i.test(interfaces)) return "database";
+  return undefined;
+}
+
+function node(id: string, x: number, y: number, label: string, description: string, interfaces: string, guarantee: string): MapNode {
+  const presentation = nodePresentation(id);
+  return { id, type: "architecture", position: mapNodePosition(id, x, y), data: { label, description, interfaces, guarantee, ...presentation, recordKind: presentation.kind === "storage" ? recordKind(interfaces) : undefined }, style: { minHeight: MAP_NODE_MIN_HEIGHT, width: MAP_NODE_WIDTH, zIndex: 2 } };
+}
+function links(...pairs: [string, string, string?][]): Edge[] { return pairs.map(([source, target, label]) => ({ id: `${source}-${target}`, source, target, label, animated: true, style: { stroke: "var(--cortex-secondary)", strokeWidth: 1.5 }, zIndex: 1, labelStyle: { fill: "var(--cortex-text)", fontSize: 10, fontWeight: 750 }, labelBgPadding: [5, 3], labelBgBorderRadius: 4, labelBgStyle: { fill: "var(--cortex-panel)", fillOpacity: 0.98, stroke: "var(--cortex-line)", strokeWidth: 1 } })); }
 function nodePresentation(id: string): Pick<MapNodeData, "kind" | "layer" | "model"> {
   if (id === "community-detection") return { kind: "processor", layer: "Algorithmic graph analysis" };
   if (id === "claims-optional") return { kind: "decision", layer: "Optional GraphRAG stage" };
   if (id === "community-reports") return { kind: "llm-api", layer: "User-selected GraphRAG model", model: "Community report model" };
   if (id === "graph-job") return { kind: "service", layer: "Durable request" };
   if (id === "graph-worker") return { kind: "worker", layer: "Worker-only execution" };
+  if (id === "workflow-redis") return { kind: "service", layer: "Broker" };
+  if (id === "workflow-worker") return { kind: "worker", layer: "Arka plan" };
   if (id === "graph-result") return { kind: "storage", layer: "Durable final result" };
   const values: Record<string, Pick<MapNodeData, "kind" | "layer" | "model">> = {
     ...detailedNodePresentation,
@@ -233,6 +336,7 @@ function ArchitectureNode({ data, selected }: NodeProps<MapNode>) {
     <Handle type="target" position={Position.Left} />
     <span className="architecture-node__layer">{data.layer}</span>
     <strong>{data.label}</strong>
+    {data.recordKind && <span className={`architecture-node__persistence is-${data.recordKind}`}>{({ database: "Veritabanı", file: "Dosya kaydı", vector: "Vektör deposu", cache: "İndeks cache" } as Record<RecordKind, string>)[data.recordKind]}</span>}
     {data.kind === "decision" && <span className="architecture-node__decision">Karar noktası</span>}
     {data.model && <span className={`architecture-node__model-type is-${data.kind}`}>{data.kind === "llm-local" ? "LLM · Local" : data.kind === "llm-api" ? "LLM · API" : "Model · Local"}</span>}
     <small>{data.description}</small>
@@ -241,28 +345,86 @@ function ArchitectureNode({ data, selected }: NodeProps<MapNode>) {
 }
 
 function FlowGroup({ data }: NodeProps<FlowGroupNode>) {
-  return <section className="flow-group"><span>{data.label}</span></section>;
+  return <section className={`flow-group is-${data.variant}`}><span>{data.label}</span></section>;
 }
 
 const nodeTypes: NodeTypes = { architecture: ArchitectureNode, "flow-group": FlowGroup };
 
 function flowGroups(tab: MapTab): FlowGroupNode[] {
-  const groups: Record<MapTab, Array<[string, number, number, number, number]>> = {
-    system: [["Cortex platform services", -60, -60, 1080, 780]],
-    ingestion: [["Giriş ve doğrulama", -80, -40, 1180, 900], ["Belge işleme ve kalıcı kayıt", 1120, -40, 3200, 900], ["Dayanıklı ingestion", 4340, -40, 1360, 900], ["İndeksleme", 5820, -40, 1160, 900]],
-    query: [["İstek ve planlama", -80, -40, 920, 900], ["Retrieval ve GraphRAG", 880, -40, 1240, 900], ["Kanıt ve yanıt", 2160, 230, 1700, 420]],
-    workflows: [["Komut ve tanım", -80, -40, 920, 900], ["Durable orchestration", 880, -40, 1580, 900], ["İlerleme teslimi", 2480, -40, 380, 900]],
+  const groups: Record<MapTab, Array<[string, number, number, number, number, FlowGroupVariant]>> = {
+    system: [["Cortex platform services", -MAP_GROUP_HORIZONTAL_PADDING, -MAP_GROUP_VERTICAL_PADDING, 1105, 1300, "platform"]],
+    ingestion: [
+      ["Giriş ve doğrulama", -100, -40, 1320, 1100, "input"],
+      ["Belge işleme ve kalıcı kayıt", 1300, -40, 4065, 1100, "processing"],
+      ["Dayanıklı ingestion", 5465, -40, 1320, 1280, "durable"],
+      ["Dense indeksleme", 6885, -80, 1015, 580, "dense"],
+      ["GraphRAG indeksleme", 6885, 600, 1320, 600, "graphrag"],
+    ],
+    query: [
+      ["İstek ve planlama", -100, -60, 1340, 1000, "input"],
+      ["Retrieval ve GraphRAG", 1340, -60, 1625, 1000, "query"],
+      ["Kanıt ve yanıt", 3065, -60, 1930, 1000, "delivery"],
+    ],
+    workflows: [["Komut ve tanım", -100, -40, 1045, 900, "input"], ["Durable orchestration", 1045, -40, 1320, 900, "durable"], ["İlerleme teslimi", 2465, -40, 405, 900, "delivery"]],
   };
-  return groups[tab].map(([label, x, y, width, height], index) => ({
+  return groups[tab].map(([label, x, y, width, height, variant], index) => ({
     id: `flow-group-${tab}-${index}`,
     type: "flow-group",
     position: { x, y },
-    data: { label },
+    data: { label, variant },
     draggable: false,
     selectable: false,
     focusable: false,
-    style: { height, pointerEvents: "none", width, zIndex: 0 },
+    style: { height, pointerEvents: "none", width, zIndex: -1 },
   }));
+}
+
+function nodeWidth(node: MapNode) {
+  return typeof node.style?.width === "number" ? node.style.width : MAP_NODE_WIDTH;
+}
+
+function nodeHeight(node: MapNode) {
+  return typeof node.style?.minHeight === "number"
+    ? node.style.minHeight
+    : MAP_NODE_MIN_HEIGHT;
+}
+
+function groupWidth(group: FlowGroupNode) {
+  return typeof group.style?.width === "number" ? group.style.width : 0;
+}
+
+function groupHeight(group: FlowGroupNode) {
+  return typeof group.style?.height === "number" ? group.style.height : 0;
+}
+
+function assertMapLayout(tab: MapTab, nodes: MapNode[], groups: FlowGroupNode[]) {
+  for (const node of nodes) {
+    const width = nodeWidth(node);
+    const height = nodeHeight(node);
+    const containingGroups = groups.filter((group) =>
+      node.position.x >= group.position.x + MAP_GROUP_HORIZONTAL_PADDING &&
+      node.position.y >= group.position.y + MAP_GROUP_VERTICAL_PADDING &&
+      node.position.x + width <= group.position.x + groupWidth(group) - MAP_GROUP_HORIZONTAL_PADDING &&
+      node.position.y + height <= group.position.y + groupHeight(group) - MAP_GROUP_VERTICAL_PADDING,
+    );
+    if (containingGroups.length !== 1)
+      throw new Error(`${tab}: ${node.id} must be inside exactly one padded group`);
+  }
+
+  for (let index = 0; index < nodes.length; index += 1) {
+    for (let candidateIndex = index + 1; candidateIndex < nodes.length; candidateIndex += 1) {
+      const current = nodes[index];
+      const candidate = nodes[candidateIndex];
+      const separatedHorizontally =
+        current.position.x + nodeWidth(current) + MAP_NODE_HORIZONTAL_GAP <= candidate.position.x ||
+        candidate.position.x + nodeWidth(candidate) + MAP_NODE_HORIZONTAL_GAP <= current.position.x;
+      const separatedVertically =
+        current.position.y + nodeHeight(current) + MAP_NODE_VERTICAL_GAP <= candidate.position.y ||
+        candidate.position.y + nodeHeight(candidate) + MAP_NODE_VERTICAL_GAP <= current.position.y;
+      if (!separatedHorizontally && !separatedVertically)
+        throw new Error(`${tab}: ${current.id} and ${candidate.id} violate the layout gap`);
+    }
+  }
 }
 
 export function ASystemMap() {
@@ -279,8 +441,8 @@ export function ASystemMap() {
   useEffect(() => { void apiClient.getSettings().then(({ settings: values }) => setSettings(values)).catch(() => undefined); }, []);
   const systemMap = useMemo(() => ({
     nodes: [["frontend", "healthy"], ...Object.entries(services).filter(([id]) => id !== "frontend")].map(([id, status], index): MapNode => ({
-      ...node(id, (index % 3) * 320, Math.floor(index / 3) * 190, `${id.replaceAll("_", " ")} · ${status}`, serviceDescription(id), serviceInterface(id), serviceGuarantee(id)),
-      style: { width: 190, zIndex: 1 },
+      ...node(id, (index % 3) * 320, Math.floor(index / 3) * (MAP_NODE_MIN_HEIGHT + MAP_NODE_VERTICAL_GAP), `${id.replaceAll("_", " ")} · ${status}`, serviceDescription(id), serviceInterface(id), serviceGuarantee(id)),
+      style: { minHeight: MAP_NODE_MIN_HEIGHT, width: MAP_NODE_WIDTH, zIndex: 2 },
     })),
     edges: links(["frontend", "backend"], ["backend", "sqlite"], ["backend", "redis"], ["backend", "qdrant"], ["backend", "ollama"], ["redis", "worker"], ["worker", "qdrant"], ["worker", "graphrag"]),
   }), [services]);
@@ -293,7 +455,11 @@ export function ASystemMap() {
     })),
   }), [baseMap, settings]);
   const selected = map.nodes.find((item) => item.id === selectedId) ?? map.nodes[0];
-  const mapNodes = useMemo(() => [...flowGroups(activeTab), ...map.nodes], [activeTab, map.nodes]);
+  const mapNodes = useMemo(() => {
+    const groups = flowGroups(activeTab);
+    assertMapLayout(activeTab, map.nodes, groups);
+    return [...groups, ...map.nodes];
+  }, [activeTab, map.nodes]);
   const selectTab = (tab: MapTab) => { setActiveTab(tab); setSelectedId((tab === "system" ? systemMap : staticMaps[tab]).nodes[0]?.id ?? ""); setDetailTab("description"); setDetailsOpen(false); };
   const visibleEdges = map.edges.filter((edge) => map.nodes.some((item) => item.id === edge.source) && map.nodes.some((item) => item.id === edge.target));
   return <section className="system-map page-stack">

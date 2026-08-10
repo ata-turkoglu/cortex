@@ -42,6 +42,10 @@ describe("ASystemMap", () => {
     expect(screen.getAllByText("GraphRAG query job").length).toBeGreaterThan(0);
     expect(screen.getAllByText("GraphRAG Worker").length).toBeGreaterThan(0);
     expect(screen.getAllByText("GraphRAG final answer").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("tab", { name: /Arka plan/ }));
+    expect(screen.getByText("Atomik checkpoint")).toBeInTheDocument();
+    expect(screen.getByText(/SSE olay/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /Sorgu/ }));
     expect(screen.getByText("Yanıt biçimi niyeti")).toBeInTheDocument();
     expect(screen.getByText("Belgeye göre grupla")).toBeInTheDocument();
   });

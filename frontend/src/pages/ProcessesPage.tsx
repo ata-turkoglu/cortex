@@ -6,9 +6,26 @@ import {
   type AFlowEdge,
   type AFlowNode,
 } from "../flow/AFlowCanvas";
+import { processNodeTypes, type ProcessNodeKind } from "../flow/AProcessFlowNodes";
+import { workflowSchema } from "../flow/workflowSchemas";
 import { AButton, ACard, ADialog, AInfoPanel } from "../components/ui";
 
 const activeStates = new Set(["queued", "running", "cancelling"]);
+
+function substepState(parentState: string) {
+  if (parentState === "completed") return "completed";
+  if (parentState === "failed") return "unknown";
+  return parentState === "running" ? "running" : "pending";
+}
+
+function processNodeKind(id: string, technology: string): ProcessNodeKind {
+  if (id === "embedding" || /embedding/i.test(technology)) return "embedding";
+  if (/LLM|GraphRAG extraction|GraphRAG summary|GraphRAG community/i.test(technology)) return "api";
+  if (/SQLite|Qdrant|filesystem|Parquet|JSON/i.test(technology)) return "storage";
+  if (/cleanup|reconcile|clear_active_vectors/i.test(id)) return "maintenance";
+  if (/snapshot|materialize|parse|normalize|mark/i.test(id)) return "prepare";
+  return "processor";
+}
 
 function sameWorkflowRuns(current: WorkflowRun[], next: WorkflowRun[]) {
   if (current.length !== next.length) return false;
@@ -33,33 +50,6 @@ function sameWorkflowRuns(current: WorkflowRun[], next: WorkflowRun[]) {
   });
 }
 
-const workflowSchemas: Record<string, { label: string; steps: string[] }> = {
-  ingestion: {
-    label: "Belge ingestion",
-    steps: ["parse", "normalize", "logical_documents", "chunk", "index"],
-  },
-  dense_reindex: {
-    label: "Dense embedding reindex",
-    steps: ["clear_active_vectors", "embed", "upsert", "activate"],
-  },
-  graphrag_reindex: {
-    label: "GraphRAG reindex",
-    steps: ["snapshot", "materialize", "index", "mirror"],
-  },
-  document_delete: {
-    label: "Belge silme",
-    steps: ["mark", "cleanup", "reconcile"],
-  },
-  workspace_delete: {
-    label: "Workspace silme",
-    steps: ["mark", "cleanup", "reconcile"],
-  },
-  reconcile: { label: "Orphan uzlaştırma", steps: ["scan", "repair"] },
-};
-
-function displayStepName(step: string) {
-  return step.replaceAll("_", " ");
-}
 export function ProcessesPage() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -136,58 +126,100 @@ export function ProcessesPage() {
     const persisted = new Map(
       selected.steps.map((step) => [step.step_name, step]),
     );
-    const stepNames =
-      workflowSchemas[selected.job_type]?.steps ??
-      selected.steps.map((step) => step.step_name);
-    return stepNames.map(
-      (stepName) =>
-        persisted.get(stepName) ?? {
-          id: `schema-${selected.id}-${stepName}`,
-          step_name: stepName,
+    const schema = workflowSchema(selected.job_type);
+    const steps = schema?.steps ?? selected.steps.map((step) => ({ id: step.step_name, label: step.step_name.replaceAll("_", " "), description: "Bu workflow sürümünde açıklama bulunmuyor.", technology: "Workflow definition", guarantee: "Durum SQLite'tan gelir." }));
+    return steps.map(
+      (schemaStep) =>
+        ({
+          ...(persisted.get(schemaStep.id) ?? {
+            id: `schema-${selected.id}-${schemaStep.id}`,
+            step_name: schemaStep.id,
           state: "pending",
           retry_count: 0,
           checkpoint_json: null,
-        },
+          }),
+          schema: schemaStep,
+        }),
     );
   }, [selected]);
+  const flowSteps = useMemo(
+    () =>
+      displayedSteps.flatMap((step) => [
+        { id: step.id, title: step.schema.label, description: step.schema.description, technology: step.schema.technology, state: step.state, kind: processNodeKind(step.schema.id, step.schema.technology) },
+        ...(step.schema.substeps ?? []).map((substep) => ({
+          id: `${step.id}:${substep.id}`,
+          title: substep.label,
+          description: substep.description,
+          technology: substep.technology,
+          state: substepState(step.state),
+          kind: processNodeKind(substep.id, substep.technology),
+        })),
+      ]),
+    [displayedSteps],
+  );
   const { nodes, edges } = useMemo(
     () => ({
       nodes: selected
-        ? [
+        ? (() => {
+            const columns = Math.min(4, Math.max(flowSteps.length, 1));
+            const rows = Math.ceil(flowSteps.length / columns);
+            const positionFor = (index: number) => {
+              const row = Math.floor(index / columns);
+              const slot = index % columns;
+              const column = row % 2 === 0 ? slot : columns - slot - 1;
+              return { x: 20 + column * 230, y: 64 + row * 220 };
+            };
+            return [
             {
               id: "workflow-group",
-              type: "group",
+              type: "process-group",
               position: { x: 0, y: 0 },
-              data: { label: selected.job_type },
+              data: { title: workflowSchema(selected.job_type)?.label ?? selected.job_type, status: selected.state },
+              draggable: false,
+              selectable: false,
+              focusable: false,
               style: {
-                width: Math.max(displayedSteps.length * 180, 260),
-                height: 220,
+                width: columns * 230 + 40,
+                height: rows * 220 + 78,
                 zIndex: 0,
               },
             } as AFlowNode,
-            ...displayedSteps.map(
+            ...flowSteps.map(
               (step, index): AFlowNode => ({
                 id: step.id,
+                type: "process",
                 parentId: "workflow-group",
                 extent: "parent",
-                position: { x: 20 + index * 160, y: 70 },
-                data: { label: `${step.step_name} · ${step.state}` },
+                position: positionFor(index),
+                data: { title: step.title, description: step.description, technology: step.technology, status: step.state, kind: step.kind },
                 className: `workflow-${step.state}`,
-                style: { width: 150, zIndex: 1 },
+                style: { width: 190, zIndex: 1 },
               }),
             ),
-          ]
+          ];
+          })()
         : [],
       edges:
-        displayedSteps.slice(1).map(
-          (step, index): AFlowEdge => ({
+        flowSteps.slice(1).map(
+          (step, index): AFlowEdge => {
+            const currentRow = Math.floor(index / Math.min(4, Math.max(flowSteps.length, 1)));
+            const nextRow = Math.floor((index + 1) / Math.min(4, Math.max(flowSteps.length, 1)));
+            const forward = currentRow % 2 === 0;
+            return ({
             id: `${index}`,
-            source: displayedSteps[index].id,
+            source: flowSteps[index].id,
             target: step.id,
-          }),
+            sourceHandle: nextRow > currentRow ? "source-bottom" : forward ? "source-right" : "source-left",
+            targetHandle: nextRow > currentRow ? "target-top" : forward ? "target-left" : "target-right",
+            type: "bezier",
+            animated: step.state === "running" || flowSteps[index].state === "running",
+            style: { stroke: "var(--cortex-secondary)", strokeWidth: 1.75 },
+            zIndex: 1,
+            });
+          },
         ) ?? [],
     }),
-    [displayedSteps, selected],
+    [flowSteps, selected],
   );
   const showDetails = async (run: WorkflowRun) => {
     setSelectedId(run.id);
@@ -231,8 +263,11 @@ export function ProcessesPage() {
         {selected ? (
           <>
             <p className="mb-3 text-sm">
-              {selected.job_type} — {selected.state}
+              {workflowSchema(selected.job_type)?.label ?? selected.job_type} — {selected.state}
               {selected.recovery_state ? ` (${selected.recovery_state})` : ""}
+            </p>
+            <p className="mb-3 text-xs opacity-70">
+              {workflowSchema(selected.job_type)?.version ?? selected.definition_id} · Canlı durum SQLite ve SSE olaylarıyla şema üzerine işlenir.
             </p>
             {selected.state === "interrupted" && (
               <AInfoPanel title="Kurtarma gerekli">
@@ -240,13 +275,19 @@ export function ProcessesPage() {
                 checkpoint’ten yeniden çalıştırmak için yeniden dene.
               </AInfoPanel>
             )}
-            <AFlowCanvas nodes={nodes} edges={edges} />
-            <div className="mt-3 text-sm">
+            <AFlowCanvas nodes={nodes} edges={edges} nodeTypes={processNodeTypes} height={540} />
+            <div className="process-step-details mt-4">
               {displayedSteps.map((step) => (
-                <div key={step.id}>
-                  {displayStepName(step.step_name)}: {step.state}
-                  {step.retry_count ? ` · retry ${step.retry_count}` : ""}
-                </div>
+                <article key={step.id} className={`process-step-detail workflow-${step.state}`}>
+                  <div className="process-step-detail__header"><strong>{step.schema.label}</strong><span>{step.state}{step.retry_count ? ` · retry ${step.retry_count}` : ""}</span></div>
+                  <p>{step.schema.description}</p>
+                  <dl><div><dt>Teknoloji</dt><dd>{step.schema.technology}</dd></div><div><dt>Garanti</dt><dd>{step.schema.guarantee}</dd></div></dl>
+                  {step.schema.substeps && (
+                    <p className="mt-3 text-xs opacity-70">
+                      Alt GraphRAG aşamaları yukarıdaki süreç akışında gösterilir; upstream bunlar için ayrı checkpoint yayınlamaz.
+                    </p>
+                  )}
+                </article>
               ))}
             </div>
           </>

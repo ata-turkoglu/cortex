@@ -28,7 +28,7 @@ export function AFlowCanvas({
 }) {
   return (
     <div style={{ height }}>
-      <ReactFlow key={nodes.map((node) => node.id).join(",")} nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView onNodeClick={(_, node) => { if (node.type !== "flow-group") onNodeClick?.(node.id); }}>
+      <ReactFlow key={nodes.map((node) => node.id).join(",")} nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView onNodeClick={(_, node) => { if (node.type !== "flow-group" && node.type !== "process-group") onNodeClick?.(node.id); }}>
         <Background />
         {showMiniMap && <MiniMap />}
         <Controls />
