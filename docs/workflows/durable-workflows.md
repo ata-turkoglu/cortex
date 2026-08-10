@@ -6,10 +6,14 @@ and SSE publishes progress. Workspace locks protect unsafe graph, reindex, and d
 operations. Workflow definitions are versioned in code and not user-editable in V1.
 
 Phase 7 persists queued/running/completed workflow runs, individual step checkpoints, and
-append-only events in SQLite. Dramatiq runs the durable state machine through Redis; a Redis
-outage leaves commands queued for a later retry rather than losing their state. The workflow
-API creates, inspects, cancels, and retries runs; its SSE endpoint accepts the last event ID
-for reconnect. Index, graph, and deletion operations acquire a workspace-scoped lock. Startup
+append-only events in SQLite. The REST API commits a newly created or retried run before
+publishing its Dramatiq message, so worker connections can immediately claim it. Dramatiq runs
+the durable state machine through Redis; a Redis outage leaves commands queued for a later retry
+rather than losing their state. The workflow API creates, inspects, cancels, and retries runs;
+its SSE endpoint accepts the last event ID for reconnect. Index, graph, and deletion operations
+acquire a workspace-scoped lock. Each worker applies persisted global settings before it resolves
+providers or models, so the user-selected embedding and GraphRAG assignments apply equally to
+API and worker execution. Startup
 marks stale running runs `interrupted` with recovery state `restart_detected`.
 
 Stage limits are global V1 settings: ingestion, dense reindex, GraphRAG reindex, and deletion

@@ -31,9 +31,24 @@ alongside its logical-document replacements.
 
 `GraphRAGAdapter.initialize()` invokes the supported GraphRAG `init` command only for that
 workspace root and records the resulting `settings.yaml` for the later worker-owned index call.
-It aligns the generated chat-model placeholder with Cortex's configured answer model, but never
-writes provider secrets: the worker passes the configured OpenAI credential to the GraphRAG CLI
-only through `GRAPHRAG_API_KEY` in the subprocess environment.
+It configures GraphRAG's text loader with an explicit Markdown (`*.md`) pattern, matching the
+normalized Markdown files materialized by Cortex; the pattern uses `\Z` rather than `$` because
+GraphRAG expands settings through Python templates. It sets the GraphRAG tokenizer field to the
+stable `cl100k_base` encoding independently of the selected chat or embedding provider, so local
+model identifiers are never passed to tiktoken. It never writes provider secrets: the worker
+passes the configured OpenAI credential to the GraphRAG CLI only through `GRAPHRAG_API_KEY` in the
+subprocess environment.
+
+GraphRAG 2.6's `create_final_text_units` workflow can leave Arrow arrays inside object-valued
+`entity_ids` cells, which upstream Pandas cannot serialize to Parquet. The worker invokes GraphRAG
+through `app.graphrag.cli`, a narrow compatibility entry point that converts only nested Arrow
+arrays to equivalent Python lists immediately before the upstream artifact writer runs. The worker
+pins `pandas==2.2.3` and `pyarrow==17.0.0`; canonical GraphRAG artifacts, workflow order, and
+schemas remain upstream-owned.
+
+The API reads the same canonical Parquet artifacts for the bounded Graph explorer projection, so
+`pyarrow==17.0.0` is an API dependency as well as a worker runtime dependency. This prevents the
+read-only graph endpoint from returning an internal error when GraphRAG artifacts are present.
 
 Deferred updates have three explicit stages: prepare the workspace snapshot and mark the graph
 indexing in SQLite; run input materialization, GraphRAG index, and NetworkX rebuild with no

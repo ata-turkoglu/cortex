@@ -50,9 +50,19 @@ the same token system supplies its dark variant.
 
 The System map assigns every node a semantic color. Its legend groups application flow, data and
 retrieval, control, LLM source, and platform nodes; local and API LLM nodes remain visibly
-distinct. The canvas uses labeled, dashed boundary groups for the main flow stages, while
+distinct. The canvas uses labeled, color-coded background groups with solid boundaries for the
+main flow stages; GraphRAG indexing is isolated from dense indexing in its own group, with a
+minimum visual gap between adjacent nodes and stage boundaries; every node belongs to exactly
+one stage group. The layout rule uses a 205 px node width, 160 px minimum node height, a
+100 px horizontal gap, and an 80 px vertical gap: a next node starts only after the prior
+node's right or bottom edge plus the matching-axis gap. Every group retains a 100 px
+horizontal and 80 px vertical inner padding, while
 selecting a node opens its contextual detail sidebar, which can be dismissed without changing
-the active map. The document flow makes format-dependent behavior explicit: Markdown and plain
+the active map. Persistent-store nodes use a dedicated slate color and a "Kalıcı kayıt" badge.
+The query map uses separately spaced hybrid and GraphRAG lanes with Bezier edges to keep
+route branches readable. Decision nodes render their positive and negative outcomes explicitly;
+edge labels are concise and use an opaque background so they remain legible between nodes. The
+document flow makes format-dependent behavior explicit: Markdown and plain
 text are read directly as UTF-8, while PDF and DOCX pass through Docling (and its OCR path when
 needed) before normalized Markdown is stored. Storage nodes explicitly mark both the persisted
 record and its technology: source and normalized files use the workspace filesystem; document,
@@ -75,7 +85,18 @@ GraphRAG state, queues its durable reindex workflow on explicit user action, and
 bounded entity/relationship projection returned by the workspace-scoped graph endpoint.
 The Processes page renders the full versioned workflow schema for the selected run, including
 steps that have not yet persisted a checkpoint; live SQLite/SSE step states are overlaid on
-those nodes so queued runs remain understandable from their first event.
+those nodes so queued runs remain understandable from their first event. `workflowSchemas.ts`
+is the shared frontend definition for the System map and Processes page; it records each
+checkpoint's purpose, technology boundary, and operational guarantee.
+
+For GraphRAG, the Processes page also shows the upstream index pipeline's entity and relationship
+extraction, description summarization, community-report, and embedding stages beneath the
+durable `index` checkpoint. Microsoft GraphRAG currently exposes that pipeline as one CLI command,
+so these child stages inherit the parent checkpoint state only while it is running or completed;
+after an index failure they show as unverified rather than falsely claiming individual failure.
+The process canvas uses the System map's semantic visual language: each node shows its
+stage type, title, concise description, technology boundary, and a live state badge. Its compact
+multi-row layout keeps GraphRAG's expanded pipeline readable without duplicating it below the flow.
 After an upload, the Upload page lists each submitted filename with its ingestion checkpoints and
 refreshes their workflow state until it reaches a terminal result; completed checkpoints use a
 visible check mark.
