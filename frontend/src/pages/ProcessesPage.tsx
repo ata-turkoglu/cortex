@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiClient, type WorkflowEvent, type WorkflowRun } from "../api/client";
+import { formatCortexDateTime, formatCortexTime } from "../utils/date";
 import { useJobsStore } from "../app/jobs";
 import {
   AFlowCanvas,
@@ -8,9 +9,10 @@ import {
 } from "../flow/AFlowCanvas";
 import { processNodeTypes, type ProcessNodeKind } from "../flow/AProcessFlowNodes";
 import { workflowSchema } from "../flow/workflowSchemas";
-import { AButton, ACard, ADialog, AInfoPanel } from "../components/ui";
+import { AButton, ACard, ADialog, AInfoPanel, ALoading, useConfirmation } from "../components/ui";
 
 const activeStates = new Set(["queued", "running", "cancelling"]);
+const terminalStates = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
 function substepState(parentState: string) {
   if (parentState === "completed") return "completed";
@@ -51,44 +53,63 @@ function sameWorkflowRuns(current: WorkflowRun[], next: WorkflowRun[]) {
 }
 
 export function ProcessesPage() {
-  const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const runs = useJobsStore((state) => state.workflowRuns);
+  const setRuns = useJobsStore((state) => state.setWorkflowRuns);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [details, setDetails] = useState<WorkflowEvent[]>([]);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<Date>();
+  const [streamStatus, setStreamStatus] = useState<"idle" | "connecting" | "live" | "reconnecting">("idle");
   const refreshInFlight = useRef(false);
+  const refreshTimer = useRef<number | undefined>(undefined);
   const setJobs = useJobsStore((state) => state.setJobs);
+  const confirm = useConfirmation();
+  const [clearingHistory, setClearingHistory] = useState(false);
   const refresh = useCallback(async () => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     try {
       const next = await apiClient.listWorkflows();
-      setRuns((current) => (sameWorkflowRuns(current, next) ? current : next));
-      setJobs(
-        next
-          .filter((run) => activeStates.has(run.state))
-          .map((run) => ({
-            id: run.id,
-            label: run.job_type,
-            progress: Math.round(
-              (run.steps.filter((step) => step.state === "completed").length /
-                Math.max(run.steps.length, 1)) *
-                100,
-            ),
-          })),
-      );
+      if (!sameWorkflowRuns(useJobsStore.getState().workflowRuns, next)) {
+        setRuns(next);
+        setJobs(
+          next
+            .filter((run) => activeStates.has(run.state))
+            .map((run) => ({
+              id: run.id,
+              label: run.job_type,
+              progress: Math.round(
+                (run.steps.filter((step) => step.state === "completed").length /
+                  Math.max(run.steps.length, 1)) *
+                  100,
+              ),
+            })),
+        );
+      }
       setError(null);
+      setLastSuccessfulRefresh(new Date());
     } catch {
       setError("Süreç durumu alınamadı.");
     } finally {
       refreshInFlight.current = false;
+      setLoading(false);
     }
-  }, [setJobs]);
+  }, [setJobs, setRuns]);
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current !== undefined) return;
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = undefined;
+      void refresh();
+    }, 500);
+  }, [refresh]);
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 5000);
-    return () => window.clearInterval(timer);
+    return () => {
+      if (refreshTimer.current !== undefined) window.clearTimeout(refreshTimer.current);
+    };
   }, [refresh]);
   const activeRunIds = useMemo(
     () =>
@@ -99,12 +120,27 @@ export function ProcessesPage() {
     [runs],
   );
   useEffect(() => {
+    if (!activeRunIds) {
+      setStreamStatus("idle");
+      return undefined;
+    }
+    setStreamStatus("connecting");
+    const connectedRuns = new Set<string>();
+    const updateStreamStatus = () => setStreamStatus(connectedRuns.size ? "live" : "reconnecting");
     const streams = activeRunIds
       .split(",")
       .filter(Boolean)
       .map((runId) => {
         const stream = apiClient.workflowEvents(runId);
-        stream.onmessage = () => void refresh();
+        stream.onopen = () => {
+          connectedRuns.add(runId);
+          updateStreamStatus();
+        };
+        stream.onerror = () => {
+          connectedRuns.delete(runId);
+          updateStreamStatus();
+        };
+        stream.onmessage = scheduleRefresh;
         for (const eventType of [
           "queued",
           "started",
@@ -115,11 +151,11 @@ export function ProcessesPage() {
           "cancelled",
           "interrupted",
         ])
-          stream.addEventListener(eventType, () => void refresh());
+          stream.addEventListener(eventType, scheduleRefresh);
         return stream;
       });
     return () => streams.forEach((stream) => stream.close());
-  }, [activeRunIds, refresh]);
+  }, [activeRunIds, scheduleRefresh]);
   const selected = runs.find((run) => run.id === selectedId) ?? runs[0];
   const displayedSteps = useMemo(() => {
     if (!selected) return [];
@@ -251,6 +287,26 @@ export function ProcessesPage() {
       setCopyMessage("Hata kopyalanamadı.");
     }
   };
+  const clearHistory = async () => {
+    const accepted = await confirm({
+      title: "Süreç geçmişi temizlensin mi?",
+      message: "Tamamlanmış, başarısız, iptal edilmiş ve kesintiye uğramış süreç kayıtları gizlenecek. Aktif süreçler korunacak.",
+      confirmLabel: "Geçmişi temizle",
+      danger: true,
+    });
+    if (!accepted) return;
+    setClearingHistory(true);
+    try {
+      await apiClient.clearWorkflowHistory();
+      await refresh();
+      setSelectedId(null);
+    } catch {
+      setError("Süreç geçmişi temizlenemedi.");
+    } finally {
+      setClearingHistory(false);
+    }
+  };
+  const historicalCount = runs.filter((run) => terminalStates.has(run.state)).length;
   return (
     <div className="grid gap-4">
       <AInfoPanel title="Kalıcı süreçler">
@@ -259,12 +315,39 @@ export function ProcessesPage() {
         alınır.
       </AInfoPanel>
       {error && <p role="alert">{error}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--cortex-line)] px-3 py-2 text-sm">
+        <p className="m-0" role="status">
+          {streamStatus === "live" ? "Canlı bağlantı açık" : streamStatus === "connecting" ? "Canlı bağlantı kuruluyor" : streamStatus === "reconnecting" ? "Canlı bağlantı yeniden kuruluyor; kayıtlı durum denetleniyor" : "Aktif süreç yok"}
+          {lastSuccessfulRefresh && ` · Son kontrol ${formatCortexTime(lastSuccessfulRefresh, true)}`}
+        </p>
+        <AButton label="Şimdi yenile" size="small" text onClick={() => void refresh()} />
+      </div>
+      {!loading && (
+        <div className="flex justify-end">
+          <AButton
+            label="Geçmişi temizle"
+            icon="trash"
+            severity="danger"
+            outlined
+            loading={clearingHistory}
+            disabled={clearingHistory || historicalCount === 0}
+            onClick={() => void clearHistory()}
+          />
+        </div>
+      )}
+      {loading && runs.length === 0 ? (
+        <ALoading label="Süreçler yükleniyor…" />
+      ) : (
+      <>
       <ACard title="Canlı iş akışı">
         {selected ? (
           <>
             <p className="mb-3 text-sm">
               {workflowSchema(selected.job_type)?.label ?? selected.job_type} — {selected.state}
               {selected.recovery_state ? ` (${selected.recovery_state})` : ""}
+            </p>
+            <p className="mb-3 text-xs opacity-70">
+              Son durum değişikliği: {formatCortexDateTime(selected.updated_at)}
             </p>
             <p className="mb-3 text-xs opacity-70">
               {workflowSchema(selected.job_type)?.version ?? selected.definition_id} · Canlı durum SQLite ve SSE olaylarıyla şema üzerine işlenir.
@@ -316,9 +399,9 @@ export function ProcessesPage() {
                 text
                 onClick={() => void showDetails(run)}
               />
-              {(run.state === "failed" || run.state === "interrupted") && (
+              {(run.state === "queued" || run.state === "failed" || run.state === "interrupted") && (
                 <AButton
-                  label="Yeniden dene"
+                  label={run.state === "queued" ? "Yeniden gönder" : "Yeniden dene"}
                   size="small"
                   onClick={() =>
                     void apiClient.retryWorkflow(run.id).then(refresh)
@@ -370,6 +453,8 @@ export function ProcessesPage() {
           <p>Sanitize edilmiş hata ayrıntısı yok.</p>
         )}
       </ADialog>
+      </>
+      )}
     </div>
   );
 }

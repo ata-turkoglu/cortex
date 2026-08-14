@@ -6,7 +6,8 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./app/App";
 import { AppearanceProvider } from "./app/appearance";
-import { AConfirmationProvider, AUiProvider } from "./components/ui";
+import { WorkspaceProvider } from "./app/workspace";
+import { AConfirmationProvider, AErrorBoundary, AToastProvider, AUiProvider } from "./components/ui";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 });
@@ -14,13 +15,19 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <AUiProvider>
       <QueryClientProvider client={queryClient}>
-        <AConfirmationProvider>
-          <AppearanceProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </AppearanceProvider>
-        </AConfirmationProvider>
+        <AToastProvider>
+          <AErrorBoundary>
+            <AConfirmationProvider>
+              <AppearanceProvider>
+                <WorkspaceProvider>
+                  <BrowserRouter>
+                    <App />
+                  </BrowserRouter>
+                </WorkspaceProvider>
+              </AppearanceProvider>
+            </AConfirmationProvider>
+          </AErrorBoundary>
+        </AToastProvider>
       </QueryClientProvider>
     </AUiProvider>
   </StrictMode>,

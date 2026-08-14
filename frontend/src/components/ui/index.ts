@@ -9,6 +9,7 @@ export * from "./AColorPicker";
 export * from "./ASelect";
 export * from "./AProgress";
 export * from "./ASkeleton";
+export * from "./ALoading";
 export * from "./ABadge";
 export * from "./AToast";
 export * from "./ATooltip";

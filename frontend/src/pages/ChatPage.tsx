@@ -5,9 +5,10 @@ import {
   type ChatMessage,
   type Conversation,
   type QueryDebug,
-  type Workspace,
 } from "../api/client";
+import { formatCortexTime } from "../utils/date";
 import { AButton, ADialog, AInfoPanel, ALabel, ASelect, ATextarea, useConfirmation } from "../components/ui";
+import { useWorkspace } from "../app/workspace";
 import { AIcon } from "../icons/AIcon";
 
 type Mode = "automatic" | "document_search" | "deep_analysis";
@@ -25,8 +26,7 @@ function conversationTitleFromQuestion(question: string) {
 }
 
 export function ChatPage() {
-  const [workspaceId, setWorkspaceId] = useState("");
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const { workspaces, workspaceId } = useWorkspace();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [active, setActive] = useState<Conversation>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -36,14 +36,10 @@ export function ChatPage() {
   const [source, setSource] = useState<Source>();
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<ChatMessage>();
   const threadAreaRef = useRef<HTMLDivElement>(null);
   const confirm = useConfirmation();
-
-  useEffect(() => {
-    apiClient.listWorkspaces()
-      .then((items) => { setWorkspaces(items); if (!workspaceId && items[0]) setWorkspaceId(items[0].id); })
-      .catch(() => setError("Çalışma alanları alınamadı."));
-  }, [workspaceId]);
+  const displayedMessages = pendingMessage ? [...messages, pendingMessage] : messages;
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -86,8 +82,19 @@ export function ChatPage() {
   async function submit() {
     if (!active || !content.trim() || sending) return;
     const question = content.trim();
+    const optimisticMessage: ChatMessage = {
+      id: `pending-${crypto.randomUUID()}`,
+      role: "user",
+      content: question,
+      status: "pending",
+      citations: [],
+      metadata: {},
+      created_at: new Date().toISOString(),
+    };
     setSending(true);
     setError("");
+    setContent("");
+    setPendingMessage(optimisticMessage);
     try {
       const answer = await apiClient.ask(workspaceId, active.id, question, mode);
       const title = conversationTitleFromQuestion(question);
@@ -97,15 +104,18 @@ export function ChatPage() {
       setActive((item) => (
         item?.id === active.id && item.title === "New conversation" ? { ...item, title } : item
       ));
-      setMessages((items) => [...items, {
-        id: `pending-${crypto.randomUUID()}`, role: "user", content: question, status: "completed",
-        citations: [], metadata: {}, created_at: new Date().toISOString(),
-      }, answer]);
-      setContent("");
+      setMessages((items) => [...items, { ...optimisticMessage, status: "completed" }, answer]);
+      setPendingMessage(undefined);
       const queryRunId = String(answer.metadata.query_run_id ?? "");
       if (queryRunId) setDebug(await apiClient.queryDebug(workspaceId, queryRunId));
-    } catch { setError("Sorgu tamamlanamadı."); }
-    finally { setSending(false); }
+    } catch {
+      setContent(question);
+      setError("Sorgu tamamlanamadı.");
+    }
+    finally {
+      setPendingMessage(undefined);
+      setSending(false);
+    }
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -120,8 +130,9 @@ export function ChatPage() {
   return <>
     <div className="cortex-chat">
       <aside className="cortex-chat__history" aria-label="Sohbet geçmişi">
-        <ALabel className="cortex-chat__workspace">Çalışma alanı
-          <ASelect value={workspaceId} onChange={(event) => { setWorkspaceId(event.value); setActive(undefined); setMessages([]); }} options={workspaces.map((workspace) => ({ label: workspace.name, value: workspace.id }))} placeholder="Çalışma alanı seçin" />
+        <ALabel className="cortex-chat__workspace">
+          Çalışma alanı
+          <ASelect value={workspaceId} options={workspaces.map((workspace) => ({ label: workspace.name, value: workspace.id }))} disabled placeholder="Çalışma alanı seçin" aria-label="Aktif çalışma alanı" />
         </ALabel>
         <AButton label="Yeni sohbet" icon="plus" disabled={!workspaceId} onClick={createConversation} />
         <p className="cortex-chat__history-heading">Sohbet geçmişi</p>
@@ -136,9 +147,9 @@ export function ChatPage() {
       <section className="cortex-chat__main" aria-label="Bilgi tabanı sohbeti">
         <div ref={threadAreaRef} className="cortex-chat__thread-area">
           {error && <AInfoPanel title="Hata">{error}</AInfoPanel>}
-          {!active ? <Welcome onStart={createConversation} disabled={!workspaceId} /> : messages.length === 0 ? <Welcome activeTitle={active.title} onSuggestion={setContent} /> : (
+          {!active ? <Welcome onStart={createConversation} disabled={!workspaceId} /> : displayedMessages.length === 0 ? <Welcome activeTitle={active.title} onSuggestion={setContent} /> : (
             <div className="cortex-chat__thread">
-              {messages.map((message) => <Message key={message.id} message={message} onSource={openSource} />)}
+              {displayedMessages.map((message) => <Message key={message.id} message={message} onSource={openSource} />)}
               {sending && <div className="cortex-chat__thinking"><span /><span /><span /> Yanıt hazırlanıyor</div>}
             </div>
           )}
@@ -161,5 +172,5 @@ function Welcome({ activeTitle, disabled, onStart, onSuggestion }: { activeTitle
 
 function Message({ message, onSource }: { message: ChatMessage; onSource: (chunkId: string) => void }) {
   const isUser = message.role === "user";
-  return <article className={`cortex-chat__message cortex-chat__message--${message.role}`}><div className="cortex-chat__avatar"><AIcon name={isUser ? "user" : "sparkles"} size={17} /></div><div className="cortex-chat__message-content"><div className="cortex-chat__message-meta"><strong>{isUser ? "Siz" : "Cortex"}</strong><time>{new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(new Date(message.created_at))}</time></div><p>{message.content}</p>{message.metadata.inference === true && <small className="cortex-chat__inference">Kaynaklara dayalı çıkarım</small>}{message.citations.length > 0 && <details className="cortex-chat__sources"><summary>{message.citations.length} kaynak göster</summary><div>{message.citations.map((citation) => <button key={citation.chunk_id} type="button" onClick={() => onSource(citation.chunk_id)}>{citation.label}</button>)}</div></details>}</div></article>;
+  return <article className={`cortex-chat__message cortex-chat__message--${message.role}`}><div className="cortex-chat__avatar"><AIcon name={isUser ? "user" : "sparkles"} size={17} /></div><div className="cortex-chat__message-content"><div className="cortex-chat__message-meta"><strong>{isUser ? "Siz" : "Cortex"}</strong><time>{formatCortexTime(message.created_at)}</time></div><p>{message.content}</p>{message.metadata.inference === true && <small className="cortex-chat__inference">Kaynaklara dayalı çıkarım</small>}{message.citations.length > 0 && <details className="cortex-chat__sources"><summary>{message.citations.length} kaynak göster</summary><div>{message.citations.map((citation) => <button key={citation.chunk_id} type="button" onClick={() => onSource(citation.chunk_id)}>{citation.label}</button>)}</div></details>}</div></article>;
 }

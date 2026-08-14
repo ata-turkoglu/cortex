@@ -1,5 +1,6 @@
 /** Boundary for OpenAPI-generated code. Feature code imports from this module only. */
 import type { components } from "./generated/schema";
+import { sanitizeToastDetail, toast } from "../components/ui";
 export type WorkflowStep = {
   id: string;
   step_name: string;
@@ -66,14 +67,43 @@ export type GraphExplorer = {
   edges: { id: string; source: string; target: string; label: string | null }[];
 };
 const base = "/api/v1";
+function mutationMessage(path: string, method: string) {
+  if (path === "/workspaces" && method === "POST") return "Çalışma alanı oluşturuldu.";
+  if (path.startsWith("/workspaces/") && method === "DELETE" && !path.includes("/documents/")) return "Çalışma alanı silindi.";
+  if (path.includes("/uploads")) return "Yükleme ve indeksleme başlatıldı.";
+  if (path.includes("/documents/") && method === "DELETE") return "Belge silme işlemi başlatıldı.";
+  if (path.includes("/messages") && method === "POST") return "Yanıt hazır.";
+  if (path.includes("/messages") && method === "PATCH") return "Mesaj güncellendi.";
+  if (path.includes("/conversations") && method === "POST") return "Yeni sohbet oluşturuldu.";
+  if (path.includes("/conversations/") && method === "DELETE") return "Sohbet silindi.";
+  if (path.includes("/reset-defaults")) return "Varsayılan ayarlar geri yüklendi.";
+  if (path.includes("/validate")) return "Sağlayıcı doğrulandı.";
+  if (path.includes("/models/pull")) return "Model indirme işlemi başlatıldı.";
+  if (path.includes("/embedding/health")) return "Embedding sağlık testi tamamlandı.";
+  if (path.includes("/setup/complete")) return "Kurulum tamamlandı.";
+  if (path.includes("/workflows/history")) return "Süreç geçmişi temizlendi.";
+  if (path.startsWith("/workflows/")) return "Süreç güncellendi.";
+  if (path === "/workflows" && method === "POST") return "Süreç başlatıldı.";
+  if (path === "/settings" && method === "PUT") return "Ayarlar kaydedildi.";
+  return "İşlem tamamlandı.";
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${base}${path}`, init);
-  if (!response.ok) {
-    const body = await response.json().catch(() => null) as { message?: string } | null;
-    throw new Error(body?.message ?? "İstek tamamlanamadı.");
+  const method = init?.method?.toUpperCase() ?? "GET";
+  try {
+    const response = await fetch(`${base}${path}`, init);
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { message?: string } | null;
+      throw new Error(body?.message ?? "İstek tamamlanamadı.");
+    }
+    if (method !== "GET") toast.success(mutationMessage(path, method));
+    if (response.status === 204) return undefined as T;
+    return response.json() as Promise<T>;
+  } catch (error) {
+    const detail = sanitizeToastDetail(error);
+    toast.error("İşlem tamamlanamadı.", detail);
+    throw error;
   }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
 }
 export const apiClient = {
   listWorkspaces: () => request<Workspace[]>("/workspaces"),
@@ -105,6 +135,7 @@ export const apiClient = {
   embeddingStatus: () => request<{ provider: string; model: string; installed: boolean; dimension: number | null; model_digest: string | null; last_benchmark: string | null; requires_full_reindex: boolean }>("/settings/embedding/status"),
   graphragEstimate: () => request<{ update_mode: string; pending_document_threshold: number; confirmation_threshold_usd: number; requires_confirmation: boolean }>("/settings/graphrag/estimate"),
   listWorkflows: async () => request<WorkflowRun[]>("/workflows"),
+  clearWorkflowHistory: () => request<{ deleted: number }>("/workflows/history", { method: "DELETE" }),
   workflow: (id: string) => request<WorkflowRun>(`/workflows/${id}`),
   createWorkflow: (workspaceId: string, jobType: "graphrag_reindex") =>
     request<WorkflowRun>("/workflows", {

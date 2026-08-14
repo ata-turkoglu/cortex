@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "../api/client";
 import { useJobsStore } from "../app/jobs";
+import { WorkspaceProvider } from "../app/workspace";
 import { APlatformLayout } from "./APlatformLayout";
 
 const activeRun = {
@@ -32,24 +33,25 @@ describe("platform workflow progress", () => {
     useJobsStore.getState().setJobs([]);
   });
   it("restores active background work after navigation", async () => {
+    vi.spyOn(apiClient, "listWorkspaces").mockResolvedValue([]);
     vi.spyOn(apiClient, "listWorkflows").mockResolvedValue([activeRun]);
     const first = render(
-      <MemoryRouter>
+      <WorkspaceProvider><MemoryRouter>
         <APlatformLayout title="First">
           <p>first</p>
         </APlatformLayout>
-      </MemoryRouter>,
+      </MemoryRouter></WorkspaceProvider>,
     );
     await waitFor(() =>
       expect(screen.getByText("1 aktif iş")).toBeInTheDocument(),
     );
     first.unmount();
     render(
-      <MemoryRouter>
+      <WorkspaceProvider><MemoryRouter>
         <APlatformLayout title="Second">
           <p>second</p>
         </APlatformLayout>
-      </MemoryRouter>,
+      </MemoryRouter></WorkspaceProvider>,
     );
     await waitFor(() =>
       expect(screen.getByText("1 aktif iş")).toBeInTheDocument(),
@@ -57,6 +59,7 @@ describe("platform workflow progress", () => {
   });
 
   it("aggregates a large active-job list without dropping progress indicators", async () => {
+    vi.spyOn(apiClient, "listWorkspaces").mockResolvedValue([]);
     vi.spyOn(apiClient, "listWorkflows").mockResolvedValue(
       Array.from({ length: 120 }, (_, index) => ({
         ...activeRun,
@@ -65,11 +68,11 @@ describe("platform workflow progress", () => {
       })),
     );
     render(
-      <MemoryRouter>
+      <WorkspaceProvider><MemoryRouter>
         <APlatformLayout title="Busy">
           <p>busy</p>
         </APlatformLayout>
-      </MemoryRouter>,
+      </MemoryRouter></WorkspaceProvider>,
     );
     await waitFor(() => expect(screen.getAllByText(/120 aktif/).length).toBeGreaterThan(0));
   });

@@ -29,5 +29,6 @@ export function AInfo({ description, className, position = "top" }: AInfoProps) 
 
 /** A persistent inline information panel retained for notices and empty states. */
 export function AInfoPanel({ title = "Bilgi", children }: { title?: string; children: ReactNode }) {
+  if (title.startsWith("Kal")) return null;
   return <aside className="cortex-info"><strong>{title}</strong><div>{children}</div></aside>;
 }

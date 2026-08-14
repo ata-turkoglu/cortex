@@ -1,8 +1,9 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import { AIcon, type IconName } from "../icons/AIcon";
-import { AButton, AProgress, ATooltip } from "../components/ui";
+import { AButton, AProgress, ASelect, ATooltip } from "../components/ui";
 import { useJobsStore } from "../app/jobs";
+import { useWorkspace } from "../app/workspace";
 import { apiClient } from "../api/client";
 
 type NavItem = { to: string; label: string; icon: IconName };
@@ -25,12 +26,15 @@ export function APlatformLayout({ title, children }: { title: string; children: 
   const [mobileOpen, setMobileOpen] = useState(false);
   const jobs = useJobsStore((state) => state.jobs);
   const setJobs = useJobsStore((state) => state.setJobs);
+  const setWorkflowRuns = useJobsStore((state) => state.setWorkflowRuns);
   const location = useLocation();
+  const { workspaces, workspaceId, setWorkspaceId } = useWorkspace();
 
   useEffect(() => {
     const refresh = async () => {
       try {
         const runs = await apiClient.listWorkflows();
+        setWorkflowRuns(runs);
         setJobs(runs.filter((run) => ["queued", "running", "cancelling"].includes(run.state)).map((run) => ({
           id: run.id,
           label: run.job_type,
@@ -41,7 +45,7 @@ export function APlatformLayout({ title, children }: { title: string; children: 
     void refresh();
     const timer = window.setInterval(() => void refresh(), 5000);
     return () => window.clearInterval(timer);
-  }, [setJobs]);
+  }, [setJobs, setWorkflowRuns]);
 
   const renderNavigation = (items: NavItem[]) => items.map((item) => (
     <NavLink key={item.to} to={item.to} className={location.pathname === item.to || (item.to !== "/" && location.pathname.startsWith(`${item.to}/`)) ? "active" : undefined}
@@ -72,6 +76,17 @@ export function APlatformLayout({ title, children }: { title: string; children: 
       </header>
       <div className={`app-shell${expanded ? "" : " is-sidebar-collapsed"}${mobileOpen ? " is-sidebar-mobile-open" : ""}`}>
         <aside className="sidebar">
+          {expanded && <div className="sidebar__workspace">
+            <label htmlFor="sidebar-workspace">Çalışma alanı</label>
+            <ASelect
+              inputId="sidebar-workspace"
+              value={workspaceId}
+              onChange={(event) => setWorkspaceId(event.value)}
+              options={workspaces.map((workspace) => ({ label: workspace.name, value: workspace.id }))}
+              placeholder="Çalışma alanı seçin"
+              aria-label="Çalışma alanı seçin"
+            />
+          </div>}
           <nav aria-label="Ana menü">{renderNavigation(navigation)}</nav>
           <nav className="sidebar__bottom-nav" aria-label="Platform ayarları">{renderNavigation(bottomNavigation)}</nav>
         </aside>

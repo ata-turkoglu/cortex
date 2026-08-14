@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   apiClient,
@@ -6,6 +6,7 @@ import {
   type WorkflowRun,
   type Workspace,
 } from "../api/client";
+import { formatCortexDate } from "../utils/date";
 import {
   AButton,
   ABadge,
@@ -13,13 +14,17 @@ import {
   AFileUpload,
   AInfoPanel,
   AInput,
+  ALoading,
   ASelect,
   ATextarea,
   useConfirmation,
 } from "../components/ui";
 import { AFlowCanvas, type AFlowEdge, type AFlowNode } from "../flow/AFlowCanvas";
+import { graphNodePresentation, graphNodeTypes, type GraphNode } from "../flow/AGraphNodes";
+import { useWorkspace } from "../app/workspace";
 
 const ingestionSteps = ["parse", "normalize", "logical_documents", "chunk", "index"];
+const GRAPH_NODE_COLUMNS = 8;
 const terminalWorkflowStates = new Set([
   "completed",
   "failed",
@@ -91,14 +96,16 @@ function useWorkspaces() {
   return { workspaces, error, refresh };
 }
 
-function WorkspaceSelect({
+export function WorkspaceSelect({
   workspaces,
   value,
   onChange,
+  disabled = false,
 }: {
   workspaces: Workspace[];
   value: string;
   onChange: (id: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <ASelect
@@ -107,6 +114,7 @@ function WorkspaceSelect({
       options={workspaces.map((w) => ({ label: w.name, value: w.id }))}
       placeholder="Çalışma alanı seçin"
       className="max-w-md"
+      disabled={disabled}
     />
   );
 }
@@ -156,7 +164,7 @@ export function DashboardPage() {
                 <strong>{doc.title}</strong>
                 <span>
                   {doc.workspace_name} ·{" "}
-                  {new Date(doc.updated_at).toLocaleDateString("tr-TR")}
+                  {formatCortexDate(doc.updated_at, { dateStyle: "short" })}
                 </span>
               </Link>
             ))}
@@ -306,8 +314,7 @@ export function WorkspaceOverviewPage() {
 }
 
 export function DocumentsPage() {
-  const { workspaces } = useWorkspaces();
-  const [workspaceId, setWorkspaceId] = useState("");
+  const { workspaces, workspaceId } = useWorkspace();
   const [documents, setDocuments] = useState<CatalogDocument[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [selectedDetail, setSelectedDetail] = useState<Awaited<
@@ -317,9 +324,6 @@ export function DocumentsPage() {
   const confirm = useConfirmation();
   const [deleting, setDeleting] = useState<Record<string, string>>({});
   const [deleteError, setDeleteError] = useState("");
-  useEffect(() => {
-    if (!workspaceId && workspaces[0]) setWorkspaceId(workspaces[0].id);
-  }, [workspaceId, workspaces]);
   const refresh = useCallback(() => {
     if (workspaceId)
       void apiClient.listDocuments(workspaceId).then((nextDocuments) => {
@@ -406,11 +410,7 @@ export function DocumentsPage() {
           <AButton label="Belge yükle" icon="upload" />
         </Link>
       </section>
-      <WorkspaceSelect
-        workspaces={workspaces}
-        value={workspaceId}
-        onChange={setWorkspaceId}
-      />
+      <WorkspaceSelect workspaces={workspaces} value={workspaceId} onChange={() => undefined} disabled />
       <div className="documents-split-view">
       <ACard title="Belge listesi">
         {deleteError && <p role="alert">{deleteError}</p>}
@@ -515,21 +515,25 @@ export function DocumentDetailPage() {
 }
 
 export function UploadPage() {
-  const { workspaces } = useWorkspaces();
-  const params = new URLSearchParams(window.location.search);
-  const [workspaceId, setWorkspaceId] = useState(params.get("workspace") || "");
+  const { workspaces, workspaceId } = useWorkspace();
   const [files, setFiles] = useState<File[]>([]);
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadedWorkflows, setUploadedWorkflows] = useState<
     UploadedWorkflow[]
   >([]);
-  useEffect(() => {
-    if (!workspaceId && workspaces[0]) setWorkspaceId(workspaces[0].id);
-  }, [workspaceId, workspaces]);
+  const uploadedWorkflowIds = useMemo(
+    () => uploadedWorkflows.map((upload) => upload.workflowRunId).join(","),
+    [uploadedWorkflows],
+  );
+  const hasIncompleteUploadedWorkflow = uploadedWorkflows.some(
+    (upload) => !upload.workflow || !terminalWorkflowStates.has(upload.workflow.state),
+  );
   const refreshUploadedWorkflows = useCallback(async () => {
-    if (!uploadedWorkflows.length) return;
-    const workflows = await apiClient.listWorkflows();
+    if (!uploadedWorkflowIds) return;
+    const workflows = await Promise.all(
+      uploadedWorkflowIds.split(",").map((workflowRunId) => apiClient.workflow(workflowRunId)),
+    );
     const byId = new Map(workflows.map((workflow) => [workflow.id, workflow]));
     setUploadedWorkflows((current) =>
       current.map((upload) => ({
@@ -537,23 +541,18 @@ export function UploadPage() {
         workflow: byId.get(upload.workflowRunId),
       })),
     );
-  }, [uploadedWorkflows.length]);
+  }, [uploadedWorkflowIds]);
   useEffect(() => {
-    if (!uploadedWorkflows.length) return;
+    if (!uploadedWorkflowIds) return;
     void refreshUploadedWorkflows();
-    if (
-      uploadedWorkflows.every(
-        (upload) =>
-          upload.workflow && terminalWorkflowStates.has(upload.workflow.state),
-      )
-    )
+    if (!hasIncompleteUploadedWorkflow)
       return;
     const timer = window.setInterval(
       () => void refreshUploadedWorkflows(),
-      2000,
+      3000,
     );
     return () => window.clearInterval(timer);
-  }, [refreshUploadedWorkflows, uploadedWorkflows]);
+  }, [hasIncompleteUploadedWorkflow, refreshUploadedWorkflows, uploadedWorkflowIds]);
   const upload = async () => {
     if (!workspaceId) {
       setMessage("Önce bir çalışma alanı seçin.");
@@ -588,11 +587,7 @@ export function UploadPage() {
     <div className="page-stack two-column">
       <ACard title="Belge yükle">
         <div className="form-stack">
-          <WorkspaceSelect
-            workspaces={workspaces}
-            value={workspaceId}
-            onChange={setWorkspaceId}
-          />
+          <WorkspaceSelect workspaces={workspaces} value={workspaceId} onChange={() => undefined} disabled />
           <AFileUpload
             multiple
             accept=".md,.txt,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -636,8 +631,7 @@ export function UploadPage() {
 }
 
 export function GraphPage() {
-  const { workspaces } = useWorkspaces();
-  const [id, setId] = useState("");
+  const { workspaces, workspaceId: id } = useWorkspace();
   const [data, setData] = useState<Awaited<
     ReturnType<typeof apiClient.workspaceOverview>
   > | null>(null);
@@ -647,11 +641,11 @@ export function GraphPage() {
   const [error, setError] = useState<string | null>(null);
   const [queueing, setQueueing] = useState(false);
   const [graphIndexing, setGraphIndexing] = useState(false);
-  useEffect(() => {
-    if (!id && workspaces[0]) setId(workspaces[0].id);
-  }, [id, workspaces]);
+  const [loading, setLoading] = useState(true);
+  const [activeDescriptionId, setActiveDescriptionId] = useState<string | null>(null);
   const refresh = useCallback(() => {
     if (!id) return;
+    setLoading(true);
     void Promise.all([
       apiClient.workspaceOverview(id),
       apiClient.graph(id),
@@ -669,10 +663,14 @@ export function GraphPage() {
           ),
         );
         setError(null);
+        setLoading(false);
       })
       .catch(() => setError("Graf verisi alınamadı. Bağlantıyı ve çalışma alanı durumunu kontrol edin."));
   }, [id]);
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (error) setLoading(false);
+  }, [error]);
   useEffect(() => {
     if (!graphIndexing) return;
     const timer = window.setInterval(refresh, 5000);
@@ -690,17 +688,36 @@ export function GraphPage() {
       setQueueing(false);
     }
   };
-  const nodes: AFlowNode[] = (graph?.nodes ?? []).map((node) => ({
+  const nodes: AFlowNode[] = (graph?.nodes ?? []).map((node, index): GraphNode => {
+    const presentation = graphNodePresentation(node.attributes);
+    const column = index % GRAPH_NODE_COLUMNS;
+    const row = Math.floor(index / GRAPH_NODE_COLUMNS);
+    return {
     id: node.id,
-    position: { x: 0, y: 0 },
-    data: { label: node.label },
-    style: { border: "1px solid var(--primary-color)", borderRadius: 8, maxWidth: 220, padding: 10 },
-  }));
+    type: "graph-entity",
+    position: { x: column * 165 + (row % 2) * 82, y: row * 130 },
+    data: {
+      label: node.label,
+      description: node.description,
+      ...presentation,
+      descriptionOpen: activeDescriptionId === node.id,
+      onDescriptionToggle: (nodeId) => setActiveDescriptionId((activeId) => activeId === nodeId ? null : nodeId),
+    },
+    style: { height: 108, minHeight: 108, width: 108 },
+    zIndex: activeDescriptionId === node.id ? 1000 : 0,
+    };
+  });
   const edges: AFlowEdge[] = (graph?.edges ?? []).map((edge) => ({
     id: edge.id,
     source: edge.source,
     target: edge.target,
     label: edge.label ?? undefined,
+    type: "bezier",
+    style: { stroke: "var(--cortex-secondary)", strokeDasharray: "5 4", strokeWidth: 1.5 },
+    labelStyle: { fill: "var(--cortex-text)", fontSize: 10, fontWeight: 750 },
+    labelBgPadding: [5, 3],
+    labelBgBorderRadius: 4,
+    labelBgStyle: { fill: "var(--cortex-panel)", fillOpacity: 0.98, stroke: "var(--cortex-line)", strokeWidth: 1 },
   }));
   const graphBadgeTone =
     data?.graphrag_state === "ready"
@@ -710,7 +727,11 @@ export function GraphPage() {
         : "secondary";
   return (
     <div className="page-stack">
-      <WorkspaceSelect workspaces={workspaces} value={id} onChange={setId} />
+      <WorkspaceSelect workspaces={workspaces} value={id} onChange={() => undefined} disabled />
+      {id && loading ? (
+        <ALoading label="Graf verisi yükleniyor…" />
+      ) : (
+      <>
       <ACard title="GraphRAG durumu">
         <AInfoPanel
           title={
@@ -750,13 +771,20 @@ export function GraphPage() {
       {error && <AInfoPanel title="Graf kullanılamıyor">{error}</AInfoPanel>}
       {nodes.length > 0 ? (
         <ACard title="Bilgi grafiği">
-          <AFlowCanvas nodes={nodes} edges={edges} height={620} showMiniMap />
+          <div className="system-map__legend graph-page__legend" aria-label="Graf varlık türleri">
+            {["input", "service", "retrieval", "processor", "llm-local", "decision", "storage"].map((kind) => (
+              <span key={kind} className={`system-map__legend-item is-${kind}`}><i aria-hidden="true" />{({ input: "Kişi", service: "Organizasyon", retrieval: "Konum", processor: "Olay", "llm-local": "Ürün / teknoloji", decision: "Kavram", storage: "Diğer" } as Record<string, string>)[kind]}</span>
+            ))}
+          </div>
+          <AFlowCanvas nodes={nodes} edges={edges} nodeTypes={graphNodeTypes} height={620} showMiniMap />
         </ACard>
       ) : (
         <AInfoPanel title="Henüz gösterilecek bir grafik yok">
           Çalışma alanındaki belgeler için GraphRAG indekslemesini başlatın. İşin ilerlemesini
           Süreçler sayfasından takip edebilirsiniz.
         </AInfoPanel>
+      )}
+      </>
       )}
     </div>
   );
