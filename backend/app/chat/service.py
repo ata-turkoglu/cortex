@@ -20,6 +20,13 @@ from ..retrieval.document_lookup import group_evidence_by_document, match_reason
 from ..retrieval.runtime import HybridRetrievalRuntime, get_hybrid_retrieval_runtime
 from ..retrieval.schemas import AnswerState, Evidence, RetrievalResult
 from ..workflows.queries import create_query_run
+from .query_plan import (
+    QueryPlan,
+    entity_resolution_trace,
+    plan_query,
+    resolve_entities,
+    retrieval_queries,
+)
 
 MODES = {"automatic", "document_search", "deep_analysis"}
 ROUTES = {"hybrid", "graphrag_local", "graphrag_global", "graphrag_drift"}
@@ -125,7 +132,76 @@ def _hybrid_evidence(
     )
 
 
-def _answer(evidence: list[Evidence]) -> tuple[str, AnswerState, list[dict[str, str]]]:
+def _select_evidence(evidence: list[Evidence], plan: QueryPlan) -> list[Evidence]:
+    """Prefer entity-bearing context and document diversity after HybridRetriever."""
+    values = [(entity.resolved_value or entity.mention).casefold() for entity in plan.entities]
+
+    def relevance(item: Evidence) -> tuple[int, int, float]:
+        text = item.content.casefold()
+        full_name_matches = sum(
+            bool(entity.resolved_value and entity.resolved_value.casefold() in text)
+            for entity in plan.entities
+        )
+        descriptive = sum(term in text for term in ("malik", "hisse", "tapu", "miras", "tescil"))
+        numeric_only = int(
+            bool(re.search(r"(?:^|\s)\d[\d. ,/-]{5,}(?:\s|$)", text)) and descriptive == 0
+        )
+        return (
+            full_name_matches * 100 + sum(value in text for value in values) * 4 + descriptive,
+            -numeric_only,
+            item.score,
+        )
+
+    ranked = sorted(evidence, key=relevance, reverse=True)
+    selected: list[Evidence] = []
+    document_ids: set[str] = set()
+    for item in ranked:
+        identity = item.document_id or item.source
+        if identity in document_ids and len(document_ids) < min(
+            len(ranked), get_settings().final_evidence_top_k
+        ):
+            continue
+        selected.append(item)
+        document_ids.add(identity)
+        if len(selected) == get_settings().final_evidence_top_k:
+            break
+    return selected
+
+
+def _planned_hybrid_evidence(
+    session: Session,
+    workspace_id: str,
+    query: str,
+    plan: QueryPlan,
+    *,
+    needs_list: bool,
+    runtime: HybridRetrievalRuntime | None = None,
+) -> tuple[RetrievalResult, list[str]]:
+    queries = retrieval_queries(query, plan)
+    results = [
+        _hybrid_evidence(session, workspace_id, item, needs_list=needs_list, runtime=runtime)
+        for item in queries
+    ]
+    seen: set[str] = set()
+    evidence: list[Evidence] = []
+    for result in results:
+        for item in result.evidence:
+            key = item.chunk_id or f"{item.source}:{item.content}"
+            if key not in seen:
+                seen.add(key)
+                evidence.append(item)
+    primary = results[0]
+    return RetrievalResult(
+        tuple(_select_evidence(evidence, plan)),
+        primary.state,
+        primary.fallback_reason,
+        primary.trace,
+    ), queries
+
+
+def _answer(
+    evidence: list[Evidence], plan: QueryPlan | None = None
+) -> tuple[str, AnswerState, list[dict[str, str]]]:
     if not evidence:
         return (
             "Bu çalışma alanındaki kaynaklarda bu soruyu destekleyen kanıt bulamadım.",
@@ -141,6 +217,33 @@ def _answer(evidence: list[Evidence]) -> tuple[str, AnswerState, list[dict[str, 
         }
         for item in evidence
     ]
+    if plan:
+        if plan.requires_aggregation:
+            prefix, state = (
+                "Bu sorgu kapsamlı toplama ve tekilleştirme gerektiriyor; aşağıdaki kayıtlar "
+                "doğrulanmış bir toplam değildir:",
+                AnswerState.PARTIAL,
+            )
+        elif plan.requires_exhaustive_retrieval:
+            prefix, state = (
+                "Aşağıdaki kayıtlar görülen kanıtlardır; tam bir envanter değildir:",
+                AnswerState.GROUNDED,
+            )
+        elif plan.operation == "identify" and plan.entities and plan.entities[0].resolved_value:
+            entity = plan.entities[0]
+            qualifier = "likely " if entity.confidence < 0.95 else ""
+            prefix, state = (
+                f'Kaynaklarda "{entity.mention}" '
+                f"{'büyük olasılıkla ' if qualifier else ''}"
+                f'"{entity.resolved_value}" olarak geçiyor:',
+                AnswerState.GROUNDED,
+            )
+        else:
+            prefix, state = "Kaynaklardaki ilgili kanıtlar:", AnswerState.GROUNDED
+        excerpts = "\n".join(
+            f"[{index}] {item.content.strip()[:280]}" for index, item in enumerate(evidence, 1)
+        )
+        return f"{prefix}\n\n{excerpts}", state, citations
     limit = {"concise": 280, "balanced": 700, "detailed": 1400}[get_settings().answer_style]
     excerpts = "\n\n".join(
         f"[{index}] {item.content.strip()[:limit]}" for index, item in enumerate(evidence, 1)
@@ -317,6 +420,11 @@ def ask(
     from .router import LlamaIndexRouter
 
     choice = LlamaIndexRouter().select(content, mode)
+    plan = resolve_entities(session, workspace_id, plan_query(content))
+    if plan.operation == "lookup_documents":
+        choice = RouteSelection(
+            choice.routes, choice.reason, choice.confidence, "entity_document_lookup", True
+        )
     run.selected_routes_json, run.route_reason, run.route_confidence = (
         json.dumps(choice.routes),
         choice.reason,
@@ -339,22 +447,37 @@ def ask(
         answer = None
         answer_state = AnswerState.UNSUPPORTED
         citations = []
-        retrieval = _hybrid_evidence(
+        retrieval, retrieval_query_list = _planned_hybrid_evidence(
             session,
             workspace_id,
             content,
+            plan,
             needs_list=choice.needs_list,
             runtime=retrieval_runtime,
         )
         evidence = list(retrieval.evidence)
-        graph_metadata = {"retrieval": retrieval.trace.as_dict()}
+        graph_metadata = {
+            "retrieval": retrieval.trace.as_dict(),
+            "retrieval_queries": retrieval_query_list,
+        }
     _step(session, run, "retrieve", "completed")
     _step(session, run, "synthesize", "running")
     if answer is None:
         answer, generated_state, citations = (
-            _document_lookup_answer(content, evidence) if choice.needs_list else _answer(evidence)
+            _document_lookup_answer(
+                plan.entities[0].resolved_value
+                if plan.entities and plan.entities[0].resolved_value
+                else content,
+                evidence,
+            )
+            if choice.needs_list
+            else _answer(evidence, plan)
         )
-        answer_state = retrieval.state if evidence else generated_state
+        answer_state = (
+            generated_state
+            if plan.requires_aggregation
+            else (retrieval.state if evidence else generated_state)
+        )
     run.answer_state = answer_state.value
     run.latency_ms = int((time.perf_counter() - started) * 1000)
     if not graph_routes:
@@ -378,6 +501,8 @@ def ask(
                 "answer_state": answer_state.value,
                 "intent": choice.intent,
                 "needs_list": choice.needs_list,
+                "query_plan": plan.as_dict(),
+                "entity_resolution": entity_resolution_trace(plan),
                 "memory_message_count": len(memory),
                 "inference": False,
                 **graph_metadata,

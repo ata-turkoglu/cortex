@@ -92,6 +92,8 @@ class QueryDebug(BaseModel):
     input_tokens: int
     output_tokens: int
     estimated_cost_usd: float
+    plan: dict[str, object] | None = None
+    retrieval_queries: list[str] = Field(default_factory=list)
 
 
 def message_read(message: Message) -> MessageRead:
@@ -229,13 +231,37 @@ def query(  # noqa: B008
             answer.metadata_json = json.dumps(metadata)
             session.commit()
         return message_read(answer)
-    try:
-        from ..workers.broker import execute_query_synthesis, summarize_conversation
+    # Commit the evidence snapshot before synchronous provider synthesis. This preserves the
+    # no-network-inside-transaction boundary while returning the final answer immediately.
+    if get_settings().answer_provider == "openai":
+        session.commit()
+        try:
+            from ..chat.execution import synthesize_with_openai
 
-        execute_query_synthesis.send(run.id)
+            synthesize_with_openai(run.id, SessionLocal)
+            session.expire_all()
+            final = session.scalar(
+                select(Message).where(Message.query_run_id == run.id, Message.role == "assistant")
+            )
+            if final:
+                answer = final
+        except Exception as exc:
+            from ..chat.execution import record_synthesis_failure
+
+            session.rollback()
+            record_synthesis_failure(
+                session,
+                run.id,
+                get_settings().answer_provider,
+                get_settings().answer_model,
+                exc,
+            )
+            session.commit()
+    try:
+        from ..workers.broker import summarize_conversation
+
         summarize_conversation.send(conversation_id)
     except Exception:
-        # The grounded local response remains available when Redis is absent.
         pass
     return message_read(answer)
 
@@ -300,6 +326,10 @@ def debug(  # noqa: B008
     )
     if not run:
         raise HTTPException(404, "query run not found in workspace")
+    assistant = session.scalar(
+        select(Message).where(Message.query_run_id == run.id, Message.role == "assistant")
+    )
+    metadata = json.loads(assistant.metadata_json or "{}") if assistant else {}
     return QueryDebug(
         id=run.id,
         routes=json.loads(run.selected_routes_json or "[]"),
@@ -310,4 +340,6 @@ def debug(  # noqa: B008
         input_tokens=run.input_tokens,
         output_tokens=run.output_tokens,
         estimated_cost_usd=run.estimated_cost_usd,
+        plan=metadata.get("query_plan"),
+        retrieval_queries=metadata.get("retrieval_queries", []),
     )

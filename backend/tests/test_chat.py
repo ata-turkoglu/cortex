@@ -292,3 +292,21 @@ def test_hybrid_route_uses_runtime_evidence_and_exposes_component_trace():
         '[{"document_id": "document", "document_version_id": "version", '
         '"chunk_id": "chunk", "label": "Ankara Notları, passage 1"}]'
     )
+
+
+def test_count_query_is_not_presented_as_a_verified_total():
+    session, workspace_id = session_with_documents()
+    conversation = create_conversation(session, workspace_id, "Count")
+
+    _, answer, run = _ask(
+        session,
+        workspace_id,
+        conversation.id,
+        "Hasan Tahsin Merter'in kaç adet tapusu var?",
+        "automatic",
+    )
+
+    metadata = __import__("json").loads(answer.metadata_json)
+    assert run.answer_state == "partial"
+    assert metadata["query_plan"]["requires_aggregation"] is True
+    assert "doğrulanmış bir toplam değildir" in answer.content

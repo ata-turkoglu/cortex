@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -9,6 +10,39 @@ from sqlalchemy.orm import Session
 from ..core.config import get_settings
 from ..models import Conversation, Message, QueryRun
 from ..providers.openai import OpenAIProvider
+
+logger = logging.getLogger(__name__)
+
+
+def record_synthesis_failure(
+    session: Session, query_run_id: str, provider: str, model: str, error: Exception
+) -> None:
+    """Persist a safe diagnostic record without provider payloads or credentials."""
+    run = session.get(QueryRun, query_run_id)
+    assistant = session.scalar(
+        select(Message).where(Message.query_run_id == query_run_id, Message.role == "assistant")
+    )
+    if not run or not assistant:
+        return
+    error_type = type(error).__name__
+    metadata = json.loads(assistant.metadata_json or "{}")
+    metadata["synthesis"] = {
+        "attempted": True,
+        "success": False,
+        "provider": provider,
+        "model": model,
+        "error_type": error_type,
+        "error_code": "provider_request_failed",
+        "failure_stage": "synchronous_answer_synthesis",
+    }
+    assistant.metadata_json = json.dumps(metadata, ensure_ascii=False)
+    logger.warning(
+        "Synchronous synthesis failed query_run_id=%s provider=%s model=%s error_type=%s",
+        query_run_id,
+        provider,
+        model,
+        error_type,
+    )
 
 
 def synthesis_snapshot(session: Session, query_run_id: str) -> tuple[str, str] | None:
@@ -31,8 +65,11 @@ def synthesis_snapshot(session: Session, query_run_id: str) -> tuple[str, str] |
         )
     else:
         instruction = (
-            "Answer only from the supplied evidence. Do not add external knowledge or unsupported "
-            "claims. Preserve citation markers [1], [2], etc. If evidence is insufficient, say so."
+            "Answer the user directly using only the supplied evidence. Do not add external "
+            "knowledge or unsupported claims. Cite factual claims with the supplied [1], [2] "
+            "markers, distinguish an inference from fact, preserve uncertainty, and never "
+            "represent top-k evidence as a complete inventory or verified total. If evidence is "
+            "insufficient, say so. Do not expose the internal query plan."
         )
     evidence = assistant.content
     conversation = session.get(Conversation, run.conversation_id)
@@ -43,7 +80,9 @@ def synthesis_snapshot(session: Session, query_run_id: str) -> tuple[str, str] |
     )
     return (
         instruction,
-        f"{memory}Question: {run.query_text}\n\nEvidence:\n{evidence}\n\nCitations: {citations}",
+        f"{memory}Question: {run.query_text}\n\nValidated query plan: "
+        f"{json.dumps(metadata.get('query_plan', {}), ensure_ascii=False)}\n\n"
+        f"Evidence:\n{evidence}\n\nCitations: {citations}",
     )
 
 
@@ -85,6 +124,12 @@ def apply_synthesis(
     metadata = json.loads(assistant.metadata_json or "{}")
     metadata["provider_synthesis"] = "openai"
     metadata["inference"] = True
+    metadata["synthesis"] = {
+        "attempted": True,
+        "success": True,
+        "provider": "openai",
+        "model": get_settings().answer_model,
+    }
     assistant.metadata_json = json.dumps(metadata, ensure_ascii=False)
     run.input_tokens += input_tokens
     run.output_tokens += output_tokens
