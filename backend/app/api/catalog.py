@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from ..models import (
     DocumentVersion,
     GraphRagState,
     LogicalDocument,
+    WorkflowRun,
     Workspace,
     WorkspaceIndexState,
 )
@@ -32,6 +34,7 @@ class DocumentRead(BaseModel):
     mime_type: str | None = None
     size_bytes: int | None = None
     state: str | None = None
+    ingestion_state: str | None = None
 
 
 class DocumentDetail(DocumentRead):
@@ -60,7 +63,32 @@ class DashboardOverview(BaseModel):
     recent_documents: list[DashboardDocument]
 
 
-def document_read(document: Document, version: DocumentVersion | None) -> DocumentRead:
+def ingestion_states(session: Session, workspace_id: str) -> dict[str, str]:
+    states: dict[str, str] = {}
+    runs = session.scalars(
+        select(WorkflowRun)
+        .where(
+            WorkflowRun.workspace_id == workspace_id,
+            WorkflowRun.job_type == "ingestion",
+            WorkflowRun.deleted_at.is_(None),
+        )
+        .order_by(WorkflowRun.updated_at.desc())
+    ).all()
+    for run in runs:
+        try:
+            version_id = json.loads(run.payload_json or "{}").get("document_version_id")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(version_id, str):
+            states.setdefault(version_id, run.state)
+    return states
+
+
+def document_read(
+    document: Document,
+    version: DocumentVersion | None,
+    ingestion_state: str | None = None,
+) -> DocumentRead:
     return DocumentRead(
         id=document.id,
         workspace_id=document.workspace_id,
@@ -73,6 +101,7 @@ def document_read(document: Document, version: DocumentVersion | None) -> Docume
         mime_type=version.mime_type if version else None,
         size_bytes=version.size_bytes if version else None,
         state=version.state if version else None,
+        ingestion_state=ingestion_state,
     )
 
 
@@ -142,7 +171,11 @@ def list_documents(workspace_id: str, session: Session = Depends(get_session)):
         .where(Document.workspace_id == workspace_id, Document.deleted_at.is_(None))
         .order_by(Document.updated_at.desc())
     ).all()
-    return [document_read(document, version) for document, version in rows]
+    states = ingestion_states(session, workspace_id)
+    return [
+        document_read(document, version, states.get(version.id) if version else None)
+        for document, version in rows
+    ]
 
 
 @router.get("/workspaces/{workspace_id}/documents/{document_id}", response_model=DocumentDetail)
@@ -184,7 +217,11 @@ def document_detail(workspace_id: str, document_id: str, session: Session = Depe
         if logical_contents:
             content = "\n\n".join(logical_contents)
     return DocumentDetail(
-        **document_read(document, version).model_dump(),
+        **document_read(
+            document,
+            version,
+            ingestion_states(session, workspace_id).get(version.id) if version else None,
+        ).model_dump(),
         chunk_count=count,
         normalized_content=content,
     )

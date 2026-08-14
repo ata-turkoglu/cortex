@@ -287,11 +287,8 @@ async def upload_files(
     # Commit before dispatching: the worker uses a separate SQLite connection and must
     # be able to read the workflow run and its durable step checkpoints immediately.
     session.commit()
-    from ..workers.broker import execute_workflow
+    from ..workers.broker import dispatch_workflow
 
     for item in uploaded:
-        try:
-            execute_workflow.send(item["workflow_run_id"])
-        except Exception:
-            pass
+        dispatch_workflow(item["workflow_run_id"])
     return {"uploads": uploaded}

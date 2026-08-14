@@ -116,10 +116,12 @@ class OllamaEmbeddingAdapter:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        # Local models can take an arbitrary time for a cold load or a large
-        # embedding batch. Indexing is durable, so let the worker wait for the
-        # provider result instead of failing a valid request at an HTTP deadline.
-        async with httpx.AsyncClient(timeout=None, transport=self.transport) as client:
+        # A local cold load may take longer than a normal HTTP call, but an
+        # unbounded wait leaves the durable workflow permanently `running`.
+        # The global operational timeout keeps failure visible and retryable.
+        async with httpx.AsyncClient(
+            timeout=get_settings().embedding_timeout_seconds, transport=self.transport
+        ) as client:
             response = await client.post(
                 self.base_url + "/api/embed",
                 json={"model": self.configuration.model, "input": texts},

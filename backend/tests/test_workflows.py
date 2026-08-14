@@ -10,11 +10,14 @@ from app.models import (
     QueryStepRun,
     WorkflowEvent,
     WorkflowRun,
+    WorkflowStepRun,
     Workspace,
     WorkspaceLock,
 )
 from app.workflows.queries import create_query_run
 from app.workflows.service import (
+    LOCK_TYPES,
+    claim_queued_workflow,
     cleanup_retention,
     clear_workflow_history,
     create_run,
@@ -93,6 +96,24 @@ def test_queued_workflow_can_be_redispatched_after_a_transient_broker_failure():
     )
 
 
+def test_failed_workflow_without_a_failed_checkpoint_retries_from_first_pending_step():
+    session, workspace_id = session_with_workspace()
+    run = create_run(session, workspace_id, "ingestion")
+    run.state = "failed"
+
+    retry_from_failed_step(session, run)
+
+    assert run.state == "queued"
+    assert run.recovery_state == "retrying"
+    first_step = (
+        session.query(WorkflowStepRun)
+        .filter_by(workflow_run_id=run.id)
+        .order_by(WorkflowStepRun.created_at)
+        .first()
+    )
+    assert first_step.retry_count == 1
+
+
 def test_concurrency_blocks_conflicting_stage_and_retention_soft_deletes_history():
     session, workspace_id = session_with_workspace()
     first = create_run(session, workspace_id, "dense_reindex")
@@ -104,6 +125,27 @@ def test_concurrency_blocks_conflicting_stage_and_retention_soft_deletes_history
     first.finished_at = datetime.now(UTC) - timedelta(days=31)
     assert cleanup_retention(session) == 1
     assert first.deleted_at is not None
+
+
+def test_ingestion_claim_respects_the_global_concurrency_limit(monkeypatch):
+    session, workspace_id = session_with_workspace()
+    first = create_run(session, workspace_id, "ingestion")
+    second = create_run(session, str(uuid4()), "ingestion")
+    third = create_run(session, str(uuid4()), "ingestion")
+    monkeypatch.setattr("app.workflows.service.concurrency_limit", lambda _: 2)
+
+    assert claim_queued_workflow(session, first) is True
+    assert claim_queued_workflow(session, second) is True
+    assert claim_queued_workflow(session, third) is False
+    assert third.state == "queued"
+    assert any(
+        event.event_type == "blocked"
+        for event in session.query(WorkflowEvent).filter_by(workflow_run_id=third.id)
+    )
+
+
+def test_ingestion_uses_the_workspace_index_lock():
+    assert LOCK_TYPES["ingestion"] == "index"
 
 
 def test_clear_workflow_history_preserves_active_runs():
@@ -211,3 +253,21 @@ def test_workflow_dispatch_keeps_the_durable_run_queued_when_redis_is_unavailabl
 
     monkeypatch.setattr(execute_workflow, "send", unavailable)
     assert dispatch_workflow("durable-run-id") is False
+
+
+def test_workflow_dispatch_schedules_an_idempotent_delayed_fallback(monkeypatch):
+    from app.workers.broker import dispatch_workflow, execute_workflow
+
+    sent: list[tuple[str, object]] = []
+    monkeypatch.setattr(execute_workflow, "send", lambda run_id: sent.append(("now", run_id)))
+    monkeypatch.setattr(
+        execute_workflow,
+        "send_with_options",
+        lambda **options: sent.append(("later", options)),
+    )
+
+    assert dispatch_workflow("durable-run-id") is True
+    assert sent == [
+        ("now", "durable-run-id"),
+        ("later", {"args": ("durable-run-id",), "delay": 5_000}),
+    ]

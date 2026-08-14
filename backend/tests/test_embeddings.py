@@ -53,7 +53,7 @@ def test_ollama_embedding_health_check_uses_embed_endpoint_without_a_real_model(
     )
 
 
-def test_ollama_embedding_requests_have_no_http_deadline(monkeypatch):
+def test_ollama_embedding_requests_use_the_global_timeout(monkeypatch):
     import httpx
 
     received: dict[str, object] = {}
@@ -73,7 +73,7 @@ def test_ollama_embedding_requests_have_no_http_deadline(monkeypatch):
     )
 
     assert asyncio.run(adapter.embed(["test"])) == [[1.0, 0.0]]
-    assert received["timeout"] is None
+    assert received["timeout"] == 60
 
 
 def test_qwen_adapter_prepares_turkish_query_and_document_without_unicode_loss():

@@ -57,6 +57,7 @@ DEFINITIONS = {
     "reconcile": ("orphan-reconciliation", "1", "Orphan reconciliation", ("scan", "repair")),
 }
 LOCK_TYPES = {
+    "ingestion": "index",
     "dense_reindex": "index",
     "graphrag_reindex": "graph",
     "document_delete": "delete",
@@ -77,6 +78,27 @@ def concurrency_limit(job_type: str) -> int:
     if job_type == "graphrag_reindex":
         return settings.workflow_graphrag_reindex_concurrency
     return settings.workflow_deletion_concurrency
+
+
+def claim_queued_workflow(session: Session, run: WorkflowRun) -> bool:
+    """Claim a queued run only when its global job-type slot is available."""
+    if run.state != "queued":
+        return False
+    running_count = session.scalar(
+        select(func.count())
+        .select_from(WorkflowRun)
+        .where(
+            WorkflowRun.job_type == run.job_type,
+            WorkflowRun.state == "running",
+            WorkflowRun.id != run.id,
+        )
+    )
+    if running_count >= concurrency_limit(run.job_type):
+        event(session, run, "blocked", reason="stage_concurrency_limit")
+        return False
+    run.state, run.updated_at = "running", now()
+    event(session, run, "started")
+    return True
 
 
 def ensure_definition(session: Session, job_type: str) -> tuple[str, tuple[str, ...]]:
@@ -179,7 +201,7 @@ def retry_from_failed_step(session: Session, run: WorkflowRun) -> WorkflowRun:
         .where(WorkflowStepRun.workflow_run_id == run.id, WorkflowStepRun.state == "failed")
         .order_by(WorkflowStepRun.created_at)
     )
-    if not failed and run.state == "interrupted":
+    if not failed and run.state in {"failed", "interrupted"}:
         failed = session.scalar(
             select(WorkflowStepRun)
             .where(

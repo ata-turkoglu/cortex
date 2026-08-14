@@ -1,17 +1,21 @@
 import json
 import logging
+from uuid import uuid4
 
 import dramatiq
 from dramatiq.brokers.redis import RedisBroker
 from sqlalchemy import select
 
 from ..core.config import get_settings
-from ..core.database import run_with_lock_retry
+from ..core.database import SessionLocal, run_with_lock_retry
 from ..core.logging import configure_logging
-from ..models import Document, DocumentVersion, WorkflowRun
+from ..models import Document, DocumentVersion, WorkflowRun, WorkspaceLock
 from ..workflows.service import (
+    LOCK_TYPES,
+    claim_queued_workflow,
     cleanup_retention,
     execute_run,
+    now,
     recover_stale,
     schedule_orphan_reconciliation,
 )
@@ -24,21 +28,48 @@ logger = logging.getLogger("cortex.worker")
 broker = RedisBroker(url=get_settings().redis_url)
 dramatiq.set_broker(broker)
 
+_DISPATCH_FALLBACK_DELAY_MS = 5_000
+
 
 def dispatch_workflow(run_id: str) -> bool:
-    """Best-effort dispatch after a workflow run is durably committed.
+    """Dispatch a durable run with one idempotent delayed fallback.
 
-    A broker outage must not turn a successfully queued command into an API
-    failure. The persisted run remains visible and can be dispatched by the
-    worker/retry path when Redis is available again.
+    The delayed message covers the small window where Redis accepted the first
+    message but no worker consumed it. ``execute_workflow`` claims only queued
+    runs, so the fallback is a no-op once the first delivery starts. A broker
+    outage must not turn a successfully queued command into an API failure.
     """
     try:
         execute_workflow.send(run_id)
+        execute_workflow.send_with_options(
+            args=(run_id,), delay=_DISPATCH_FALLBACK_DELAY_MS
+        )
         logger.info("workflow dispatched: run_id=%s", run_id)
     except Exception:
         logger.exception("workflow dispatch failed: run_id=%s", run_id)
         return False
     return True
+
+
+def dispatch_queued_workflows(job_type: str, limit: int) -> int:
+    """Re-publish a bounded oldest-first slice after a worker slot opens."""
+    session = SessionLocal()
+    try:
+        run_ids = session.scalars(
+            select(WorkflowRun.id)
+            .where(
+                WorkflowRun.job_type == job_type,
+                WorkflowRun.state == "queued",
+                WorkflowRun.deleted_at.is_(None),
+            )
+            .order_by(WorkflowRun.created_at)
+            .limit(limit)
+        ).all()
+    finally:
+        session.close()
+    for queued_run_id in run_ids:
+        dispatch_workflow(queued_run_id)
+    return len(run_ids)
 
 
 @dramatiq.actor(max_retries=3)
@@ -64,7 +95,7 @@ def recover_stale_jobs() -> None:
         len(queued_ids),
     )
     for run_id in queued_ids:
-        execute_workflow.send(run_id)
+        dispatch_workflow(run_id)
 
 
 @dramatiq.actor(max_retries=3)
@@ -109,8 +140,45 @@ def execute_workflow(run_id: str) -> None:
                     active.state if active else "missing",
                 )
                 return None
-            from datetime import UTC, datetime
-
+            lock_type = LOCK_TYPES[active.job_type]
+            held = session.scalar(
+                select(WorkspaceLock).where(
+                    WorkspaceLock.workspace_id == active.workspace_id,
+                    WorkspaceLock.lock_type == lock_type,
+                )
+            )
+            if held:
+                owner = session.get(WorkflowRun, held.workflow_run_id)
+                if owner is None or owner.state in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                    "interrupted",
+                }:
+                    session.delete(held)
+                    session.flush()
+                    held = None
+            if held and held.workflow_run_id != active.id:
+                workflow_event(session, active, "blocked", lock_type=lock_type)
+                return None
+            created_lock = False
+            if held is None:
+                held = WorkspaceLock(
+                    id=str(uuid4()),
+                    workspace_id=active.workspace_id,
+                    lock_type=lock_type,
+                    workflow_run_id=active.id,
+                    acquired_at=now(),
+                )
+                session.add(held)
+                created_lock = True
+            if not claim_queued_workflow(session, active):
+                if created_lock:
+                    session.delete(held)
+                logger.info(
+                    "workflow blocked: run_id=%s type=%s", active.id, active.job_type
+                )
+                return None
             payload = json.loads(active.payload_json or "{}")
             version_id = payload.get("document_version_id")
             filename = None
@@ -118,8 +186,6 @@ def execute_workflow(run_id: str) -> None:
                 version = session.get(DocumentVersion, version_id)
                 document = session.get(Document, version.document_id) if version else None
                 filename = document.title if document else None
-            active.state, active.updated_at = "running", datetime.now(UTC)
-            workflow_event(session, active, "started")
             logger.info(
                 "workflow running: run_id=%s workspace_id=%s file=%s",
                 active.id,
@@ -171,6 +237,7 @@ def execute_workflow(run_id: str) -> None:
 
         run_with_lock_retry(complete_index)
         logger.info("workflow completed: run_id=%s", run_id)
+        dispatch_queued_workflows("ingestion", limit=2)
         return
     run_with_lock_retry(lambda session: execute_run(session, run_id))
     from ..workflows.reconciliation import cleanup_external, snapshot_external_cleanup

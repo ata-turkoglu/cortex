@@ -12,8 +12,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import WorkflowEvent, WorkflowRun, WorkflowStepRun
-from ..workflows.service import clear_workflow_history, create_run, request_cancel, retry_from_failed_step
+from ..models import DocumentVersion, WorkflowEvent, WorkflowRun, WorkflowStepRun
+from ..workflows.service import (
+    clear_workflow_history,
+    create_run,
+    request_cancel,
+    retry_from_failed_step,
+)
 from .workspaces import get_session
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -50,6 +55,7 @@ class WorkflowRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     finished_at: datetime | None
+    source_filename: str | None
     steps: list[StepRead] = []
 
 
@@ -66,6 +72,9 @@ class WorkflowHistoryClearRead(BaseModel):
 
 
 def serialize(session: Session, run: WorkflowRun) -> WorkflowRead:
+    payload = json.loads(run.payload_json or "{}")
+    version_id = payload.get("document_version_id")
+    version = session.get(DocumentVersion, version_id) if isinstance(version_id, str) else None
     return WorkflowRead.model_validate(
         {
             **{
@@ -79,9 +88,10 @@ def serialize(session: Session, run: WorkflowRun) -> WorkflowRead:
                     "recovery_state",
                     "created_at",
                     "updated_at",
-                    "finished_at",
-                )
+                "finished_at",
+            )
             },
+            "source_filename": version.source_filename if version else None,
             "steps": session.scalars(
                 select(WorkflowStepRun)
                 .where(WorkflowStepRun.workflow_run_id == run.id)
