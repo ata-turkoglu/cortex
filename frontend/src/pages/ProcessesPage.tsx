@@ -37,6 +37,7 @@ function sameWorkflowRuns(current: WorkflowRun[], next: WorkflowRun[]) {
       run.id === candidate.id &&
       run.state === candidate.state &&
       run.recovery_state === candidate.recovery_state &&
+      run.source_filename === candidate.source_filename &&
       run.updated_at === candidate.updated_at &&
       run.steps.length === candidate.steps.length &&
       run.steps.every((step, stepIndex) => {
@@ -346,6 +347,11 @@ export function ProcessesPage() {
               {workflowSchema(selected.job_type)?.label ?? selected.job_type} — {selected.state}
               {selected.recovery_state ? ` (${selected.recovery_state})` : ""}
             </p>
+            {selected.source_filename && (
+              <p className="mb-3 text-sm">
+                Kaynak dosya: <b>{selected.source_filename}</b>
+              </p>
+            )}
             <p className="mb-3 text-xs opacity-70">
               Son durum değişikliği: {formatCortexDateTime(selected.updated_at)}
             </p>
@@ -392,6 +398,7 @@ export function ProcessesPage() {
                 onClick={() => setSelectedId(run.id)}
               />
               <span>{run.state}</span>
+              {run.source_filename && <span>{run.source_filename}</span>}
               <span className="text-xs opacity-70">{run.id}</span>
               <AButton
                 label="Ayrıntılar"

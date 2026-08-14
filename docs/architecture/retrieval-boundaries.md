@@ -5,6 +5,16 @@ Hybrid search combines workspace-filtered Qdrant dense retrieval, bm25s sparse r
 fusion, and a local BGE reranker. Embedding configuration changes require dense reindexing;
 vectors with incompatible dimensions/configurations may never share an active vector field.
 
+## Structured query execution
+
+Chat creates a validated compositional query plan before Hybrid Search. The plan records the
+operation, entity mentions/resolution confidence, date constraints, and whether a request needs
+exhaustive retrieval, aggregation, or deduplication. Entity resolution reads only active chunks
+from the requested workspace; resolved names provide bounded additional HybridRetriever queries,
+then a deterministic selector favors entity-bearing and document-diverse evidence. It does not
+alter dense, BM25, fusion, or reranker scoring. Count and complete-list requests remain explicitly
+partial until their dedicated aggregation/exhaustive execution support exists.
+
 ## Phase 6 implementation boundary
 
 `app/retrieval/qdrant.py` is the only Qdrant adapter. It always creates a
@@ -39,6 +49,8 @@ partial result if its configured model is unavailable.
 The Ollama adapter calls `/api/embed` and exposes a lightweight embedding health check. Qwen3
 query/document preparation is kept inside that adapter and preserves Turkish Unicode while
 normalizing line endings; retrieval feature code never owns model-specific prefixes.
+Embedding calls use the global bounded embedding timeout so a local model outage becomes a
+visible, retryable workflow failure instead of leaving an ingestion run indefinitely running.
 
 Entity/document-list questions are planned as `entity_document_lookup` with `needs_list=true`.
 Their hybrid candidates are grouped by `document_id`, and

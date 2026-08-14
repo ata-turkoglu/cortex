@@ -17,8 +17,8 @@ Codex must keep this file updated.
 
 ## Current phase
 
-- Phase: Complete
-- Status: All implementation phases are complete and validated.
+- Phase: Structured query understanding follow-up
+- Status: Complete; focused validation passed.
 - Active validation target: None
 - Started: 2026-08-02
 - Last updated: 2026-08-08
@@ -104,6 +104,10 @@ Codex must keep this file updated.
 ## In progress
 
 - No active implementation phase.
+- Completed structured query planning, workspace-evidence entity resolution, bounded resolved-name
+  retrieval expansion, operation-aware evidence selection, synchronous OpenAI hybrid synthesis,
+  and query-plan debug output. COUNT/LIST answers explicitly retain aggregation/completeness
+  uncertainty until their deferred execution layers exist.
 - Deferred by user decision: production OpenAI/Anthropic request adapters and automatic provider-reported token counting. See `docs/FUTURE_BACKLOG.md`.
 
 ## Blocking issues
@@ -115,6 +119,7 @@ Codex must keep this file updated.
 ## Validation history
 
 | Date | Phase | Command | Result |
+| 2026-08-14 | Structured query understanding | `ruff check --no-cache app/chat app/api/chat.py tests/test_chat.py tests/test_query_plan.py`, focused pytest, context validation, and `git diff --check` | Passed (11 focused tests; existing upstream Pydantic warning) |
 | ---- | ----- | ------- | ------ |
 | 2026-08-10 | Retrieval wiring | `uv run ruff check ...`, `uv run pytest -q tests/test_chat.py tests/test_retrieval.py -p no:cacheprovider`, and Alembic upgrade (from `backend`) | Passed (25 focused tests; warnings only) |
 | 2026-08-08 | 8 | `uv run ruff check app tests alembic` and `uv run pytest -q -p no:cacheprovider` (from `backend`) | Passed (106 tests; upstream/local-adapter warnings only) |

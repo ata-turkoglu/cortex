@@ -18,6 +18,7 @@ export type WorkflowRun = {
   created_at: string;
   updated_at: string;
   finished_at: string | null;
+  source_filename: string | null;
   steps: WorkflowStep[];
 };
 export type WorkflowEvent = {

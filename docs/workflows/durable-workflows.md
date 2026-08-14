@@ -16,10 +16,20 @@ providers or models, so the user-selected embedding and GraphRAG assignments app
 API and worker execution. Startup
 marks stale running runs `interrupted` with recovery state `restart_detected`.
 
+Every post-commit dispatch also publishes one delayed idempotent fallback delivery. This covers a
+transient consumer gap after Redis accepts the first message: the worker claims only runs still
+in `queued` state, so a run already claimed by the first delivery is skipped safely.
+
+Retry resumes from the failed checkpoint when one exists. If an external indexing adapter fails
+before recording its first checkpoint, retry instead starts from the first incomplete step.
+
 Stage limits are global V1 settings: ingestion, dense reindex, GraphRAG reindex, and deletion
 have independent worker concurrency caps. A run that exceeds its cap remains queued and emits a
-`blocked` event. Completed runs are soft-deleted by the retention actor after the configured
-number of days.
+`blocked` event. When an ingestion run completes, the worker re-publishes the oldest queued
+ingestion runs up to that limit, so a queued batch advances as slots open. Ingestion also holds
+the workspace-scoped `index` lock: two workspaces can use the global capacity, but one workspace
+is rebuilt by only one ingestion run at a time. Completed runs are soft-deleted by the retention
+actor after the configured number of days.
 
 A GraphRAG reindex performs real worker-owned work, outside a SQLite transaction: it snapshots
 the workspace documents, materializes GraphRAG inputs, runs the canonical GraphRAG index and

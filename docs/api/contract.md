@@ -28,6 +28,10 @@ diagnostics; it does not return source document content or unredacted exceptions
 `DELETE /history` soft-deletes all terminal workflow runs for the process-history cleanup action;
 active queued, running, and cancelling runs are preserved. The response contains the number of
 hidden runs.
+Workflow responses include the ingestion source filename when the run belongs to a document
+version, so operational screens can identify the affected file. Document list/detail responses
+also include the latest ingestion state for the active version (`queued`, `running`, `completed`,
+`failed`, and other terminal states).
 
 `DELETE /api/v1/workspaces/{workspace_id}` queues a workspace-deletion workflow after the
 workspace is marked deleting. `DELETE /api/v1/workspaces/{workspace_id}/documents/{document_id}`
@@ -39,7 +43,11 @@ query-debug lookups are all filtered by that workspace. `POST /conversations/{id
 accepts `automatic`, `document_search`, or `deep_analysis`, persists route/debug state in a
 query run, and returns an evidence-backed assistant message. Citations carry document,
 document-version, and chunk IDs; unsupported answers contain no citations. `GET /query-runs/{id}`
-returns routes, reason, confidence, answer state, latency, and persisted token/cost counters.
+returns routes, reason, confidence, answer state, latency, persisted token/cost counters, and
+safe debug fields for the validated query plan and expanded retrieval queries. It never returns
+provider secrets or hidden reasoning. Normal Hybrid Search responds with the direct evidence
+fallback and, when OpenAI is configured, synchronously replaces it with grounded synthesis after
+the evidence snapshot is committed.
 `PATCH /conversations/{conversation_id}/messages/{message_id}` only permits editing a user
 message in its owning workspace/conversation. `GET /sources/{chunk_id}` returns source content
 and document-version metadata only when the chunk belongs to the requested workspace.

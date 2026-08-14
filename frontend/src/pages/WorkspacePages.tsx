@@ -264,6 +264,16 @@ function slugify(value: string) {
     .replace(/(^-|-$)/g, "");
 }
 
+function ingestionStatusLabel(state: string | null | undefined) {
+  if (state === "completed") return "İndeks tamamlandı";
+  if (state === "failed") return "İndeks hatası";
+  if (state === "running") return "İndeksleniyor";
+  if (state === "queued") return "İndeks kuyruğunda";
+  if (state === "cancelling" || state === "cancelled") return "İndeks iptal edildi";
+  if (state === "interrupted") return "İndeks kesintiye uğradı";
+  return "İndeks durumu bilinmiyor";
+}
+
 export function WorkspaceOverviewPage() {
   const { workspaceId = "" } = useParams();
   const [data, setData] = useState<Awaited<
@@ -431,6 +441,7 @@ export function DocumentsPage() {
                       ? `${Math.ceil(doc.size_bytes / 1024)} KB`
                       : ""}
                   </span>
+                  <span>{ingestionStatusLabel(doc.ingestion_state)}</span>
                 </button>
                 <AButton
                   label={deleting[doc.id] ? "Siliniyorâ€¦" : "Sil"}
@@ -457,6 +468,7 @@ export function DocumentsPage() {
               <span>Sürüm <b>{selectedDetail.version_number ?? "—"}</b></span>
               <span>Parça <b>{selectedDetail.chunk_count ?? "—"}</b></span>
               <span>Durum <b>{selectedDetail.state ?? "—"}</b></span>
+              <span>İndeks <b>{ingestionStatusLabel(selectedDetail.ingestion_state)}</b></span>
             </div>
             <pre className="document-preview">
               {selectedDetail.normalized_content ?? "İçerik bulunamadı."}
@@ -501,6 +513,9 @@ export function DocumentDetailPage() {
           </span>
           <span>
             Durum <b>{detail?.state ?? "—"}</b>
+          </span>
+          <span>
+            İndeks <b>{ingestionStatusLabel(detail?.ingestion_state)}</b>
           </span>
         </div>
       </ACard>
