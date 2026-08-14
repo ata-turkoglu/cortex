@@ -18,7 +18,19 @@ mark the new fingerprint ready. `app/providers/embeddings.py` owns the stable ti
 so Unicode—including Turkish text—is passed through unchanged.
 
 Sparse indexes are per-workspace bm25s corpora and are never shared. The corpus and its
-evidence metadata persist beneath the workspace cache path and reject cross-workspace loads.
+evidence metadata persist beneath the workspace-owned `bm25_chunks` resource path and reject
+cross-workspace loads. `HybridRetrievalRuntime` is the chat-facing composition boundary: it loads
+that index, creates the configured query embedding, binds `WorkspaceQdrantStore` to the active
+workspace/configuration hash, and calls `HybridRetriever.search()`.
+
+## Ingestion indexing contract
+
+The worker-owned ingestion and dense-reindex paths rebuild retrieval projections from the active
+workspace corpus before completing their index checkpoint. `app.retrieval.indexing` persists the
+workspace BM25 corpus, embeds active chunks with the configured provider, replaces that workspace's
+Qdrant chunk projection, records prepared embedding hashes, and only then marks sparse/dense state
+ready with the canonical embedding configuration fingerprint. Rebuild replacement is workspace
+filtered, so stale active-version vectors do not accumulate and other workspaces are untouched.
 Hybrid fusion uses reciprocal-rank fusion and applies the configured dense, BM25, fusion,
 reranker, and final-evidence limits. The local BGE reranker loads only pre-installed model
 weights from the Sentence Transformers cache; retrieval falls back to fused evidence with a
@@ -29,7 +41,7 @@ query/document preparation is kept inside that adapter and preserves Turkish Uni
 normalizing line endings; retrieval feature code never owns model-specific prefixes.
 
 Entity/document-list questions are planned as `entity_document_lookup` with `needs_list=true`.
-Their chunk candidates are ranked with an exact-phrase preference, grouped by `document_id`, and
+Their hybrid candidates are grouped by `document_id`, and
 returned as unique document matches that retain ordered matching chunks. Answer context is formed
 as document blocks with document code, title, page, original source, and document type; synthesis
 emits one concise row and one citation per document instead of passage dumps.

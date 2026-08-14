@@ -46,6 +46,20 @@ arrays to equivalent Python lists immediately before the upstream artifact write
 pins `pandas==2.2.3` and `pyarrow==17.0.0`; canonical GraphRAG artifacts, workflow order, and
 schemas remain upstream-owned.
 
+On Windows host development, the CLI preloads CPU PyTorch before importing GraphRAG's scientific
+stack. This avoids the intermittent `c10.dll` initialization failure that can occur when PyArrow
+loads first. The adapter also decodes upstream diagnostics with replacement characters so a
+Windows console-encoding mismatch cannot hide the actionable GraphRAG error.
+
+Qdrant artifact mirroring has no client-side HTTP deadline. Creating a collection or persisting
+a large GraphRAG batch may exceed ordinary request timeouts; the worker waits for Qdrant's result
+and records an actual storage failure rather than failing the index solely because the response is
+slow.
+
+The selected local Ollama embedding provider also has no HTTP deadline during durable indexing.
+This permits cold model loading and large artifact batches to complete; cancellation remains a
+workflow-level concern rather than a client-side read timeout.
+
 The API reads the same canonical Parquet artifacts for the bounded Graph explorer projection, so
 `pyarrow==17.0.0` is an API dependency as well as a worker runtime dependency. This prevents the
 read-only graph endpoint from returning an internal error when GraphRAG artifacts are present.

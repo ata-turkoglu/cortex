@@ -22,6 +22,14 @@ Vite proxies browser requests beginning with `/api` to the API service. Host dev
 to `http://localhost:4000`; Compose sets `VITE_API_PROXY_TARGET=http://backend:8000` so browser
 requests served on port 3000 never incorrectly target the Vite port.
 
+Runtime containers use `TZ=Europe/Istanbul` for local operational timestamps. Persistent API
+timestamps remain UTC and the frontend explicitly formats them for the Istanbul time zone.
+
+For no-build host development, Redis and Qdrant are published on `localhost:6379` and
+`localhost:6333`. Set `VITE_API_PROXY_TARGET=http://host.docker.internal:4000`, recreate only the
+frontend/Redis/Qdrant Compose services, then run the backend and worker from `backend/.venv` with
+the same mounted `data` directory. The normal Compose default remains `http://backend:8000`.
+
 The Dockerfile has two build targets. `runtime` is the API image and installs only the `query`
 group. `worker` inherits it and installs `retrieval` plus `graphrag`; this is where GraphRAG's
 heavy transitive dependencies, including LanceDB, PyArrow, spaCy, Torch, and Graspologic reside.

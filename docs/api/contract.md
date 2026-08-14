@@ -20,10 +20,14 @@ remains the existing durable workflow command.
 
 Workflow commands are exposed under `/api/v1/workflows`: `POST /` creates a durable run,
 `GET /` and `GET /{id}` restore state, `POST /{id}/cancel` requests safe-boundary cancellation,
-and `POST /{id}/retry` resumes from the failed step. `GET /{id}/events` is an SSE stream with
+and `POST /{id}/retry` resumes from the failed step or re-dispatches an unchanged queued run
+after a transient broker/worker failure. `GET /{id}/events` is an SSE stream with
 event IDs for reconnect. Workflow responses include persisted steps and recovery state.
 `GET /{id}/events/history` exposes the persisted, already-sanitized event history for process
 diagnostics; it does not return source document content or unredacted exceptions.
+`DELETE /history` soft-deletes all terminal workflow runs for the process-history cleanup action;
+active queued, running, and cancelling runs are preserved. The response contains the number of
+hidden runs.
 
 `DELETE /api/v1/workspaces/{workspace_id}` queues a workspace-deletion workflow after the
 workspace is marked deleting. `DELETE /api/v1/workspaces/{workspace_id}/documents/{document_id}`

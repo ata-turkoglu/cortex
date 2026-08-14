@@ -97,6 +97,9 @@ Codex must keep this file updated.
 - Updated the System Map with the durable GraphRAG query boundary, explicit-fallback path,
   optional default-off claims, algorithmic community detection, and user-selected community report
   generation.
+- Wired ordinary `hybrid` chat routes and the opt-in GraphRAG fallback to the real
+  workspace-scoped `HybridRetriever` runtime (configured embeddings, Qdrant, persisted BM25,
+  RRF, optional local reranker, evidence limits, citations, and sanitized retrieval trace data).
 
 ## In progress
 
@@ -113,6 +116,7 @@ Codex must keep this file updated.
 
 | Date | Phase | Command | Result |
 | ---- | ----- | ------- | ------ |
+| 2026-08-10 | Retrieval wiring | `uv run ruff check ...`, `uv run pytest -q tests/test_chat.py tests/test_retrieval.py -p no:cacheprovider`, and Alembic upgrade (from `backend`) | Passed (25 focused tests; warnings only) |
 | 2026-08-08 | 8 | `uv run ruff check app tests alembic` and `uv run pytest -q -p no:cacheprovider` (from `backend`) | Passed (106 tests; upstream/local-adapter warnings only) |
 | 2026-08-08 | 8 | `python scripts/ai-context/validate-context.py` and `git diff --check` | Passed |
 | 2026-08-08 | 8 | `corepack pnpm test -- ASystemMap.test.tsx`, `corepack pnpm build`, and `corepack pnpm lint` (from `frontend`) | Passed (6 tests; bundle-size advisory only) |

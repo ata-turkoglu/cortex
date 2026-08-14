@@ -5,6 +5,9 @@ and drawer behavior on narrow screens. Main V1 routes cover Dashboard, Workspace
 overview, Documents, document details/versions, upload/import, Chat, Conversations,
 Processes, failed-job diagnostics, Graph explorer, System map, Settings, provider/model
 settings, appearance settings, and Health/status.
+The expanded sidebar owns the active workspace selection for workspace-scoped pages. The
+selection is persisted in browser localStorage and restored when the platform starts; if the
+stored workspace is unavailable, the first available workspace becomes active.
 
 PrimeReact, lucide-react, and React Flow stay behind typed Cortex-owned abstractions.
 Feature code imports only those abstractions and the generated OpenAPI client.
@@ -82,12 +85,24 @@ internal stages of the existing query run, not separate background workflow chec
 
 The Graph explorer is separate from the System map: it selects a workspace, reports the
 GraphRAG state, queues its durable reindex workflow on explicit user action, and renders the
-bounded entity/relationship projection returned by the workspace-scoped graph endpoint.
+bounded entity/relationship projection returned by the workspace-scoped graph endpoint. Its
+compact circular entity cards use a 108 px width and height with translucent semantic-color
+backgrounds, arranged in a staggered honeycomb grid;
+their type badges map to the input, service, retrieval, processing, local-model, decision, or
+persistent-data palette. Selecting a card toggles a small description tooltip, keeping the
+canvas readable while preserving the entity detail. The compact legend uses the same colors,
+and relationship labels retain opaque backgrounds on dashed Bezier edges.
 The Processes page renders the full versioned workflow schema for the selected run, including
 steps that have not yet persisted a checkpoint; live SQLite/SSE step states are overlaid on
 those nodes so queued runs remain understandable from their first event. `workflowSchemas.ts`
 is the shared frontend definition for the System map and Processes page; it records each
 checkpoint's purpose, technology boundary, and operational guarantee.
+
+Workflow-event-triggered list refreshes are coalesced briefly, so a burst of SSE events does not
+rebuild the process canvas for every individual event. The page also shows whether its SSE stream
+is live, connecting, or reconnecting, the last successful SQLite status check, and the selected
+run's last persisted state change. A manual refresh remains available when an operator needs to
+distinguish a long-running stage from a disconnected browser session.
 
 For GraphRAG, the Processes page also shows the upstream index pipeline's entity and relationship
 extraction, description summarization, community-report, and embedding stages beneath the
@@ -103,6 +118,16 @@ visible check mark.
 Primary actions use the primary token as a filled button. Secondary actions use the same primary
 token as outlined buttons, following the KnowledgeOS interaction hierarchy; danger coloring is
 reserved for attention and error states.
+
+`AToastProvider` is mounted once at the application root and owns transient, accessible
+operation feedback. The API client reports every mutating REST request through this Cortex-owned
+adapter: successful commands receive a concise success message and failed requests show the
+sanitized server or connection message. React feature code may use `useToast` for feedback that
+does not originate from an API request; it must not import PrimeReact Toast directly.
+The provider also reports uncaught browser errors and unhandled promise rejections, while
+`AErrorBoundary` keeps a render failure visible and supplies the same sanitized feedback. Equal
+error notifications are coalesced for three seconds to prevent polling or retry loops from
+flooding the interface.
 
 Playwright tests in `frontend/e2e` exercise the running Compose frontend through the browser;
 the test suite requires the Chromium browser installed by Playwright.
