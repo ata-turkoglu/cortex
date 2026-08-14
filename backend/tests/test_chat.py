@@ -19,7 +19,7 @@ from app.chat.service import (
 from app.core.config import get_settings
 from app.models import Base, Chunk, Document, DocumentVersion, Message, Workspace
 from app.retrieval.hybrid import result_for
-from app.retrieval.schemas import Evidence
+from app.retrieval.schemas import Evidence, RetrievalTrace
 from app.workflows.graphrag_query import execute as execute_graphrag_query
 
 
@@ -84,10 +84,55 @@ def session_with_documents():
     return session, workspace_id
 
 
+class FakeHybridRuntime:
+    """Controlled runtime boundary: chat tests never use the retired SQLite scanner."""
+
+    def search(self, _session, workspace_id, query, *, final_evidence_limit=None):
+        if "mars" in query.casefold():
+            return result_for([], trace=RetrievalTrace(dense_executed=True, bm25_executed=True))
+        evidence = [
+            Evidence(
+                workspace_id,
+                "hybrid:test",
+                "Ankara Türkiye'nin başkentidir.",
+                1.0,
+                document_id="document",
+                document_version_id="version",
+                chunk_id="chunk",
+                citation_label="Ankara Notları, passage 1",
+                metadata={"title": "Ankara Notları"},
+            )
+        ]
+        return result_for(
+            evidence[:final_evidence_limit] if final_evidence_limit else evidence,
+            trace=RetrievalTrace(
+                dense_executed=True,
+                dense_candidate_count=1,
+                bm25_executed=True,
+                bm25_candidate_count=1,
+                fusion_candidate_count=1,
+                final_evidence_count=1,
+            ),
+        )
+
+
+def _ask(session, workspace_id, conversation_id, content, mode):
+    return ask(
+        session,
+        workspace_id,
+        conversation_id,
+        content,
+        mode,
+        retrieval_runtime=FakeHybridRuntime(),
+    )
+
+
 def test_chat_is_workspace_scoped_and_cites_document_version():
     session, workspace_id = session_with_documents()
     conversation = create_conversation(session, workspace_id, "Başkent")
-    _, answer, run = ask(session, workspace_id, conversation.id, "Ankara nedir?", "document_search")
+    _, answer, run = _ask(
+        session, workspace_id, conversation.id, "Ankara nedir?", "document_search"
+    )
     assert run.selected_routes_json == '["hybrid"]'
     assert answer.citations_json and "document_version_id" in answer.citations_json
     assert session.query(Message).filter_by(workspace_id=workspace_id).count() == 2
@@ -96,7 +141,7 @@ def test_chat_is_workspace_scoped_and_cites_document_version():
 def test_unsupported_answers_do_not_fabricate_citations():
     session, workspace_id = session_with_documents()
     conversation = create_conversation(session, workspace_id, "Boş")
-    _, answer, run = ask(session, workspace_id, conversation.id, "Mars kolonisi", "automatic")
+    _, answer, run = _ask(session, workspace_id, conversation.id, "Mars kolonisi", "automatic")
     assert run.answer_state == "unsupported"
     assert answer.citations_json == "[]"
 
@@ -105,7 +150,7 @@ def test_first_question_replaces_the_default_conversation_title():
     session, workspace_id = session_with_documents()
     conversation = create_conversation(session, workspace_id, DEFAULT_CONVERSATION_TITLE)
 
-    ask(session, workspace_id, conversation.id, "  Ankara'nın   nüfusu nedir?  ", "automatic")
+    _ask(session, workspace_id, conversation.id, "  Ankara'nın   nüfusu nedir?  ", "automatic")
 
     assert conversation.title == "Ankara'nın nüfusu nedir?"
 
@@ -120,7 +165,7 @@ def test_conversation_title_from_query_is_compact():
 def test_default_titles_are_backfilled_from_legacy_conversations():
     session, workspace_id = session_with_documents()
     conversation = create_conversation(session, workspace_id, DEFAULT_CONVERSATION_TITLE)
-    ask(session, workspace_id, conversation.id, "Ankara nedir?", "automatic")
+    _ask(session, workspace_id, conversation.id, "Ankara nedir?", "automatic")
     conversation.title = DEFAULT_CONVERSATION_TITLE
 
     backfill_default_conversation_titles(session, [conversation])
@@ -152,7 +197,7 @@ def test_graphrag_route_creates_a_worker_owned_query_job(monkeypatch):
         "app.chat.router.LlamaIndexRouter.select",
         lambda *_: RouteSelection(("graphrag_local",), "Graph route", 1.0),
     )
-    _, answer, run = ask(session, workspace_id, conversation.id, "Ankara", "automatic")
+    _, answer, run = _ask(session, workspace_id, conversation.id, "Ankara", "automatic")
 
     assert answer.status == "queued"
     assert run.state == "queued"
@@ -167,7 +212,7 @@ def test_graphrag_worker_writes_the_final_answer_without_synthesis(monkeypatch, 
         "app.chat.router.LlamaIndexRouter.select",
         lambda *_: RouteSelection(("graphrag_global",), "Graph route", 1.0),
     )
-    _, answer, run = ask(session, workspace_id, conversation.id, "Ankara?", "automatic")
+    _, answer, run = _ask(session, workspace_id, conversation.id, "Ankara?", "automatic")
     calls: list[tuple[str, str]] = []
 
     class FakeAdapter:
@@ -205,7 +250,7 @@ def test_graphrag_worker_uses_hybrid_only_when_the_policy_is_enabled(monkeypatch
         "app.chat.router.LlamaIndexRouter.select",
         lambda *_: RouteSelection(("graphrag_local",), "Graph route", 1.0),
     )
-    _, answer, run = ask(session, workspace_id, conversation.id, "Ankara", "automatic")
+    _, answer, run = _ask(session, workspace_id, conversation.id, "Ankara", "automatic")
     monkeypatch.setattr(get_settings(), "graphrag_query_fallback_to_hybrid", True)
     monkeypatch.setattr(
         "app.workflows.graphrag_query.WorkspaceContext.load",
@@ -213,9 +258,37 @@ def test_graphrag_worker_uses_hybrid_only_when_the_policy_is_enabled(monkeypatch
             graph_root=tmp_path, graphrag_state=SimpleNamespace(state="stale")
         ),
     )
+    monkeypatch.setattr(
+        "app.chat.service.get_hybrid_retrieval_runtime", lambda: FakeHybridRuntime()
+    )
 
     assert execute_graphrag_query(session, run.id) is True
     assert run.state == "completed"
     assert answer.status == "completed"
     assert '"executed_route": "hybrid"' in answer.metadata_json
     assert '"fallback_used": true' in answer.metadata_json
+
+
+def test_hybrid_route_uses_runtime_evidence_and_exposes_component_trace():
+    session, workspace_id = session_with_documents()
+    conversation = create_conversation(session, workspace_id, "Hybrid")
+    runtime = FakeHybridRuntime()
+
+    _, answer, run = ask(
+        session,
+        workspace_id,
+        conversation.id,
+        "Hasan Tahsin Merter hakkında neler biliyoruz?",
+        "automatic",
+        retrieval_runtime=runtime,
+    )
+
+    metadata = __import__("json").loads(answer.metadata_json)
+    assert run.selected_routes_json == '["hybrid"]'
+    assert metadata["retrieval"]["retrieval_mode"] == "hybrid"
+    assert metadata["retrieval"]["dense"]["executed"] is True
+    assert metadata["retrieval"]["bm25"]["executed"] is True
+    assert answer.citations_json == (
+        '[{"document_id": "document", "document_version_id": "version", '
+        '"chunk_id": "chunk", "label": "Ankara Notları, passage 1"}]'
+    )

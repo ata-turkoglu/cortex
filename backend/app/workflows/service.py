@@ -156,12 +156,24 @@ def create_run(
 def request_cancel(session: Session, run: WorkflowRun) -> WorkflowRun:
     if run.state in ("completed", "failed", "cancelled", "interrupted"):
         return run
+    if run.state == "queued":
+        # No worker has claimed queued work yet. Make cancellation durable now
+        # instead of leaving it in "cancelling" when the broker is unavailable.
+        run.state, run.finished_at, run.updated_at = "cancelled", now(), now()
+        event(session, run, "cancelled", step=None)
+        return run
     run.state, run.updated_at = "cancelling", now()
     event(session, run, "cancellation_requested")
     return run
 
 
 def retry_from_failed_step(session: Session, run: WorkflowRun) -> WorkflowRun:
+    if run.state == "queued":
+        # The durable record is intact, but its broker message may have exhausted
+        # retries during a transient worker or database outage. Re-dispatch it.
+        run.updated_at = now()
+        event(session, run, "redispatch_requested")
+        return run
     failed = session.scalar(
         select(WorkflowStepRun)
         .where(WorkflowStepRun.workflow_run_id == run.id, WorkflowStepRun.state == "failed")
@@ -204,7 +216,8 @@ def redact_exception(exc: Exception) -> dict[str, str]:
         r"\1\2[redacted]",
         detail,
     )
-    return {"summary": detail[:500] or "workflow failed"}
+    # Upstream CLIs commonly put the actionable exception at the end of a long traceback.
+    return {"summary": detail[-500:] or "workflow failed"}
 
 
 def apply_deletion_cleanup(session: Session, run: WorkflowRun) -> None:
@@ -413,6 +426,20 @@ def cleanup_retention(session: Session) -> int:
     for run in completed:
         run.deleted_at = now()
     return len(completed)
+
+
+def clear_workflow_history(session: Session) -> int:
+    """Soft-delete all terminal workflow runs while preserving active work."""
+    historical = session.scalars(
+        select(WorkflowRun).where(
+            WorkflowRun.state.in_(('completed', 'failed', 'cancelled', 'interrupted')),
+            WorkflowRun.deleted_at.is_(None),
+        )
+    ).all()
+    timestamp = now()
+    for run in historical:
+        run.deleted_at = timestamp
+    return len(historical)
 
 
 def schedule_orphan_reconciliation(session: Session) -> int:

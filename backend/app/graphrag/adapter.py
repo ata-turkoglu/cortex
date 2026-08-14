@@ -80,16 +80,20 @@ class MicrosoftGraphRAGRunner:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            # GraphRAG and its dependencies can emit Windows-console encoded diagnostics.
+            # Never let an undecodable diagnostic crash subprocess's reader thread and hide the
+            # actual upstream failure behind a secondary NoneType.strip AttributeError.
+            errors="replace",
             env=environment,
         )
         if completed.returncode:
-            detail = completed.stderr.strip() or completed.stdout.strip()
+            detail = (completed.stderr or "").strip() or (completed.stdout or "").strip()
             # Rich-formatted tracebacks put the actionable exception at the end. Keep a bounded
             # tail so workflow diagnostics show the cause without persisting an unbounded CLI log.
             raise GraphRAGExecutionError(
                 detail[-1500:] if detail else "Microsoft GraphRAG command failed"
             )
-        return completed.stdout.strip()
+        return (completed.stdout or "").strip()
 
     def initialize(self, graph_root: Path) -> Path:
         self._run(["init", "--root", str(graph_root)], graph_root)

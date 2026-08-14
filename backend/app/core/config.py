@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     fusion_candidate_limit: int = 40
     reranker_input_limit: int = 30
     final_evidence_top_k: int = 10
+    document_lookup_final_evidence_top_k: int = 50
     reranker_model: str | None = None
     reranker_device: str | None = None
     router_confidence_threshold: float = Field(default=0.6, ge=0, le=1)

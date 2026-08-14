@@ -83,6 +83,7 @@ class SettingsUpdate(BaseModel):
     fusion_candidate_limit: int | None = Field(default=None, ge=1)
     reranker_input_limit: int | None = Field(default=None, ge=1)
     final_evidence_top_k: int | None = Field(default=None, ge=1)
+    document_lookup_final_evidence_top_k: int | None = Field(default=None, ge=1)
     router_confidence_threshold: float | None = Field(default=None, ge=0, le=1)
     router_multi_route_threshold: float | None = Field(default=None, ge=0, le=1)
     graphrag_pending_document_threshold: int | None = Field(default=None, ge=1)

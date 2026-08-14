@@ -17,14 +17,14 @@ COPY backend/pyproject.toml backend/uv.lock ./
 # is cached and shared while each final target receives only its finished virtualenv.
 FROM python-base AS query-deps
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --group query --no-install-project
+    uv sync --frozen --no-dev --group query --group retrieval --no-install-project
 
 FROM query-deps AS backend-builder
 COPY backend/alembic.ini ./
 COPY backend/alembic ./alembic
 COPY backend/app ./app
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --group query --no-editable
+    uv sync --frozen --no-dev --group query --group retrieval --no-editable
 
 FROM query-deps AS worker-deps
 RUN --mount=type=cache,target=/root/.cache/uv \

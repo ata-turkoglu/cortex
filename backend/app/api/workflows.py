@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import WorkflowEvent, WorkflowRun, WorkflowStepRun
-from ..workflows.service import create_run, request_cancel, retry_from_failed_step
+from ..workflows.service import clear_workflow_history, create_run, request_cancel, retry_from_failed_step
 from .workspaces import get_session
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -59,6 +59,10 @@ class WorkflowEventRead(BaseModel):
     payload_json: str | None
     created_at: datetime
     model_config = {"from_attributes": True}
+
+
+class WorkflowHistoryClearRead(BaseModel):
+    deleted: int
 
 
 def serialize(session: Session, run: WorkflowRun) -> WorkflowRead:
@@ -120,6 +124,11 @@ def create(payload: WorkflowCreate, session: Session = Depends(get_session)):  #
     session.commit()
     dispatch(run.id)
     return serialize(session, run)
+
+
+@router.delete("/history", response_model=WorkflowHistoryClearRead)
+def clear_history(session: Session = Depends(get_session)):  # noqa: B008
+    return {"deleted": clear_workflow_history(session)}
 
 
 @router.get("/{run_id}", response_model=WorkflowRead)

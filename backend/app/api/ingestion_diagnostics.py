@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..chat.service import _evidence
+from ..chat.service import _hybrid_evidence
 from ..core.workspaces import WorkspaceContext, WorkspaceNotFoundError
 from ..graphrag.adapter import GraphRAGAdapter
 from ..models import Chunk, Document, DocumentVersion, LogicalDocument
@@ -145,9 +145,8 @@ def ingestion_diagnostic(  # noqa: B008
         )
     retrieved = []
     if query:
-        matches = group_evidence_by_document(
-            _evidence(session, workspace_id, query, limit=50), exact_text=query
-        )
+        retrieval = _hybrid_evidence(session, workspace_id, query, needs_list=True)
+        matches = group_evidence_by_document(list(retrieval.evidence), exact_text=query)
         retrieved = [
             RetrievedLogicalDocument(
                 document_id=item.document_id,

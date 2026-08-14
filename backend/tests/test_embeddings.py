@@ -53,6 +53,29 @@ def test_ollama_embedding_health_check_uses_embed_endpoint_without_a_real_model(
     )
 
 
+def test_ollama_embedding_requests_have_no_http_deadline(monkeypatch):
+    import httpx
+
+    received: dict[str, object] = {}
+    original_client = httpx.AsyncClient
+
+    def create_client(*args, **kwargs):
+        received.update(kwargs)
+        return original_client(*args, **kwargs)
+
+    monkeypatch.setattr("app.providers.embeddings.httpx.AsyncClient", create_client)
+    adapter = OllamaEmbeddingAdapter(
+        EmbeddingConfiguration("ollama", "bge-m3:latest"),
+        base_url="http://ollama.test",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"embeddings": [[1.0, 0.0]]})
+        ),
+    )
+
+    assert asyncio.run(adapter.embed(["test"])) == [[1.0, 0.0]]
+    assert received["timeout"] is None
+
+
 def test_qwen_adapter_prepares_turkish_query_and_document_without_unicode_loss():
     adapter = Qwen3EmbeddingAdapter(EmbeddingConfiguration("ollama", "qwen3-embedding:0.6b"))
     assert adapter.prepare_query("İstanbul\r\nşeker") == "Query: İstanbul\nşeker"

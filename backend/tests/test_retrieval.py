@@ -1,6 +1,6 @@
 import pytest
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.providers.embeddings import (
     EmbeddingConfiguration,
     prepare_embedding_text,
@@ -27,6 +27,7 @@ from app.retrieval.qdrant import (
     workspace_filter,
 )
 from app.retrieval.reranker import LocalBGEReranker, RerankerUnavailable
+from app.retrieval.runtime import HybridRetrievalRuntime
 from app.retrieval.schemas import AnswerState, Evidence
 from app.retrieval.sparse import SparseDocument, WorkspaceBM25Index
 
@@ -220,3 +221,60 @@ def test_retrieval_limits_reject_non_positive_values():
 def test_local_reranker_never_downloads_an_unconfigured_model():
     with pytest.raises(RerankerUnavailable, match="not_configured"):
         LocalBGEReranker(None).rerank("Ankara", [evidence("chunk")], 1)
+
+
+def test_runtime_executes_real_hybrid_retriever_with_dense_and_bm25(monkeypatch, tmp_path):
+    from qdrant_client import QdrantClient
+
+    from app.retrieval.qdrant import VectorRecord
+
+    workspace_id = "workspace-a"
+    sparse_path = tmp_path / "bm25"
+    WorkspaceBM25Index(
+        workspace_id,
+        [SparseDocument("bm25", "Hasan Tahsin Merter hakkında kayıt", evidence("bm25"))],
+        sparse_path,
+    ).save()
+    client = QdrantClient(":memory:")
+    store = WorkspaceQdrantStore(client, workspace_id, embedding_config_hash="active-config")
+    store.upsert(
+        "chunks",
+        [
+            VectorRecord(
+                "dense",
+                [1.0, 0.0],
+                {
+                    "content": "Semantically relevant Hasan Tahsin Merter evidence",
+                    "chunk_id": "dense",
+                },
+            )
+        ],
+        dimension=2,
+    )
+    context = type(
+        "Context",
+        (),
+        {
+            "index_state": type("State", (), {"embedding_config_hash": "active-config"})(),
+            "resource_path": lambda _self, resource: (
+                sparse_path if resource == "bm25_chunks" else None
+            ),
+        },
+    )()
+    monkeypatch.setattr("app.retrieval.runtime.WorkspaceContext.load", lambda *_: context)
+    monkeypatch.setattr("app.retrieval.runtime.get_qdrant_client", lambda: client)
+    monkeypatch.setattr(HybridRetrievalRuntime, "_embed_query", lambda *_: [1.0, 0.0])
+    settings = get_settings()
+    monkeypatch.setattr(settings, "dense_top_k", 1)
+    monkeypatch.setattr(settings, "bm25_top_k", 1)
+    monkeypatch.setattr(settings, "fusion_candidate_limit", 2)
+    monkeypatch.setattr(settings, "final_evidence_top_k", 2)
+
+    result = HybridRetrievalRuntime().search(None, workspace_id, "Hasan Tahsin Merter")
+
+    assert {item.chunk_id for item in result.evidence} == {"dense", "bm25"}
+    assert result.trace.dense_executed is True
+    assert result.trace.dense_candidate_count == 1
+    assert result.trace.bm25_executed is True
+    assert result.trace.bm25_candidate_count == 1
+    assert result.trace.fusion_candidate_count == 2

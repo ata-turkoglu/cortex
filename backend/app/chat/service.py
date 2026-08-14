@@ -15,20 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
-from ..models import (
-    Chunk,
-    Conversation,
-    Document,
-    DocumentMetadata,
-    DocumentVersion,
-    LogicalDocument,
-    Message,
-    QueryRun,
-    QueryStepRun,
-    Workspace,
-)
+from ..models import Conversation, Message, QueryRun, QueryStepRun, Workspace
 from ..retrieval.document_lookup import group_evidence_by_document, match_reason
-from ..retrieval.schemas import AnswerState, Evidence
+from ..retrieval.runtime import HybridRetrievalRuntime, get_hybrid_retrieval_runtime
+from ..retrieval.schemas import AnswerState, Evidence, RetrievalResult
 from ..workflows.queries import create_query_run
 
 MODES = {"automatic", "document_search", "deep_analysis"}
@@ -115,106 +105,24 @@ def _step(session: Session, run: QueryRun, name: str, state: str) -> None:
         item.state, item.updated_at = state, datetime.now(UTC)
 
 
-def _evidence(session: Session, workspace_id: str, query: str, limit: int = 5) -> list[Evidence]:
-    target = lookup_target(query) if is_document_lookup(query) else query
-    terms = [term for term in target.casefold().split() if len(term) > 1]
-    rows = session.execute(
-        select(Chunk, Document, DocumentVersion, LogicalDocument)
-        .join(Document, Document.id == Chunk.document_id)
-        .join(DocumentVersion, DocumentVersion.id == Chunk.document_version_id)
-        .outerjoin(LogicalDocument, LogicalDocument.id == Chunk.logical_document_id)
-        .where(
-            Chunk.workspace_id == workspace_id,
-            Chunk.deleted_at.is_(None),
-            Document.deleted_at.is_(None),
-            Chunk.document_version_id == Document.active_version_id,
-        )
-        .order_by(Chunk.ordinal)
-    ).all()
-    document_ids = {document.id for _, document, _, _ in rows}
-    metadata_rows = (
-        session.execute(
-            select(
-                DocumentMetadata.document_id,
-                DocumentMetadata.key,
-                DocumentMetadata.value_json,
-            ).where(
-                DocumentMetadata.workspace_id == workspace_id,
-                DocumentMetadata.document_id.in_(document_ids),
-            )
-        ).all()
-        if document_ids
-        else []
+def _hybrid_evidence(
+    session: Session,
+    workspace_id: str,
+    query: str,
+    *,
+    needs_list: bool,
+    runtime: HybridRetrievalRuntime | None = None,
+) -> RetrievalResult:
+    """A `hybrid` route always reaches HybridRetriever.search through this boundary."""
+    settings = get_settings()
+    return (runtime or get_hybrid_retrieval_runtime()).search(
+        session,
+        workspace_id,
+        lookup_target(query) if needs_list else query,
+        final_evidence_limit=(
+            settings.document_lookup_final_evidence_top_k if needs_list else None
+        ),
     )
-    document_metadata: dict[str, dict[str, str]] = {}
-    for document_id, key, value_json in metadata_rows:
-        value = json.loads(value_json)
-        if isinstance(value, str | int | float):
-            document_metadata.setdefault(document_id, {})[key] = str(value)
-
-    ranked = []
-    for chunk, document, version, logical in rows:
-        folded = chunk.content.casefold()
-        exact = bool(target and target.casefold() in folded)
-        score = sum(folded.count(term) for term in terms) + (100 if exact else 0)
-        if score:
-            chunk_metadata = json.loads(chunk.metadata_json or "{}")
-            stored = document_metadata.get(document.id, {})
-            metadata = {
-                **{key: str(value) for key, value in chunk_metadata.items() if value is not None},
-                "document_id": logical.id if logical else document.id,
-                "source_document_id": document.id,
-                "document_code": (
-                    logical.document_code if logical else stored.get("document_code", "")
-                ),
-                "title": logical.title if logical else document.title,
-                "page": str(chunk_metadata.get("page") or ""),
-                "page_start": str(logical.page_start or "") if logical else "",
-                "page_end": str(logical.page_end or "") if logical else "",
-                "source_original": (
-                    logical.source_original if logical else version.source_filename
-                ),
-                "document_type": (
-                    logical.document_type
-                    if logical
-                    else stored.get("document_type", version.mime_type or "")
-                ),
-            }
-            ranked.append((score, chunk, document, logical, metadata))
-    ordered = sorted(ranked, key=lambda item: item[0], reverse=True)
-    if is_document_lookup(query):
-        selected = []
-        selected_documents: set[str] = set()
-        chunks_per_document: dict[str, int] = {}
-        for item in ordered:
-            document_id = item[3].id if item[3] else item[2].id
-            if document_id not in selected_documents and len(selected_documents) >= limit:
-                continue
-            if chunks_per_document.get(document_id, 0) >= 3:
-                continue
-            selected_documents.add(document_id)
-            chunks_per_document[document_id] = chunks_per_document.get(document_id, 0) + 1
-            selected.append(item)
-    else:
-        selected = ordered[:limit]
-    return [
-        Evidence(
-            workspace_id=workspace_id,
-            source=logical.title if logical else document.title,
-            content=chunk.content,
-            score=float(score),
-            document_id=logical.id if logical else document.id,
-            document_version_id=chunk.document_version_id,
-            chunk_id=chunk.id,
-            citation_label=(
-                f"{logical.document_code}, passage {chunk.ordinal + 1}"
-                if logical
-                else f"{document.title}, passage {chunk.ordinal + 1}"
-            ),
-            metadata=metadata,
-        )
-        for score, chunk, document, logical, metadata in selected
-    ]
 
 
 def _answer(evidence: list[Evidence]) -> tuple[str, AnswerState, list[dict[str, str]]]:
@@ -366,7 +274,13 @@ def edit_message(
 
 
 def ask(
-    session: Session, workspace_id: str, conversation_id: str, content: str, mode: str
+    session: Session,
+    workspace_id: str,
+    conversation_id: str,
+    content: str,
+    mode: str,
+    *,
+    retrieval_runtime: HybridRetrievalRuntime | None = None,
 ) -> tuple[Message, Message, QueryRun]:
     if mode not in MODES or not content.strip():
         raise ValueError("a query and supported mode are required")
@@ -425,14 +339,22 @@ def ask(
         answer = None
         answer_state = AnswerState.UNSUPPORTED
         citations = []
-        evidence = _evidence(session, workspace_id, content, limit=50 if choice.needs_list else 5)
-        graph_metadata = {}
+        retrieval = _hybrid_evidence(
+            session,
+            workspace_id,
+            content,
+            needs_list=choice.needs_list,
+            runtime=retrieval_runtime,
+        )
+        evidence = list(retrieval.evidence)
+        graph_metadata = {"retrieval": retrieval.trace.as_dict()}
     _step(session, run, "retrieve", "completed")
     _step(session, run, "synthesize", "running")
     if answer is None:
-        answer, answer_state, citations = (
+        answer, generated_state, citations = (
             _document_lookup_answer(content, evidence) if choice.needs_list else _answer(evidence)
         )
+        answer_state = retrieval.state if evidence else generated_state
     run.answer_state = answer_state.value
     run.latency_ms = int((time.perf_counter() - started) * 1000)
     if not graph_routes:

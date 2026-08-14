@@ -16,6 +16,7 @@ from app.models import (
 from app.workflows.queries import create_query_run
 from app.workflows.service import (
     cleanup_retention,
+    clear_workflow_history,
     create_run,
     execute_run,
     recover_stale,
@@ -69,6 +70,29 @@ def test_cancellation_and_restart_recovery_are_visible():
     assert run.state == "queued"
 
 
+def test_queued_workflow_cancels_without_a_worker_claiming_it():
+    session, workspace_id = session_with_workspace()
+    run = create_run(session, workspace_id, "ingestion")
+
+    request_cancel(session, run)
+
+    assert run.state == "cancelled"
+    assert run.finished_at is not None
+
+
+def test_queued_workflow_can_be_redispatched_after_a_transient_broker_failure():
+    session, workspace_id = session_with_workspace()
+    run = create_run(session, workspace_id, "ingestion")
+
+    retry_from_failed_step(session, run)
+
+    assert run.state == "queued"
+    assert any(
+        item.event_type == "redispatch_requested"
+        for item in session.query(WorkflowEvent).filter_by(workflow_run_id=run.id)
+    )
+
+
 def test_concurrency_blocks_conflicting_stage_and_retention_soft_deletes_history():
     session, workspace_id = session_with_workspace()
     first = create_run(session, workspace_id, "dense_reindex")
@@ -80,6 +104,18 @@ def test_concurrency_blocks_conflicting_stage_and_retention_soft_deletes_history
     first.finished_at = datetime.now(UTC) - timedelta(days=31)
     assert cleanup_retention(session) == 1
     assert first.deleted_at is not None
+
+
+def test_clear_workflow_history_preserves_active_runs():
+    session, workspace_id = session_with_workspace()
+    completed = create_run(session, workspace_id, "dense_reindex")
+    completed.state = "completed"
+    active = create_run(session, workspace_id, "dense_reindex")
+    active.state = "running"
+
+    assert clear_workflow_history(session) == 1
+    assert completed.deleted_at is not None
+    assert active.deleted_at is None
 
 
 def test_document_deletion_workflow_is_idempotent():
@@ -128,6 +164,12 @@ def test_workflow_error_details_redact_secret_values():
     assert "Bearer-secret" not in details["summary"]
     assert "sk-secret" not in details["summary"]
     assert "[redacted]" in details["summary"]
+
+
+def test_workflow_error_details_keep_the_actionable_tail():
+    details = redact_exception(RuntimeError(("traceback context\\n" * 80) + "ValueError: cause"))
+
+    assert details["summary"].endswith("ValueError: cause")
 
 
 def test_query_runs_are_persisted_separately_from_background_workflows():

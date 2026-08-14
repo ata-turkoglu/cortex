@@ -156,6 +156,18 @@ class WorkspaceQdrantStore:
         )
         self.client.delete(collection, points_selector=selector, wait=True)
 
+    def clear_workspace(self, resource_type: str) -> None:
+        """Replace only this workspace's projection during a full active-corpus rebuild."""
+        from qdrant_client.models import FilterSelector
+
+        collection = COLLECTIONS[resource_type]
+        if self.client.collection_exists(collection):
+            self.client.delete(
+                collection,
+                points_selector=FilterSelector(filter=workspace_filter(self.workspace_id)),
+                wait=True,
+            )
+
     def _require_embedding_configuration(self, resource_type: str) -> None:
         if resource_type == "chunks" and not self.embedding_config_hash:
             raise ValueError("active embedding configuration is required for dense chunk vectors")

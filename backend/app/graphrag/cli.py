@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
-import pandas as pd
-import pyarrow as pa
 
-
-def normalize_arrow_values(table: pd.DataFrame) -> pd.DataFrame:
+def normalize_arrow_values(table):
     """Convert Arrow arrays nested in object cells into Parquet-safe Python lists.
 
     GraphRAG 2.6's final text-unit workflow stores the result of pandas ``unique``
@@ -17,6 +15,8 @@ def normalize_arrow_values(table: pd.DataFrame) -> pd.DataFrame:
     are preserved; only their in-memory container is normalized before upstream
     writes its native Parquet artifact.
     """
+    import pyarrow as pa
+
     for column in table.columns:
         if table[column].dtype != "object":
             continue
@@ -30,6 +30,20 @@ def normalize_arrow_values(table: pd.DataFrame) -> pd.DataFrame:
     return table
 
 
+def preload_torch_on_windows():
+    """Load PyTorch before GraphRAG's scientific stack on Windows.
+
+    GraphRAG's import chain reaches PyTorch through graspologic. On Windows, loading that
+    chain first can fail to initialize torch's ``c10.dll`` (WinError 1114), while loading
+    PyTorch before it is reliable. Linux worker containers do not need this ordering shim.
+    """
+    if sys.platform != "win32":
+        return None
+    import torch
+
+    return torch
+
+
 def install_parquet_compatibility() -> None:
     """Patch only GraphRAG's final artifact writer for this worker process."""
     from graphrag.index.workflows import create_final_text_units
@@ -37,7 +51,7 @@ def install_parquet_compatibility() -> None:
 
     original = storage.write_table_to_storage
 
-    async def write_table_to_storage(table: pd.DataFrame, name: str, target: Any) -> None:
+    async def write_table_to_storage(table: Any, name: str, target: Any) -> None:
         await original(normalize_arrow_values(table), name, target)
 
     storage.write_table_to_storage = write_table_to_storage
@@ -45,6 +59,7 @@ def install_parquet_compatibility() -> None:
 
 
 def main() -> None:
+    preload_torch_on_windows()
     install_parquet_compatibility()
     from graphrag.cli.main import app
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from ..core.config import Settings
 from .reranker import EvidenceReranker, RerankerUnavailable
-from .schemas import AnswerState, Evidence, RetrievalResult
+from .schemas import AnswerState, Evidence, RetrievalResult, RetrievalTrace
 from .sparse import WorkspaceBM25Index
 
 
@@ -50,21 +50,48 @@ class HybridRetriever:
         query: str,
         query_vector: list[float],
         lookup: dict[str, Evidence] | None = None,
+        final_evidence_limit: int | None = None,
     ) -> RetrievalResult:
         dense = self.dense_search(query_vector, self.limits.dense_top_k)
         sparse = self.sparse_index.search(query, self.limits.bm25_top_k)
         candidates = reciprocal_rank_fusion(dense, sparse, limit=self.limits.fusion_candidate_limit)
+        fusion_candidate_count = len(candidates)
+        reranker_executed = False
+        reranker_input_count = 0
+        reranker_output_count = 0
         if lookup:
             candidates = parent_neighbor_heading(candidates, lookup)
         fallback_reason = None
         if self.reranker:
             try:
+                reranker_executed = True
+                reranker_input_count = min(len(candidates), self.limits.reranker_input_limit)
                 candidates = self.reranker.rerank(
                     query, candidates, self.limits.reranker_input_limit
                 )
+                reranker_output_count = len(candidates)
             except RerankerUnavailable as error:
                 fallback_reason = str(error)
-        return result_for(candidates[: self.limits.final_evidence_top_k], fallback_reason)
+        final_limit = final_evidence_limit or self.limits.final_evidence_top_k
+        if final_limit < 1:
+            raise ValueError("final evidence limit must be positive")
+        final = candidates[:final_limit]
+        return result_for(
+            final,
+            fallback_reason,
+            trace=RetrievalTrace(
+                dense_executed=True,
+                dense_candidate_count=len(dense),
+                bm25_executed=True,
+                bm25_candidate_count=len(sparse),
+                fusion_candidate_count=fusion_candidate_count,
+                neighbor_expansion_executed=lookup is not None,
+                reranker_executed=reranker_executed,
+                reranker_input_count=reranker_input_count,
+                reranker_output_count=reranker_output_count,
+                final_evidence_count=len(final),
+            ),
+        )
 
 
 def reciprocal_rank_fusion(*rankings: list[Evidence], limit: int, k: int = 60) -> list[Evidence]:
@@ -111,8 +138,13 @@ def parent_neighbor_heading(
     return expanded
 
 
-def result_for(evidence: list[Evidence], fallback_reason: str | None = None) -> RetrievalResult:
+def result_for(
+    evidence: list[Evidence],
+    fallback_reason: str | None = None,
+    *,
+    trace: RetrievalTrace | None = None,
+) -> RetrievalResult:
     state = AnswerState.GROUNDED if evidence else AnswerState.UNSUPPORTED
     if evidence and fallback_reason:
         state = AnswerState.PARTIAL
-    return RetrievalResult(tuple(evidence), state, fallback_reason)
+    return RetrievalResult(tuple(evidence), state, fallback_reason, trace or RetrievalTrace())

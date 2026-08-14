@@ -77,6 +77,7 @@ def create(payload: WorkspaceCreate, s: Session = Depends(get_session)):
     base = f"workspaces/{w.id}"
     for typ, name, path in [
         ("qdrant_chunks", "cortex_chunks", None),
+        ("bm25_chunks", None, f"{base}/bm25"),
         ("graphrag_root", None, f"{base}/graphrag"),
         ("cache", None, f"{base}/cache"),
         ("uploads", None, f"{base}/uploads"),

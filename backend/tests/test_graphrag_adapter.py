@@ -5,6 +5,7 @@ from io import BytesIO
 import pytest
 import yaml
 
+from app.graphrag import cli
 from app.graphrag.adapter import GraphRAGAdapter, GraphRoute
 from app.graphrag.cli import normalize_arrow_values
 from app.graphrag.input import GraphRAGInputMaterializer
@@ -21,6 +22,14 @@ def test_graphrag_cli_normalizes_nested_arrow_arrays_before_writing_parquet():
 
     assert normalized.loc[0, "entity_ids"] == ["entity-a", "entity-b"]
     normalized.to_parquet(BytesIO())
+
+
+def test_graphrag_cli_preloads_torch_on_windows(monkeypatch):
+    sentinel = object()
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setitem(cli.sys.modules, "torch", sentinel)
+
+    assert cli.preload_torch_on_windows() is sentinel
 
 
 def test_graphrag_routes_remain_distinct_and_networkx_is_rebuildable(tmp_path):
@@ -129,6 +138,24 @@ def test_runner_adds_the_cortex_package_root_for_the_worker_cli(monkeypatch, tmp
     MicrosoftGraphRAGRunner()._run(["index"], tmp_path)
 
     assert captured["env"]["PYTHONPATH"].split(os.pathsep)[0].endswith("backend")
+    assert captured["errors"] == "replace"
+
+
+def test_runner_handles_missing_subprocess_output(monkeypatch, tmp_path):
+    from app.graphrag.adapter import GraphRAGExecutionError, MicrosoftGraphRAGRunner
+
+    class Completed:
+        returncode = 1
+        stdout = None
+        stderr = None
+
+    monkeypatch.setattr("app.graphrag.adapter.SecretStore.get", lambda *_: "configured")
+    monkeypatch.setattr(
+        "app.graphrag.adapter.subprocess.run", lambda *_args, **_kwargs: Completed()
+    )
+
+    with pytest.raises(GraphRAGExecutionError, match="Microsoft GraphRAG command failed"):
+        MicrosoftGraphRAGRunner()._run(["index"], tmp_path)
 
 
 def test_graph_adapter_updates_the_generated_model_placeholder_without_storing_secrets(tmp_path):

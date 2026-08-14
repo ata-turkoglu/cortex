@@ -120,10 +120,13 @@ def execute(session: Session, query_run_id: str) -> bool:
         if settings.graphrag_query_fallback_to_hybrid:
             # A fallback is opt-in: the same worker produces a normal evidence-backed answer
             # instead of invoking GraphRAG a second time or asking the API to execute it.
-            from ..chat.service import _answer, _evidence
+            from ..chat.service import _answer, _hybrid_evidence
 
-            fallback_evidence = _evidence(session, run.workspace_id, run.query_text)
-            fallback_answer, fallback_state, fallback_citations = _answer(fallback_evidence)
+            fallback = _hybrid_evidence(
+                session, run.workspace_id, run.query_text, needs_list=False
+            )
+            fallback_evidence = list(fallback.evidence)
+            fallback_answer, _, fallback_citations = _answer(fallback_evidence)
             if fallback_citations:
                 metadata.update(
                     {
@@ -131,6 +134,7 @@ def execute(session: Session, query_run_id: str) -> bool:
                         "fallback_used": True,
                         "fallback_reason": reason,
                         "termination_reason": "hybrid_fallback",
+                        "retrieval": fallback.trace.as_dict(),
                     }
                 )
                 assistant.content, assistant.status, assistant.citations_json = (
@@ -139,7 +143,7 @@ def execute(session: Session, query_run_id: str) -> bool:
                     json.dumps(fallback_citations, ensure_ascii=False),
                 )
                 assistant.metadata_json = json.dumps(metadata, ensure_ascii=False)
-                run.answer_state, run.state = fallback_state.value, "completed"
+                run.answer_state, run.state = fallback.state.value, "completed"
                 _step(session, run, "retrieve", "completed")
                 _step(session, run, "synthesize", "completed")
                 run.updated_at = datetime.now(UTC)
