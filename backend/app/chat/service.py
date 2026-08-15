@@ -14,12 +14,21 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..aggregation.property import (
+    AggregationResult,
+    aggregate_properties,
+    entity_share,
+    ownership_spans,
+    property_location_display,
+)
 from ..core.config import get_settings
 from ..models import Conversation, Message, QueryRun, QueryStepRun, Workspace
 from ..retrieval.document_lookup import group_evidence_by_document, match_reason
 from ..retrieval.runtime import HybridRetrievalRuntime, get_hybrid_retrieval_runtime
 from ..retrieval.schemas import AnswerState, Evidence, RetrievalResult
 from ..workflows.queries import create_query_run
+from .evidence_selection import select_answer_evidence
+from .execution import citation_summary, finalize_citations
 from .query_plan import (
     QueryPlan,
     entity_resolution_trace,
@@ -132,42 +141,6 @@ def _hybrid_evidence(
     )
 
 
-def _select_evidence(evidence: list[Evidence], plan: QueryPlan) -> list[Evidence]:
-    """Prefer entity-bearing context and document diversity after HybridRetriever."""
-    values = [(entity.resolved_value or entity.mention).casefold() for entity in plan.entities]
-
-    def relevance(item: Evidence) -> tuple[int, int, float]:
-        text = item.content.casefold()
-        full_name_matches = sum(
-            bool(entity.resolved_value and entity.resolved_value.casefold() in text)
-            for entity in plan.entities
-        )
-        descriptive = sum(term in text for term in ("malik", "hisse", "tapu", "miras", "tescil"))
-        numeric_only = int(
-            bool(re.search(r"(?:^|\s)\d[\d. ,/-]{5,}(?:\s|$)", text)) and descriptive == 0
-        )
-        return (
-            full_name_matches * 100 + sum(value in text for value in values) * 4 + descriptive,
-            -numeric_only,
-            item.score,
-        )
-
-    ranked = sorted(evidence, key=relevance, reverse=True)
-    selected: list[Evidence] = []
-    document_ids: set[str] = set()
-    for item in ranked:
-        identity = item.document_id or item.source
-        if identity in document_ids and len(document_ids) < min(
-            len(ranked), get_settings().final_evidence_top_k
-        ):
-            continue
-        selected.append(item)
-        document_ids.add(identity)
-        if len(selected) == get_settings().final_evidence_top_k:
-            break
-    return selected
-
-
 def _planned_hybrid_evidence(
     session: Session,
     workspace_id: str,
@@ -176,7 +149,7 @@ def _planned_hybrid_evidence(
     *,
     needs_list: bool,
     runtime: HybridRetrievalRuntime | None = None,
-) -> tuple[RetrievalResult, list[str]]:
+) -> tuple[RetrievalResult, list[str], dict[str, object]]:
     queries = retrieval_queries(query, plan)
     results = [
         _hybrid_evidence(session, workspace_id, item, needs_list=needs_list, runtime=runtime)
@@ -191,12 +164,28 @@ def _planned_hybrid_evidence(
                 seen.add(key)
                 evidence.append(item)
     primary = results[0]
-    return RetrievalResult(
-        tuple(_select_evidence(evidence, plan)),
-        primary.state,
-        primary.fallback_reason,
-        primary.trace,
-    ), queries
+    if needs_list:
+        selected = evidence
+        selection_trace = {
+            "operation": plan.operation,
+            "resolved_entity": plan.entities[0].resolved_value if plan.entities else None,
+            "input_count": len(evidence),
+            "selected_count": len(evidence),
+            "mode": "document_lookup_grouping",
+            "items": [],
+        }
+    else:
+        selected, selection_trace = select_answer_evidence(evidence, plan)
+    return (
+        RetrievalResult(
+            tuple(selected),
+            primary.state,
+            primary.fallback_reason,
+            primary.trace,
+        ),
+        queries,
+        selection_trace,
+    )
 
 
 def _answer(
@@ -217,6 +206,8 @@ def _answer(
         }
         for item in evidence
     ]
+    if plan and plan.operation in {"identify", "describe", "timeline", "generic_qa"}:
+        return _concise_fallback(evidence, plan, citations)
     if plan:
         if plan.requires_aggregation:
             prefix, state = (
@@ -249,6 +240,91 @@ def _answer(
         f"[{index}] {item.content.strip()[:limit]}" for index, item in enumerate(evidence, 1)
     )
     return (f"Kaynaklardaki ilgili kanıtlar:\n\n{excerpts}", AnswerState.GROUNDED, citations)
+
+
+def _concise_fallback(
+    evidence: list[Evidence], plan: QueryPlan, citations: list[dict[str, str]]
+) -> tuple[str, AnswerState, list[dict[str, str]]]:
+    """A deliberately small, grounded fallback that never exposes a chunk buffer."""
+    entity = plan.entities[0] if plan.entities else None
+    name = (entity.resolved_value or entity.mention) if entity else "Bu konu"
+    resolved_name = entity.resolved_value if entity else None
+    first = evidence[0].content.casefold()
+    if any(term in first for term in ("tapu", "hisse", "malik", "taşınmaz", "gayrimenkul")):
+        context = "taşınmaz ve hissedarlık bağlamında"
+    elif any(term in first for term in ("miras", "veraset")):
+        context = "miras ve veraset bağlamında"
+    elif any(term in first for term in ("icra", "borç", "senet")):
+        context = "hukuki veya mali kayıtlar bağlamında"
+    else:
+        context = "incelenen belgelerde"
+    if plan.operation == "identify" and entity and entity.resolved_value:
+        uncertainty = "büyük olasılıkla " if entity.confidence < 0.95 else ""
+        answer = (
+            f"Kaynaklarda “{entity.mention}” {uncertainty}"
+            f"{entity.resolved_value}’i ifade ediyor.\n\n"
+            f"{entity.resolved_value}, {context} geçiyor. [1]"
+        )
+    elif plan.operation == "timeline":
+        date = plan.constraints.date_start or "İlgili dönemde"
+        answer = f"- {date}: {name}, {context} yer alan bir kayıtla ilişkilendiriliyor. [1]"
+    elif (
+        plan.operation == "describe"
+        and resolved_name
+        and any(
+            term in " ".join(item.content.casefold() for item in evidence)
+            for term in ("tapu", "hisse", "taşınmaz", "gayrimenkul", "parsel")
+        )
+    ):
+        facts: dict[tuple[str | None, str | None], tuple[int, str, int]] = {}
+        for index, item in enumerate(evidence, 1):
+            text = item.content
+            ownership = ownership_spans(text, resolved_name)
+            cadastral = re.search(
+                r"(?:(\d+)\s+pafta[\s,]*)?(?:(\d+)\s+ada[\s,]*)?(?:(\d+)\s+(?:nolu\s+|sayılı\s+)?parsel)",
+                text,
+                re.I,
+            )
+            share = entity_share(text, resolved_name)
+            parts = []
+            if cadastral:
+                parts.extend(
+                    f"{value} {label}"
+                    for value, label in zip(
+                        cadastral.groups(), ("pafta", "ada", "parsel"), strict=True
+                    )
+                    if value
+                )
+            if share:
+                parts.append(f"{share.text} hisse")
+            if parts and ownership:
+                key = (
+                    cadastral.group(2) if cadastral else None,
+                    cadastral.group(3) if cadastral else None,
+                )
+                row = f"- {', '.join(parts)} ile ilişkilendiriliyor. [{index}]"
+                richness = sum(bool(value) for value in cadastral.groups()) if cadastral else 0
+                if key == (None, None) or key not in facts or richness > facts[key][2]:
+                    facts[key] = (index, row, richness)
+        if facts:
+            answer = (
+                f"{name}, arşiv belgelerinde taşınmaz ve hissedarlık kayıtlarıyla "
+                "ilişkilendiriliyor.\n\n"
+                + "\n".join(row for _, row, _ in facts.values())
+                + "\n\nBu kayıtlar tarihsel belge bilgisidir; güncel mülkiyet durumu "
+                "olarak yorumlanmamalıdır."
+            )
+        else:
+            answer = (
+                f"Seçilen kaynaklar, belirli taşınmazları {resolved_name} ile yerel bir "
+                "mülkiyet ilişkisine güvenle bağlamak için yeterli değil."
+            )
+    elif plan.operation == "describe":
+        markers = " ".join(f"[{index}]" for index in range(1, min(len(evidence), 3) + 1))
+        answer = f"{name}, {context} geçiyor. {markers}"
+    else:
+        answer = f"Soruyla ilgili seçilen kayıtlar {context} bilgi sağlıyor. [1]"
+    return answer, AnswerState.GROUNDED, citations
 
 
 def _document_lookup_answer(
@@ -284,6 +360,57 @@ def _document_lookup_answer(
         + f"\n\nToplam: {len(documents)} belge"
     )
     return answer, AnswerState.GROUNDED, citations
+
+
+def _aggregation_answer(
+    result: AggregationResult, plan: QueryPlan
+) -> tuple[str, AnswerState, list[dict[str, str]]]:
+    """Render normalized property records rather than raw evidence chunks."""
+    citations: list[dict[str, str]] = []
+    if plan.operation == "count":
+        count, label = (
+            (result.distinct_parcel_count, "farklı parsel")
+            if plan.aggregation_type == "distinct_parcel"
+            else (result.distinct_property_count, "farklı taşınmaz kaydı")
+        )
+        text = (
+            f"Aktif arşivde {count} {label} tekilleştirildi."
+            if result.complete
+            else f"En az {count} {label} tespit edildi; kesin toplam doğrulanamadı."
+        )
+        return text, AnswerState.GROUNDED if result.complete else AnswerState.PARTIAL, citations
+    rows: list[str] = []
+    for index, record in enumerate(result.records, 1):
+        claim = record.representative
+        details = property_location_display(claim)
+        rows.append(f"{index}. {details or 'Kimliği eksik taşınmaz kaydı'}")
+        if claim.normalized_share:
+            rows.append(f"   Hisse: {claim.normalized_share}")
+        rows.append(f"   Kaynak: [{index}]")
+        citations.append(
+            {
+                "document_id": claim.document_id,
+                "document_version_id": claim.document_version_id,
+                "chunk_id": claim.chunk_id,
+                "label": claim.citation,
+            }
+        )
+    disclaimer = (
+        "Bu liste, bu workspace'teki aktif belgelerde tespit edilen "
+        "ve tekilleştirilebilen kayıtlardır."
+        if result.complete
+        else (
+            "Tam envanter doğrulanamadı; aşağıdakiler erişilebilen kaynaklarda "
+            "tespit edilen kayıtlardır."
+        )
+    )
+    return (
+        f"Belgelerde {result.entity} adına/hissesine kayıtlı görülen taşınmazlar:\n\n"
+        + "\n".join(rows)
+        + f"\n\n{disclaimer}",
+        AnswerState.GROUNDED if result.complete else AnswerState.PARTIAL,
+        citations,
+    )
 
 
 def require_conversation(session: Session, workspace_id: str, conversation_id: str) -> Conversation:
@@ -433,6 +560,25 @@ def ask(
     _step(session, run, "route", "completed")
     _step(session, run, "retrieve", "running")
     graph_routes = [route for route in choice.routes if route.startswith("graphrag_")]
+    aggregation_result = None
+    execution_route = {
+        "route": "aggregation" if plan.requires_aggregation else "normal_qa",
+        "operation": plan.operation,
+        "target": plan.target,
+        "requires_exhaustive_retrieval": plan.requires_exhaustive_retrieval,
+        "requires_aggregation": plan.requires_aggregation,
+        "requires_deduplication": plan.requires_deduplication,
+        "reason_codes": list(plan.reason_codes),
+    }
+    if plan.requires_aggregation:
+        entity = plan.entities[0] if plan.entities else None
+        aggregation_result = aggregate_properties(
+            session,
+            workspace_id,
+            entity.resolved_value if entity else None,
+            entity.aliases if entity else (),
+        )
+        graph_routes = []
     if graph_routes:
         # API only persists and submits the job. The worker imports and executes GraphRAG.
         answer, answer_state, citations = "GraphRAG query queued.", AnswerState.UNSUPPORTED, []
@@ -447,37 +593,53 @@ def ask(
         answer = None
         answer_state = AnswerState.UNSUPPORTED
         citations = []
-        retrieval, retrieval_query_list = _planned_hybrid_evidence(
-            session,
-            workspace_id,
-            content,
-            plan,
-            needs_list=choice.needs_list,
-            runtime=retrieval_runtime,
-        )
-        evidence = list(retrieval.evidence)
-        graph_metadata = {
-            "retrieval": retrieval.trace.as_dict(),
-            "retrieval_queries": retrieval_query_list,
-        }
+        if aggregation_result:
+            retrieval = None
+            evidence = []
+            graph_metadata = {"aggregation_execution": aggregation_result.execution}
+        else:
+            retrieval, retrieval_query_list, selection_trace = _planned_hybrid_evidence(
+                session,
+                workspace_id,
+                content,
+                plan,
+                needs_list=choice.needs_list,
+                runtime=retrieval_runtime,
+            )
+            evidence = list(retrieval.evidence)
+            graph_metadata = {
+                "retrieval": retrieval.trace.as_dict(),
+                "retrieval_queries": retrieval_query_list,
+                "evidence_selection": selection_trace,
+            }
     _step(session, run, "retrieve", "completed")
     _step(session, run, "synthesize", "running")
     if answer is None:
         answer, generated_state, citations = (
-            _document_lookup_answer(
-                plan.entities[0].resolved_value
-                if plan.entities and plan.entities[0].resolved_value
-                else content,
-                evidence,
+            _aggregation_answer(aggregation_result, plan)
+            if aggregation_result
+            else (
+                _document_lookup_answer(
+                    (
+                        plan.entities[0].resolved_value
+                        if plan.entities and plan.entities[0].resolved_value
+                        else content
+                    ),
+                    evidence,
+                )
+                if choice.needs_list
+                else _answer(evidence, plan)
             )
-            if choice.needs_list
-            else _answer(evidence, plan)
         )
         answer_state = (
             generated_state
-            if plan.requires_aggregation
+            if aggregation_result
             else (retrieval.state if evidence else generated_state)
         )
+        if not choice.needs_list and not aggregation_result and citations:
+            finalized = finalize_citations(answer, citations)
+            if finalized:
+                answer, citations = finalized
     run.answer_state = answer_state.value
     run.latency_ms = int((time.perf_counter() - started) * 1000)
     if not graph_routes:
@@ -502,9 +664,23 @@ def ask(
                 "intent": choice.intent,
                 "needs_list": choice.needs_list,
                 "query_plan": plan.as_dict(),
+                "execution_route": execution_route,
+                "citation_summary": citation_summary(
+                    {"evidence_selection": graph_metadata.get("evidence_selection", {})}, citations
+                ),
                 "entity_resolution": entity_resolution_trace(plan),
                 "memory_message_count": len(memory),
                 "inference": False,
+                "synthesis": {
+                    "eligible": bool(not graph_routes and not choice.needs_list and citations),
+                    "attempted": False,
+                    "success": False,
+                    "provider": get_settings().answer_provider,
+                    "model": get_settings().answer_model,
+                    "fallback_used": True,
+                    "raw_evidence_guard_triggered": False,
+                    "regeneration_attempted": False,
+                },
                 **graph_metadata,
             }
         ),

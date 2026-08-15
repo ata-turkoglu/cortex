@@ -16,6 +16,9 @@ from ..models import Chunk, DocumentMetadata
 Operation = Literal[
     "identify", "describe", "lookup_documents", "list", "count", "timeline", "compare", "generic_qa"
 ]
+AggregationType = Literal[
+    "distinct_property", "distinct_parcel", "title_document", "grouped_property"
+]
 EntityType = Literal["person", "organization", "place", "property", "document", "unknown"]
 _MAX_CANDIDATE_CHUNKS = 5_000
 _MAX_CANDIDATES = 12
@@ -83,6 +86,7 @@ class DateConstraint:
 @dataclass(frozen=True)
 class QueryPlan:
     operation: Operation
+    target: str | None = None
     entities: tuple[QueryEntity, ...] = ()
     constraints: DateConstraint = field(default_factory=DateConstraint)
     scope: str = "relevant_evidence"
@@ -90,12 +94,15 @@ class QueryPlan:
     requires_exhaustive_retrieval: bool = False
     requires_aggregation: bool = False
     requires_deduplication: bool = False
+    aggregation_type: AggregationType | None = None
+    reason_codes: tuple[str, ...] = ()
     confidence: float = 0.6
     reason: str = "Deterministic structured query planner."
 
     def as_dict(self) -> dict[str, object]:
         return {
             "operation": self.operation,
+            "target": self.target,
             "entities": [entity.as_dict() for entity in self.entities],
             "constraints": self.constraints.as_dict(),
             "scope": self.scope,
@@ -103,6 +110,8 @@ class QueryPlan:
             "requires_exhaustive_retrieval": self.requires_exhaustive_retrieval,
             "requires_aggregation": self.requires_aggregation,
             "requires_deduplication": self.requires_deduplication,
+            "aggregation_type": self.aggregation_type,
+            "reason_codes": list(self.reason_codes),
             "confidence": self.confidence,
             "reason": self.reason,
         }
@@ -116,26 +125,82 @@ _QUESTION_SUFFIX = re.compile(
 )
 
 
-def _operation(query: str) -> tuple[Operation, bool, bool, bool]:
+_PROPERTY_TERMS = (
+    "mal",
+    "mülk",
+    "taşınmaz",
+    "gayrimenkul",
+    "tapu",
+    "parsel",
+    "arsa",
+    "arazi",
+    "daire",
+    "büro",
+    "işyeri",
+    "hisse",
+    "hissedar",
+    "mulk",
+    "tasinmaz",
+    "is yeri",
+)
+
+
+def _property_target(query: str) -> bool:
+    value = query.casefold()
+    return any(re.search(rf"\b{re.escape(term)}", value) for term in _PROPERTY_TERMS)
+
+
+def _operation(
+    query: str,
+) -> tuple[Operation, bool, bool, bool, str | None, AggregationType | None, tuple[str, ...]]:
     value = query.casefold()
     if re.search(
         r"hangi\s+(?:belge|dosya)|(?:belge|dosya)lerde\s+geç|documents?\s+(?:containing|mentioning)",
         value,
     ):
-        return "lookup_documents", False, False, False
-    if re.search(r"kaç\s+(?:adet|tane)|how many", value):
-        return "count", True, True, True
+        return "lookup_documents", False, False, False, "document", None, ("document_lookup",)
+    property_target = _property_target(query)
+    if re.search(r"(?:kaç|kac)\s+(?:adet|tane|farklı)|how many", value) and property_target:
+        aggregation_type: AggregationType = (
+            "distinct_parcel" if "parsel" in value else "distinct_property"
+        )
+        return (
+            "count",
+            True,
+            True,
+            True,
+            "property",
+            aggregation_type,
+            ("count_request", "property_target"),
+        )
     if re.search(
-        r"(?:hangi|tüm)\s+(?:mal|gayrimenkul)|(?:malları|gayrimenkulleri)\s+(?:var|nelerdir)", value
+        r"(?:hangi|tüm|tum)\s+(?:mal|mülk|mulk|taşınmaz|tasinmaz|gayrimenkul|parsel)|(?:malları|mallari|mülkleri|mulkleri|taşınmazları|tasinmazları|gayrimenkulleri)\s+(?:var|nelerdir)|(?:mal|mülk|mulk|taşınmaz|tasinmaz|gayrimenkul|parsel)\w*.{0,40}(?:listele|grupla)|hangi\s+parsellerde\s+hissedar",
+        value,
     ):
-        return "list", True, False, True
+        return (
+            "list",
+            True,
+            True,
+            True,
+            "property",
+            "grouped_property" if "grupla" in value else "distinct_property",
+            ("inventory_request", "property_target"),
+        )
     if _YEAR.search(value):
-        return "timeline", False, False, False
+        return "timeline", False, False, False, None, None, ("temporal_request",)
     if re.search(r"\bkim(?:dir)?\b|who is", value):
-        return "identify", False, False, False
-    if re.search(r"hakkında|neler biliyoruz|tell me about|what do we know", value):
-        return "describe", False, False, False
-    return "generic_qa", False, False, False
+        return "identify", False, False, False, None, None, ("identity_request",)
+    if re.search(r"hakkında|ilgili bilgi ver|neler biliyoruz|tell me about|what do we know", value):
+        return (
+            "describe",
+            False,
+            False,
+            False,
+            "property" if property_target else None,
+            None,
+            ("description_request",),
+        )
+    return "generic_qa", False, False, False, None, None, ("general_question",)
 
 
 def _constraint(query: str) -> DateConstraint:
@@ -148,6 +213,14 @@ def _constraint(query: str) -> DateConstraint:
 
 def _mention(query: str, operation: Operation) -> str | None:
     value = " ".join(query.strip().strip("?!.").split())
+    if operation == "describe":
+        value = re.sub(
+            r"(?:'|’)(?:in|ın|un|ün|nin|nın|nun|nün)\s+"
+            r"(?:malları|mülkleri|taşınmazları|gayrimenkulleri)\s+.*$",
+            "",
+            value,
+            flags=re.I,
+        )
     if operation == "lookup_documents":
         value = re.sub(
             r"\s+hangi\s+(?:belgelerde|dosyalarda)\s+geç(?:iyor|mektedir)?\??$",
@@ -159,21 +232,32 @@ def _mention(query: str, operation: Operation) -> str | None:
         value = re.sub(
             r"(?:(?:'|’)(?:in|ın|un|ün)|(?:nin|nın|nun|nün))\s+.*$", "", value, flags=re.I
         )
+        value = re.sub(
+            r"\s+(?:hangi\s+parsellerde\s+hissedar|kaç\s+farklı\s+parselde\s+hissedar)\??$",
+            "",
+            value,
+            flags=re.I,
+        )
     value = _QUESTION_SUFFIX.sub("", value).strip(" ?!.'")
     return value if value and len(value) <= 120 else None
 
 
 def plan_query(query: str) -> QueryPlan:
-    operation, exhaustive, aggregation, deduplication = _operation(query)
+    operation, exhaustive, aggregation, deduplication, target, aggregation_type, reason_codes = (
+        _operation(query)
+    )
     mention = _mention(query, operation)
     entities = () if not mention else (QueryEntity("person", mention, _normalize(mention)),)
     return QueryPlan(
-        operation,
-        entities,
-        _constraint(query),
+        operation=operation,
+        target=target,
+        entities=entities,
+        constraints=_constraint(query),
         requires_exhaustive_retrieval=exhaustive,
         requires_aggregation=aggregation,
         requires_deduplication=deduplication,
+        aggregation_type=aggregation_type,
+        reason_codes=reason_codes,
         confidence=0.72 if operation != "generic_qa" else 0.5,
     )
 

@@ -25,6 +25,40 @@ def test_core_query_operations_and_safety_flags():
     assert listing.operation == "list" and listing.requires_exhaustive_retrieval
     assert count.entities[0].mention == "Hasan Tahsin Merter"
     assert listing.entities[0].mention == "Berke"
+    parcel_count = plan_query("Mehmet Berke Merter kaç farklı parselde hissedar?")
+    assert parcel_count.entities[0].mention == "Mehmet Berke Merter"
+    assert parcel_count.aggregation_type == "distinct_parcel"
+
+
+def test_aggregation_routing_requires_inventory_or_count_semantics():
+    normal = (
+        "Berke kim?",
+        "Berke hakkinda ne biliyoruz?",
+        "Berke'nin mallari hakkinda ne biliyoruz?",
+        "Bu arsivde neler var?",
+        "1980'lerde neler olmus?",
+    )
+    for query in normal:
+        plan = plan_query(query)
+        assert plan.requires_aggregation is False
+        assert plan.requires_exhaustive_retrieval is False
+    for query in (
+        "Berke'nin hangi mallari var?",
+        "Berke'nin tum tasinmazlarini listele.",
+        "Mehmet Berke Merter hangi parsellerde hissedar?",
+        "Hasan Tahsin Merter kac adet tapusu var?",
+    ):
+        plan = plan_query(query)
+        assert plan.target == "property"
+        assert plan.requires_aggregation is True
+        assert plan.requires_exhaustive_retrieval is True
+
+
+def test_describe_possessive_property_tail_leaves_a_person_mention():
+    plan = plan_query("Berke'nin malları hakkında ne biliyoruz?")
+
+    assert plan.operation == "describe"
+    assert plan.entities[0].mention == "Berke"
 
 
 def test_entity_resolution_uses_only_workspace_chunk_evidence():

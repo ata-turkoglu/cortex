@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     fusion_candidate_limit: int = 40
     reranker_input_limit: int = 30
     final_evidence_top_k: int = 10
+    identify_final_evidence_top_k: int = 3
+    describe_final_evidence_top_k: int = 5
+    timeline_final_evidence_top_k: int = 5
     document_lookup_final_evidence_top_k: int = 50
     reranker_model: str | None = None
     reranker_device: str | None = None
@@ -78,6 +81,9 @@ class Settings(BaseSettings):
     sse_reconnect_interval_seconds: int = 3
     conversation_memory_window_messages: int = 12
     answer_style: Literal["concise", "balanced", "detailed"] = "balanced"
+    identify_answer_max_words: int = 180
+    describe_answer_max_words: int = 400
+    timeline_answer_max_words: int = 400
     grounding_required: bool = True
     metadata_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     metadata_model: str = "gpt-5.6-luna"

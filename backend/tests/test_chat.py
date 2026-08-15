@@ -292,9 +292,20 @@ def test_hybrid_route_uses_runtime_evidence_and_exposes_component_trace():
         '[{"document_id": "document", "document_version_id": "version", '
         '"chunk_id": "chunk", "label": "Ankara Notları, passage 1"}]'
     )
+    assert metadata["evidence_selection"]["selected_count"] == 1
+    assert metadata["synthesis"] == {
+        "eligible": True,
+        "attempted": False,
+        "success": False,
+        "provider": "openai",
+        "model": get_settings().answer_model,
+        "fallback_used": True,
+        "raw_evidence_guard_triggered": False,
+        "regeneration_attempted": False,
+    }
 
 
-def test_count_query_is_not_presented_as_a_verified_total():
+def test_count_query_uses_the_verified_aggregation_route():
     session, workspace_id = session_with_documents()
     conversation = create_conversation(session, workspace_id, "Count")
 
@@ -307,6 +318,6 @@ def test_count_query_is_not_presented_as_a_verified_total():
     )
 
     metadata = __import__("json").loads(answer.metadata_json)
-    assert run.answer_state == "partial"
+    assert run.answer_state == "grounded"
     assert metadata["query_plan"]["requires_aggregation"] is True
-    assert "doğrulanmış bir toplam değildir" in answer.content
+    assert metadata["execution_route"]["route"] == "aggregation"
