@@ -17,11 +17,11 @@ Codex must keep this file updated.
 
 ## Current phase
 
-- Phase: Structured query understanding follow-up
-- Status: Complete; focused validation passed.
+- Phase: Phase 4.4 — Entity-bound property facts and ownership span binding
+- Status: Complete in source; focused validation passed. Live regression remains blocked by the local backend's SQLite disk I/O startup failure.
 - Active validation target: None
 - Started: 2026-08-02
-- Last updated: 2026-08-08
+- Last updated: 2026-08-15
 
 ## Completed work
 
@@ -100,6 +100,18 @@ Codex must keep this file updated.
 - Wired ordinary `hybrid` chat routes and the opt-in GraphRAG fallback to the real
   workspace-scoped `HybridRetriever` runtime (configured embeddings, Qdrant, persisted BM25,
   RRF, optional local reranker, evidence limits, citations, and sanitized retrieval trace data).
+- Completed Phase 3.2 answer-stage evidence selection: HybridRetriever remains broad, while a
+  deterministic operation-aware selector promotes resolved full-name descriptive evidence,
+  penalizes numeric/OCR shorthand and stubs, filters unrelated identity evidence, applies
+  document diversity, and emits a short inspectable selection trace. Identity, description, and
+  timeline answers have independent final-evidence limits; citations now derive only from that
+  selected ordering. Normal hybrid fallbacks and synchronous OpenAI synthesis persist explicit
+  eligibility, attempt, success, provider/model, fallback, and safe-error metadata.
+- Completed Phase 3.3 concise answer rendering: normal structured QA now returns a small
+  operation-aware local fallback instead of raw chunk excerpts. Synchronous synthesis reads cited
+  chunks only as internal context, receives a strict paraphrase-and-inline-citation contract, and
+  applies a deterministic copied-span guard with one regeneration attempt. Metadata records the
+  guard and regeneration outcomes.
 
 ## In progress
 
@@ -118,8 +130,20 @@ Codex must keep this file updated.
 
 ## Validation history
 
+| 2026-08-15 | Phase 4.4 entity-bound facts | focused ruff/pytest, context validation, and `git diff --check` | Passed (31 focused tests; existing upstream Pydantic warning) |
+
+| 2026-08-15 | Phase 4.3 share/entity binding | `uv run black`, focused ruff/pytest, context validation, and `git diff --check` | Passed (28 focused tests; existing upstream Pydantic warning) |
+
+| 2026-08-15 | Phase 4.2 describe/citations | `uv run black`, focused ruff/pytest, context validation, and `git diff --check` | Passed (22 focused tests; existing upstream Pydantic warning) |
+
+| 2026-08-15 | Phase 4.1 cadastral accuracy | `uv run black`, focused ruff/pytest, context validation, and `git diff --check` | Passed (19 focused tests; existing upstream Pydantic warning) |
+
+| 2026-08-15 | Phase 4 aggregation | `uv run black`, focused ruff/pytest, context validation, and `git diff --check` | Passed (16 focused tests; existing upstream Pydantic warning) |
+
 | Date | Phase | Command | Result |
 | 2026-08-14 | Structured query understanding | `ruff check --no-cache app/chat app/api/chat.py tests/test_chat.py tests/test_query_plan.py`, focused pytest, context validation, and `git diff --check` | Passed (11 focused tests; existing upstream Pydantic warning) |
+| 2026-08-15 | Phase 3.2 | `uv run ruff check app/chat app/core/config.py tests/test_chat.py tests/test_evidence_selection.py`; `uv run pytest -q tests/test_chat.py tests/test_query_plan.py tests/test_evidence_selection.py -p no:cacheprovider`; context validation; `git diff --check` | Passed (16 focused tests; one existing upstream Pydantic warning) |
+| 2026-08-15 | Phase 3.3 | `uv run ruff check app/chat app/core/config.py tests/test_chat.py tests/test_evidence_selection.py`; `uv run pytest -q tests/test_chat.py tests/test_query_plan.py tests/test_evidence_selection.py -p no:cacheprovider`; context validation; `git diff --check` | Passed (18 focused tests; one existing upstream Pydantic warning) |
 | ---- | ----- | ------- | ------ |
 | 2026-08-10 | Retrieval wiring | `uv run ruff check ...`, `uv run pytest -q tests/test_chat.py tests/test_retrieval.py -p no:cacheprovider`, and Alembic upgrade (from `backend`) | Passed (25 focused tests; warnings only) |
 | 2026-08-08 | 8 | `uv run ruff check app tests alembic` and `uv run pytest -q -p no:cacheprovider` (from `backend`) | Passed (106 tests; upstream/local-adapter warnings only) |

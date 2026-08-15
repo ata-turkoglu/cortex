@@ -5,6 +5,9 @@ are in `codex-prompts/MASTER_PROMPT.md` and `codex-prompts/docs/DECISIONS.md`; d
 silently deviate from them. Use `.ai/project-map.yaml` and `docs/ai/index.md` to find the
 smallest relevant module before searching files.
 
+Before changing query, retrieval, aggregation, normalization, citation, or answer architecture,
+also read `docs/architecture/CORTEX_RULEBOOK.md`.
+
 ## Working rules
 
 - Keep `codex-prompts/IMPLEMENTATION_STATUS.md` truthful: mark work complete only after

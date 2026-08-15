@@ -11,9 +11,12 @@ Chat creates a validated compositional query plan before Hybrid Search. The plan
 operation, entity mentions/resolution confidence, date constraints, and whether a request needs
 exhaustive retrieval, aggregation, or deduplication. Entity resolution reads only active chunks
 from the requested workspace; resolved names provide bounded additional HybridRetriever queries,
-then a deterministic selector favors entity-bearing and document-diverse evidence. It does not
-alter dense, BM25, fusion, or reranker scoring. Count and complete-list requests remain explicitly
-partial until their dedicated aggregation/exhaustive execution support exists.
+then an operation-aware deterministic selector favors resolved full names, descriptive context, and
+document-diverse evidence while penalizing numeric/OCR shorthand, stubs, and evidence without the
+resolved entity. It does not
+alter dense, BM25, fusion, or reranker scoring. Explicit exhaustive property LIST/COUNT requests
+use a separate workspace-scoped aggregation boundary that processes active relational candidates;
+it does not change Hybrid Search, Qdrant, BM25, or GraphRAG ranking/indexing.
 
 ## Phase 6 implementation boundary
 
