@@ -337,6 +337,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--cortex-primary
 .metric-value { display: block; font-size: 2rem; margin-top: .35rem; }
 .two-column { grid-template-columns: minmax(0, 1.6fr) minmax(280px, .8fr); }
 .documents-split-view { align-items: start; display: grid; gap: 1rem; grid-template-columns: minmax(260px, .85fr) minmax(0, 1.65fr); }
+.knowledge-curation__split-grid { display: grid; gap: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: .75rem; }
 .form-stack { display: grid; gap: .9rem; }
 .resource-list, .document-table { display: grid; }
 .resource-list > a { border-bottom: 1px solid var(--cortex-line); color: inherit; display: grid; gap: .25rem; padding: .9rem 0; text-decoration: none; }

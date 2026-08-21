@@ -1,13 +1,48 @@
-import { Handle, Position, type Edge, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
+import {
+  Handle,
+  Position,
+  type Edge,
+  type Node,
+  type NodeProps,
+  type NodeTypes,
+} from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/client";
 import { ACard, AInfoPanel, ATabs } from "../components/ui";
 import { AFlowCanvas } from "./AFlowCanvas";
-import { workflowSchema } from "./workflowSchemas";
 
 type MapTab = "system" | "ingestion" | "query" | "workflows";
-type DetailTab = "description" | "interfaces" | "guarantee";
-type NodeKind = "input" | "service" | "processor" | "decision" | "storage" | "retrieval" | "llm-local" | "llm-api" | "safety" | "worker" | "delivery";
+type DetailTab =
+  | "description"
+  | "interfaces"
+  | "guarantee"
+  | "documentation"
+  | "context";
+type NodeKind =
+  | "input"
+  | "service"
+  | "processor"
+  | "decision"
+  | "storage"
+  | "retrieval"
+  | "llm-local"
+  | "llm-api"
+  | "safety"
+  | "worker"
+  | "delivery";
+const nodeCategoryLabels: Record<NodeKind, string> = {
+  input: "Veri girişi",
+  processor: "Veri işleme",
+  decision: "Yönlendirme",
+  safety: "Güvenlik",
+  storage: "Kalıcı veri",
+  retrieval: "Retrieval",
+  worker: "Arka plan",
+  delivery: "Teslim",
+  service: "Servis",
+  "llm-local": "LLM",
+  "llm-api": "LLM",
+};
 const MAP_NODE_WIDTH = 205;
 const MAP_NODE_MIN_HEIGHT = 160;
 const MAP_NODE_HORIZONTAL_GAP = 100;
@@ -15,281 +50,691 @@ const MAP_NODE_VERTICAL_GAP = 80;
 const MAP_GROUP_HORIZONTAL_PADDING = 100;
 const MAP_GROUP_VERTICAL_PADDING = 80;
 type RecordKind = "database" | "file" | "vector" | "cache";
-type MapNodeData = { label: string; description: string; interfaces: string; guarantee: string; kind: NodeKind; layer: string; model?: string; recordKind?: RecordKind };
+type MapNodeData = {
+  label: string;
+  description: string;
+  interfaces: string;
+  guarantee: string;
+  kind: NodeKind;
+  layer: string;
+  model?: string;
+  recordKind?: RecordKind;
+  documentation?: string;
+  context?: string;
+};
 type MapNode = Node<MapNodeData, "architecture">;
-type FlowGroupVariant = "platform" | "input" | "processing" | "durable" | "dense" | "graphrag" | "query" | "delivery";
-type FlowGroupNode = Node<{ label: string; variant: FlowGroupVariant }, "flow-group">;
+type FlowGroupVariant =
+  | "platform"
+  | "input"
+  | "processing"
+  | "durable"
+  | "dense"
+  | "graphrag"
+  | "query"
+  | "delivery";
+type FlowGroupNode = Node<
+  {
+    label: string;
+    variant: FlowGroupVariant;
+    boundary?: string;
+    documentation?: string;
+    context?: string;
+  },
+  "flow-group"
+>;
 
-const legendGroups: Array<{ label: string; items: Array<{ kind: NodeKind; label: string }> }> = [
-  { label: "Uygulama akışı", items: [{ kind: "input", label: "Girdi" }, { kind: "processor", label: "İşleme" }, { kind: "worker", label: "Arka plan" }, { kind: "delivery", label: "Teslim" }] },
-  { label: "Veri ve retrieval", items: [{ kind: "storage", label: "Kalıcı veri" }, { kind: "retrieval", label: "Retrieval" }] },
-  { label: "Kontrol", items: [{ kind: "decision", label: "Karar" }, { kind: "safety", label: "Güvenlik" }] },
-  { label: "LLM kaynağı", items: [{ kind: "llm-local", label: "Local" }, { kind: "llm-api", label: "API" }] },
+export type SystemMapSubsystem = {
+  id: string;
+  label: string;
+  boundary: string;
+  documentation: string;
+  context: string;
+  description: string;
+  guarantee: string;
+  kind: NodeKind;
+  variant: FlowGroupVariant;
+};
+
+const legendGroups: Array<{
+  label: string;
+  items: Array<{ kind: NodeKind; label: string }>;
+}> = [
+  {
+    label: "Akış",
+    items: [
+      { kind: "input", label: "Veri girişi" },
+      { kind: "processor", label: "Veri işleme" },
+      { kind: "decision", label: "Yönlendirme" },
+      { kind: "worker", label: "Arka plan" },
+      { kind: "delivery", label: "Teslim" },
+    ],
+  },
+  {
+    label: "Veri",
+    items: [
+      { kind: "storage", label: "Kalıcı veri" },
+      { kind: "retrieval", label: "Retrieval" },
+    ],
+  },
+  { label: "Koruma", items: [{ kind: "safety", label: "Güvenlik" }] },
+  {
+    label: "LLM",
+    items: [
+      { kind: "llm-local", label: "Local" },
+      { kind: "llm-api", label: "API" },
+    ],
+  },
   { label: "Platform", items: [{ kind: "service", label: "Servis" }] },
 ];
 
 const tabLabels: Record<MapTab, string> = {
   system: "Canlı sistem",
-  ingestion: "Belge akışı",
-  query: "Sorgu akışı",
+  ingestion: "Indexing V2",
+  query: "Query V2",
   workflows: "Arka plan işlemleri",
 };
 
-const detailedNodePresentation: Record<string, Pick<MapNodeData, "kind" | "layer" | "model">> = {
-  "upload-request": { kind: "input", layer: "Kullanıcı girişi" }, "workspace-scope": { kind: "safety", layer: "Workspace güvenliği" }, "folder-resolution": { kind: "safety", layer: "Workspace güvenliği" }, "replacement-decision": { kind: "decision", layer: "Sürümleme" }, "file-read": { kind: "processor", layer: "Yükleme hazırlığı" }, "upload-validation": { kind: "safety", layer: "Yükleme güvenliği" }, "source-hash": { kind: "processor", layer: "İçerik kimliği" }, "content-duplicate": { kind: "decision", layer: "Tekrar denetimi" }, rejected: { kind: "safety", layer: "Reddedilen istek" }, "source-store": { kind: "storage", layer: "Kaynak depolama" }, "text-source-decision": { kind: "decision", layer: "Belge işleme" }, "direct-text-read": { kind: "processor", layer: "Belge işleme" }, docling: { kind: "processor", layer: "Belge işleme" }, normalized: { kind: "storage", layer: "Normalize kaynak kaydı" }, "document-record": { kind: "storage", layer: "Kalıcı belge kaydı" }, "version-record": { kind: "storage", layer: "Kalıcı belge kaydı" }, "system-metadata": { kind: "storage", layer: "Kalıcı belge kaydı" }, chunks: { kind: "storage", layer: "Kalıcı chunk kaydı" }, relationships: { kind: "storage", layer: "Belge ilişkileri" }, workflow: { kind: "storage", layer: "Kalıcı workflow kaydı" }, "dispatch-decision": { kind: "decision", layer: "İş teslimi" }, "ingestion-worker": { kind: "worker", layer: "Arka plan" }, "checkpoint-parse": { kind: "storage", layer: "Dayanıklı checkpoint" }, "checkpoint-normalize": { kind: "storage", layer: "Dayanıklı checkpoint" }, "checkpoint-chunk": { kind: "storage", layer: "Dayanıklı checkpoint" }, "checkpoint-index": { kind: "storage", layer: "Dayanıklı checkpoint" },
-};
-detailedNodePresentation["logical-documents"] = {
-  kind: "processor",
-  layer: "Mantıksal belge algılama",
-};
-detailedNodePresentation["system-metadata"] = {
-  kind: "storage",
-  layer: "Kalıcı metadata kaydı",
-};
-detailedNodePresentation["checkpoint-logical"] = {
-  kind: "storage",
-  layer: "Dayanıklı checkpoint",
-};
-const ingestionNodesKey: string = "nodes";
-const ingestionEdgesKey: string = "edges";
-
-function graphragConfigurationNodes(): MapNode[] { return [
-  node("community-detection", 6600, 620, "Community detection", "Graph communities are detected algorithmically from the graph; no LLM model is selected for this step.", "Microsoft GraphRAG clustering", "Community membership is distinct from report generation."),
-  node("claims-optional", 6900, 620, "Optional claim extraction", "Claim extraction is disabled by default and runs only when the user enables it in GraphRAG settings.", "GraphRAG extract_claims", "Disabled settings create no claim-extraction model call."),
-  node("community-reports", 6900, 880, "Community report generation", "Reports use the user-selected community provider and model.", "GraphRAG community_reports", "The selected model is recorded with GraphRAG stage usage."),
-]; }
-
-function workflowStepIds(jobType: string) {
-  return workflowSchema(jobType)?.steps.map((step) => step.id).join(", ") ?? "versioned";
-}
-
-function importantIndexingNodes(): MapNode[] { return [
-  node("index-state", 5700, 320, "İndeks durumu · SQLite", "Belge ingestion tamamlandıktan sonra workspace indeks durumları SQLite’ta ayrı yaşam döngülerinde izlenir.", "SQLite · workspace_index_states / graphrag_states", "İndeks türleri birbirinden bağımsız olarak hazır veya reindex gerekli olabilir."),
-  node("dense-trigger", 6000, 80, "Dense reindex gerekli mi?", "Embedding yapılandırması değiştiğinde ya da kullanıcı reindex istediğinde ayrı run planlanır.", "Embedding configuration fingerprint", "Aktif vektörler yeni indeks hazır olmadan değiştirilmez."),
-  node("dense-reindex", 6300, 80, "Dense reindex workflow", `${workflowStepIds("dense_reindex")} adımları ayrı durable run yürütür.`, "dense_reindex", "Workspace index lock ile çakışan dense reindex engellenir."),
-  node("qdrant-index", 6600, 80, "Qdrant dense vektörleri", "Workspace filtreli aktif dense vektörler Qdrant vector DB’de saklanır.", "Qdrant Vector DB · chunks collection", "Farklı embedding yapılandırmaları aynı aktif alanı paylaşmaz."),
-  node("sparse-index", 6000, 320, "bm25s sparse corpus", "Workspace’e özel sparse corpus ve evidence metadata’sı dosya tabanlı cache’de saklanır.", "Filesystem · workspace cache path", "Sparse indeksler workspace’ler arasında paylaşılmaz."),
-  node("graphrag-trigger", 6000, 560, "GraphRAG tetikleyicisi", "Manual veya threshold ayarı GraphRAG reindex isteğini belirler.", "GraphRAG workspace state", "Graph güncel değilse grounded cevap olarak kullanılmaz."),
-  node("graphrag-reindex", 6300, 560, "GraphRAG reindex workflow", `${workflowStepIds("graphrag_reindex")} adımları ayrı durable run yürütür.`, "graphrag_reindex", "Workspace graph lock ile çakışan graph işlemleri engellenir."),
-  node("graphrag-artifacts", 6600, 560, "GraphRAG çalışma verisi", "Kanonik GraphRAG çıktıları workspace dosya alanında Parquet/JSON olarak saklanır; vektörleri Qdrant’a aynalanır.", "Filesystem · GraphRAG root; Qdrant vector mirror", "Local, Global ve DRIFT sorgu yolları bu veriyi kullanır."),
-]; }
-const importantIndexingEdges: Edge[] = links(["checkpoint-index", "index-state", "ingestion tamamlandı"], ["index-state", "dense-trigger", "ayrı tetikleyici"], ["dense-trigger", "dense-reindex", "gerekir"], ["dense-trigger", "qdrant-index", "gerekmez"], ["dense-reindex", "qdrant-index"], ["index-state", "sparse-index", "workspace corpus"], ["index-state", "graphrag-trigger", "manual / threshold"], ["graphrag-trigger", "graphrag-reindex", "tetikle"], ["graphrag-trigger", "graphrag-artifacts", "mevcut graph"], ["graphrag-reindex", "graphrag-artifacts"]);
-importantIndexingEdges.push(
-  ...links(
-    ["graphrag-reindex", "community-detection"],
-    ["graphrag-reindex", "claims-optional", "opsiyonel"],
-    ["community-detection", "community-reports"],
-    ["community-reports", "graphrag-artifacts"],
-    ["claims-optional", "graphrag-artifacts", "etkin"],
-    ["claims-optional", "community-reports", "atla"],
-  ),
-);
-
-const importantIndexingPresentation: Record<string, Pick<MapNodeData, "kind" | "layer" | "model">> = {
-  "index-state": { kind: "storage", layer: "İndeks yaşam döngüsü" }, "dense-trigger": { kind: "decision", layer: "Dense reindex" }, "dense-reindex": { kind: "worker", layer: "Ayrı workflow" }, "qdrant-index": { kind: "storage", layer: "Dense retrieval" }, "sparse-index": { kind: "storage", layer: "Sparse retrieval" }, "graphrag-trigger": { kind: "decision", layer: "GraphRAG reindex" }, "graphrag-reindex": { kind: "worker", layer: "Ayrı workflow" }, "graphrag-artifacts": { kind: "storage", layer: "GraphRAG çalışma verisi" },
-};
-
-const detailedIngestionMap: { nodes: MapNode[]; edges: Edge[] } = {
-  nodes: [
-    node("upload-request", 0, 360, "Yükleme isteği", "İstemci bir veya daha fazla kaynak dosya gönderir.", "POST /workspaces/{id}/uploads", "İstek workspace kapsamında işlenir."),
-    node("workspace-scope", 300, 360, "Workspace kapsamı", "Workspace varlığı ve kaynak dizinleri yükleme öncesi çözümlenir.", "WorkspaceContext", "Dosyalar yalnızca ilgili workspace köküne yazılır."),
-    node("folder-resolution", 600, 360, "Klasör çözümleme", "İsteğe bağlı klasör yolu workspace içinde doğrulanır.", "Folder resolver", "Geçersiz klasör kalıcı yazımdan önce durur."),
-    node("replacement-decision", 900, 360, "Replacement isteği mi?", "replace_document_id varsa tek dosya ve aynı workspace belgesi aranır.", "Document lookup", "Geçersiz replacement kalıcı yazımdan önce durur."),
-    node("file-read", 1200, 200, "Dosyayı güvenli okuma", "İçerik, üst sınırdan bir bayt fazla okunarak boyut korumasına alınır.", "Upload byte guard", "Sınırı aşan dosya saklanmaz."),
-    node("upload-validation", 1500, 200, "Biçim ve boyut doğrulama", "İzinli uzantı, MIME türü ve dosya boyutu denetlenir.", "Upload validation boundary", "Geçersiz içerik workflow başlatmaz."),
-    node("source-hash", 1800, 200, "Kaynak hash’i", "Dosya içeriğinin SHA-256 özeti hesaplanır.", "SHA-256", "Tekrar denetimi içerik üzerinden yapılır."),
-    node("content-duplicate", 2100, 200, "Aynı içerik var mı?", "Aynı workspace’te eşleşen source hash aranır.", "DocumentVersion lookup", "Özdeş içerik ikinci kez indekslenmez."),
-    node("rejected", 2400, 620, "Reddedilen yükleme", "Geçersiz, tekrar veya ayrıştırılamayan içerik için standart API hatası döner.", "API error envelope", "Belge, chunk veya workflow kaydı oluşturulmaz."),
-    node("source-store", 2400, 200, "Kaynak dosya kaydı · Disk", "Doğrulanan dosya workspace’in uploads alanına yazılır.", "Filesystem · workspace/uploads", "Kaynak dosya değişmeden korunur."),
-    node("text-source-decision", 2700, 200, "Düz metin kaynağı mı?", "Dosya uzantısı .md veya .txt ise doğrudan okuma yolu seçilir.", "Filename extension", "Markdown ve metin kaynakları Docling/OCR’a gönderilmez."),
-    node("docling", 3000, 80, "Docling ayrıştırma", "PDF ve DOCX kaynakları Markdown’a çevrilir; DOCX Word Heading 2 stilleri tam olarak ## başlıklarına normalize edilir.", "İç ayrıştırıcı sınırı", "Ayrıştırma hatası 422 ile sonlanır."),
-    node("direct-text-read", 3000, 360, "Doğrudan UTF-8 okuma", "Markdown ve metin, içerik korunarak doğrudan okunur.", "UTF-8 text reader", "Geçersiz UTF-8 içerik 422 ile sonlanır."),
-    node("normalized", 3300, 200, "Normalize Markdown · Disk", "Satır sonları normalize edilir ve çalışma kopyası workspace’in normalized alanına kaydedilir.", "Filesystem · workspace/normalized", "Dosya işlemi açık SQLite transaction dışında yapılır."),
-    node("document-record", 3600, 80, "Belge kaydı · SQLite", "Yeni belge oluşturulur veya replacement belgesi SQLite’a yazılır.", "SQLite · documents", "Belge her zaman workspace kapsamındadır."),
-    node("version-record", 3600, 320, "Sürüm kaydı · SQLite", "Kaynak/normalize yol ve içerik hash’leriyle belge sürümü SQLite’a yazılır.", "SQLite · document_versions", "Önceki sürümler korunur."),
-    node("system-metadata", 3900, 80, "Sistem metadata’sı · SQLite", "Dosya adı, MIME türü, hash, boyut ve model ataması SQLite’ta kaydedilir.", "SQLite · document_metadata", "Kullanıcı düzeltmesi sistem metadata’sından önceliklidir."),
-    node("logical-documents", 3900, 560, "Heading 2 → mantıksal belgeler · SQLite", "Her Markdown ## başlığı yeni bir mantıksal belge başlatır; başlık metni önek veya arşiv kodu yorumu yapılmadan kod ve başlık olarak kaydedilir.", "SQLite · logical_documents", "Yalnızca Heading 2 sınırdır; chunk ve GraphRAG girdileri mantıksal belgeye bağlanır."),
-    node("chunks", 3900, 320, "Chunk kayıtları · SQLite", "Normalize içerik token sınırı ve overlap ile parçalara ayrılır ve SQLite’a yazılır.", "SQLite · chunks", "Her chunk workspace ve belge sürümü kapsamını taşır."),
-    node("relationships", 4200, 320, "Chunk komşulukları · SQLite", "Sıralı chunk’lar için next ilişkileri SQLite’ta kalıcılaştırılır.", "SQLite · chunk_relationships", "Komşuluk yalnızca aynı belge sürümünde kurulur."),
-    node("workflow", 4500, 320, "Ingestion run · SQLite", "Kalıcı ingestion run ve payload SQLite’a yazılır.", "SQLite · workflow_runs", "Broker kesintisinde run queued kalır."),
-    node("dispatch-decision", 4800, 320, "Broker erişilebilir mi?", "Dramatiq actor’a gönderim denenir; hata upload sonucunu bozmaz.", "Redis / Dramatiq", "Kalıcı run daha sonra yeniden teslim edilebilir."),
-    node("ingestion-worker", 5100, 320, "Ingestion worker", "Yükleme sırasında tamamlanan adımları ve indeks adımını dayanıklı checkpoint’lerle izler.", "Document ingestion v1", "İptal ve yeniden deneme güvenli adım sınırlarında uygulanır."),
-    node("checkpoint-parse", 5400, 80, "Parse checkpoint · SQLite", "Yükleme sırasında tamamlanan parse adımının SQLite kaydı.", "SQLite · workflow_step_runs", "Adım tekrarlandığında checkpoint korunur."),
-    node("checkpoint-normalize", 5400, 240, "Normalize checkpoint · SQLite", "Yükleme sırasında tamamlanan normalize adımının SQLite kaydı.", "SQLite · workflow_step_runs", "Restart sonrası tamamlanan adım yeniden çalışmaz."),
-    node("checkpoint-logical", 5400, 320, "Mantıksal belge checkpoint · SQLite", "Algılanan belge sınırları ve metadata nesneleri chunking öncesinde kalıcılaştırılır.", "SQLite · workflow_step_runs", "Belge sınırları yeniden denemede aynı sonucu üretir."),
-    node("checkpoint-chunk", 5400, 400, "Chunk checkpoint · SQLite", "Yükleme sırasında tamamlanan chunk adımının SQLite kaydı.", "SQLite · workflow_step_runs", "İlerleme SSE üzerinden yayımlanır."),
-    node("checkpoint-index", 5400, 560, "Index checkpoint · SQLite", "İndeks adımı SQLite’ta kalıcı olay ve checkpoint ile tamamlanır.", "SQLite · workflow_step_runs", "Run tamamlandığında retention politikasına girer."),
-    ...importantIndexingNodes(),
-    ...graphragConfigurationNodes(),
-  ],
-  edges: [...links(["upload-request", "workspace-scope"], ["workspace-scope", "folder-resolution"], ["folder-resolution", "replacement-decision"], ["replacement-decision", "file-read", "uygun"], ["replacement-decision", "rejected", "geçersiz"], ["file-read", "upload-validation"], ["upload-validation", "source-hash"], ["upload-validation", "rejected", "geçersiz"], ["source-hash", "content-duplicate"], ["content-duplicate", "source-store", "yeni içerik"], ["content-duplicate", "rejected", "tekrar"], ["source-store", "text-source-decision"], ["text-source-decision", "docling", "PDF / DOCX"], ["text-source-decision", "direct-text-read", "MD / TXT"], ["docling", "normalized"], ["docling", "rejected", "ayrıştırılamadı"], ["direct-text-read", "normalized"], ["direct-text-read", "rejected", "geçersiz UTF-8"], ["normalized", "document-record"], ["document-record", "version-record"], ["version-record", "system-metadata"], ["version-record", "chunks"], ["chunks", "relationships"], ["relationships", "workflow"], ["workflow", "dispatch-decision"], ["dispatch-decision", "ingestion-worker", "gönderildi"], ["dispatch-decision", "workflow", "queued"], ["ingestion-worker", "checkpoint-parse"], ["checkpoint-parse", "checkpoint-normalize"], ["checkpoint-normalize", "checkpoint-chunk"], ["checkpoint-chunk", "checkpoint-index"]), ...importantIndexingEdges],
-};
-
-detailedIngestionMap.edges = detailedIngestionMap.edges.filter(
-  (edge) =>
-    edge.id !== "version-record-chunks" &&
-    edge.id !== "checkpoint-normalize-checkpoint-chunk",
-);
-detailedIngestionMap.edges.push(
-  ...links(
-    ["version-record", "logical-documents", "yalnızca ## sınırları"],
-    ["logical-documents", "chunks", "ayrı chunk kümeleri"],
-    ["checkpoint-normalize", "checkpoint-logical"],
-    ["checkpoint-logical", "checkpoint-chunk"],
-  ),
-);
-
-const staticMaps: Record<Exclude<MapTab, "system">, { nodes: MapNode[]; edges: Edge[] }> = {
-  ingestion: {
-    nodes: [
-      node("upload", 0, 360, "Yükleme", "PDF, DOCX, Markdown ve metin kabul edilir.", "POST /workspaces/{id}/uploads", "Dosya boyutu ve biçimi doğrulanır."),
-      node("upload-validation", 320, 360, "Dosya doğrulama", "Biçim, boyut ve workspace kapsamı denetlenir.", "Upload validation boundary", "Geçersiz içerik workflow başlatmaz."),
-      node("duplicate-decision", 640, 360, "Sürüm kararı", "Aynı belge için yeni sürüm veya reddetme yolu seçilir.", "Document/version lookup", "Önceki sürümün kaynak kaydı korunur."),
-      node("rejected", 960, 620, "Reddedilen yükleme", "Doğrulama, tekrar içerik veya ayrıştırma kuralını geçemeyen istek.", "API error envelope", "Belge, chunk veya workflow kaydı oluşturulmaz."),
-    node("source-store", 960, 360, "Kaynak dosya kaydı · Disk", "Doğrulanan orijinal dosya workspace’in uploads alanına yazılır.", "Filesystem · workspace/uploads", "Kaynak dosya değişmeden korunur."),
-      node("text-source-decision", 1280, 360, "Düz metin kaynağı mı?", ".md ve .txt dosyaları doğrudan okuma yoluna gider.", "Filename extension", "Markdown ve metin kaynakları Docling/OCR’a gönderilmez."),
-      node("docling", 1600, 220, "Docling ayrıştırma", "PDF ve DOCX kaynakları Markdown’a çevrilir; DOCX Word Heading 2 stilleri ## olarak korunur.", "İç ayrıştırıcı sınırı", "Ayrıştırma hatası 422 ile sonlanır."),
-      node("direct-text-read", 1600, 500, "Doğrudan UTF-8 okuma", "Markdown ve metin, içerik korunarak doğrudan okunur.", "UTF-8 text reader", "Geçersiz UTF-8 içerik 422 ile sonlanır."),
-      node("normalized", 1920, 360, "Normalize Markdown · Disk", "Satır sonları normalize edilir ve çalışma kopyası workspace/normalized altında kaydedilir.", "Filesystem · workspace/normalized", "Dosya işlemi açık SQLite transaction dışında yapılır."),
-      node("document-record", 2240, 360, "Belge sürümü · SQLite", "Belge, sürüm, dosya bilgileri ve sistem metadata’sı SQLite’a kaydedilir.", "SQLite · documents / versions / metadata", "Kullanıcı metadata’sı sistem değerlerini ezebilir."),
-      node("logical-documents", 2560, 360, "Heading 2 → mantıksal belgeler", "Her ## başlığı ayrı metadata nesnesi ve mantıksal belge kaydı oluşturur; arşiv öneki eşleştirilmez.", "SQLite · logical_documents", "Metadata chunking başlamadan önce kaydedilir."),
-      node("chunks", 2880, 360, "Chunk kayıtları · SQLite", "Her mantıksal belge token sınırı ve overlap ile bağımsız parçalanır.", "SQLite · chunks + next relationships", "Her chunk mantıksal belge kimliği, kodu, başlığı, sayfası ve kaynak adını taşır."),
-      node("workflow", 3200, 360, "Ingestion run · SQLite", "Kalıcı ingestion run SQLite’a yazılır ve Dramatiq’e gönderilir.", "SQLite · workflow_runs; Redis", "Redis erişilemezse run queued olarak kalır."),
-      node("ingestion-worker", 3520, 360, "Ingestion checkpointleri", "Parse, normalize, logical_documents, chunk ve index adımları kalıcı olarak izlenir.", "Document ingestion v3", "İptal ve yeniden deneme yalnızca güvenli adım sınırlarında uygulanır."),
-    ],
-    edges: links(["upload", "upload-validation"], ["upload-validation", "duplicate-decision"], ["upload-validation", "rejected", "geçersiz"], ["duplicate-decision", "source-store", "yeni içerik"], ["duplicate-decision", "rejected", "aynı içerik"], ["source-store", "text-source-decision"], ["text-source-decision", "docling", "PDF / DOCX"], ["text-source-decision", "direct-text-read", "MD / TXT"], ["docling", "normalized"], ["docling", "rejected", "ayrıştırılamadı"], ["direct-text-read", "normalized"], ["direct-text-read", "rejected", "geçersiz UTF-8"], ["normalized", "document-record"], ["document-record", "logical-documents", "yalnızca ##"], ["logical-documents", "chunks"], ["chunks", "workflow"], ["workflow", "ingestion-worker"]),
-    [ingestionNodesKey]: detailedIngestionMap.nodes,
-    [ingestionEdgesKey]: detailedIngestionMap.edges,
-  },
-  query: {
-    nodes: [
-      node("graph-job", 1600, 420, "GraphRAG query job", "API submits the durable query through Redis/Dramatiq; it does not execute Microsoft GraphRAG.", "QueryRun · Redis / Dramatiq", "Worker validates route and workspace scope."),
-      node("graph-worker", 1920, 420, "GraphRAG Worker", "The worker executes Local, Global, or DRIFT with the user's selected provider/model.", "Worker-only Microsoft GraphRAG", "GraphRAG's answer is final; Cortex synthesis is skipped."),
-      node("graph-result", 2240, 620, "GraphRAG final answer", "Usage, technical trace, and evidence metadata return to the API without a second LLM generation.", "QueryRun + GraphRAG reports", "Hybrid fallback is conditional on explicit policy."),
-      node("chat", 0, 360, "Sohbet isteği", "Workspace ve konuşma kapsamındaki kullanıcı sorusu.", "POST /conversations/{id}/messages", "Konuşma sınırı korunur."),
-      node("conversation-context", 320, 360, "Konuşma bağlamı", "Kayıt kaynağı: SQLite’taki workspace kapsamlı conversation ve message kayıtları.", "SQLite · conversations / messages", "Başka workspace’in geçmişi okunmaz."),
-      node("router", 640, 360, "Sorgu planı", "Router, sorgu için retrieval yaklaşımını seçer.", "CustomQueryEngine adapters", "Yollar ayrı kalır; uygunsuz birleşim yapılmaz."),
-      node("lookup-intent", 960, 360, "Yanıt biçimi niyeti", "Planlayıcı, belge listeleme dilini entity_document_lookup olarak işaretler ve needs_list değerini etkinleştirir.", "RouteSelection · intent / needs_list", "Belge listesi soruları özet yanıt yoluna düşmez."),
-      node("hybrid", 960, 80, "Hibrit yol", "Dense, sparse, fusion ve reranking aşamalarını başlatır.", "Qdrant + bm25s", "Embedding uyumsuzsa dense arama engellenir."),
-      node("dense", 1280, 20, "Dense retrieval", "Kayıt kaynağı: Qdrant Vector DB. Workspace filtresiyle benzerlik araması çalışır.", "Qdrant Vector DB · vector query", "Sadece aynı workspace adayları döner."),
-      node("sparse", 1280, 230, "Sparse retrieval", "Kayıt kaynağı: workspace’e özel bm25s cache dosyaları. Terim araması aynı workspace indeksinde çalışır.", "Filesystem · bm25s workspace cache", "Dense arızasında kısmi sonuç sağlayabilir."),
-      node("fusion", 1600, 125, "RRF fusion", "Dense ve sparse adayları reciprocal-rank fusion ile birleştirilir.", "Hybrid retrieval contract", "Aday kaynakları korunur."),
-      node("reranker", 1920, 125, "Yerel BGE reranker", "Birleşen adaylar yerel modelle yeniden sıralanır.", "Local reranker adapter", "Model yoksa sonuçlar açık kısmi modda döner."),
-      node("graph-ready", 960, 570, "Graph hazır mı?", "Kayıt kaynağı: SQLite’taki GraphRAG workspace state; güncellik ve sorgu kipi denetlenir.", "SQLite · graphrag_states", "Stale graph grounded cevap olarak sunulmaz."),
-      node("graph-local", 1280, 470, "Graph Local", "Kayıt kaynağı: kanonik GraphRAG Parquet/JSON artefact’ları ve Qdrant vektör aynası.", "Filesystem · GraphRAG root; Qdrant vector mirror", "Kanonik graph verisi kullanılır."),
-      node("graph-global", 1280, 670, "Graph Global", "Kayıt kaynağı: kanonik GraphRAG Parquet/JSON topluluk raporları ve Qdrant vektör aynası.", "Filesystem · GraphRAG root; Qdrant vector mirror", "Kanonik graph verisi kullanılır."),
-      node("graph-drift", 1600, 570, "Graph DRIFT", "Kayıt kaynağı: GraphRAG Parquet/JSON ve Qdrant aynasındaki yerel/global kanıt.", "Filesystem · GraphRAG root; Qdrant vector mirror", "Modele sunulan kanıt ayrı normalize edilir."),
-      node("document-group", 2240, 80, "Belgeye göre grupla", "Entity lookup adayları document_id ile gruplanır; aynı belgedeki eşleşen chunk’lar tek sonuç altında birleştirilir.", "DocumentMatch · document metadata + matched chunks", "Tam eşleşme ve belge çeşitliliği önceliklidir; her belge yalnızca bir kez döner."),
-      node("evidence", 2240, 360, "Kanıt normalizasyonu", "Qdrant, bm25s cache veya GraphRAG artefact’larından gelen kaynaklar ortak Cortex evidence modeline dönüştürülür.", "Qdrant / filesystem cache / GraphRAG files", "Faktüel iddialar citation gerektirir."),
-      node("citation-check", 2560, 360, "Citation kontrolü", "Kayıt kaynağı: SQLite belge, sürüm ve chunk kayıtlarıyla kaynak eşleşmesi doğrulanır.", "SQLite · documents / document_versions / chunks", "Desteksiz iddia grounded olarak işaretlenmez."),
-      node("answer", 2880, 360, "Grounded yanıt", "Sentez, inference etiketi ve kaynak ayrıntıları.", "Provider answer adapter", "Desteksiz yanıtta citation yoktur."),
-      node("answer-state", 3200, 360, "Yanıt durumu", "Yanıt, citation ve çalışma telemetry’si birlikte kaydedilir.", "Query run persistence", "Kullanıcı mesajları düzenlenebilir, yanıt geçmişi korunur."),
-      node("history", 3520, 360, "Konuşma ve telemetry", "Mesajlar, query run, gecikme ve maliyet SQLite’a kaydedilir; geçmiş buradan okunur.", "SQLite · messages / query_runs / query_step_runs", "Geçmiş sayfa değişiminden bağımsızdır."),
-    ],
-    edges: links(["chat", "conversation-context"], ["conversation-context", "router"], ["router", "lookup-intent"], ["lookup-intent", "hybrid", "hybrid / lookup"], ["lookup-intent", "graph-ready", "graph"], ["hybrid", "dense"], ["hybrid", "sparse"], ["dense", "fusion"], ["sparse", "fusion"], ["fusion", "reranker"], ["reranker", "document-group", "needs_list"], ["reranker", "evidence", "passage QA"], ["document-group", "citation-check", "benzersiz belgeler"], ["graph-ready", "graph-local", "local"], ["graph-ready", "graph-global", "global"], ["graph-local", "graph-drift"], ["graph-global", "graph-drift"], ["graph-drift", "evidence"], ["graph-ready", "hybrid", "hazır değil"], ["evidence", "citation-check"], ["citation-check", "answer", "kanıtlı"], ["citation-check", "answer-state", "eksik citation"], ["answer", "answer-state"], ["answer-state", "history"]),
-  },
+const staticMaps: Record<
+  Exclude<MapTab, "system">,
+  { nodes: MapNode[]; edges: Edge[] }
+> = {
+  ingestion: { nodes: [], edges: [] },
+  query: { nodes: [], edges: [] },
   workflows: {
     nodes: [
-      node("ui", 0, 360, "Cortex arayüzü", "Yükleme, silme, reindex ve kurtarma komutları.", "REST commands", "İşler gezinmeden sonra da sürer."),
-      node("api", 320, 360, "FastAPI komutu", "Komutu doğrular, kalıcı run ve step kayıtlarını oluşturur.", "/api/v1/workflows", "Hatalar standardize edilmiş envelope döner."),
-      node("definition", 640, 360, "Sürümlü workflow tanımı", "Komutun izinli adımları ve retry sınırları seçilir.", "Versioned definitions", "Uygulanan adımlar kayıtlı tanımla tutarlıdır."),
-      node("state", 960, 160, "Kalıcı run kaydı", "Run, adım, olay, lock ve recovery state saklanır.", "workflow_runs / workflow_step_runs", "Safe checkpoint’ten retry yapılır."),
-      node("lock-decision", 960, 500, "Workspace lock uygun mu?", "Tehlikeli eşzamanlı komutlar için workspace kilidi kontrol edilir.", "Workspace lock record", "Çakışan mutasyonlar aynı anda yürütülmez."),
-      node("workflow-redis", 1450, 500, "Redis + Dramatiq", "İş teslimi ve worker çalıştırma sınırı.", "Dramatiq broker", "API yeniden başlasa bile run kaydı korunur."),
-      node("workflow-worker", 1755, 500, "Worker", "Ingestion, reindex, GraphRAG ve bakım workflow’larını yürütür.", "Versioned definitions", "Yan etkili adımlar idempotent tasarlanır."),
-      node("checkpoint", 1920, 300, "Atomik checkpoint", "Başarılı adım sonucu ve sonraki adım atomik kaydedilir.", "Step run + checkpoint", "Yeniden deneme güvenli noktadan başlar."),
-      node("retry-decision", 2240, 160, "Retry gerekli mi?", "Hata, retry politikası ve iptal sinyali değerlendirilir.", "Recovery policy", "Terminal hata görünür şekilde kalıcıdır."),
-      node("cancel", 2240, 500, "İptal / recovery komutu", "Kullanıcı iptali veya kesilmiş run kurtarma isteği.", "REST recovery command", "İptal checkpoint sınırında uygulanır."),
-      node("sse", 2560, 300, "SSE olay akışı", "UI canlı ilerlemeyi izler; bağlantı kesilince geçmişten geri yükler.", "GET /workflows/{id}/events", "Yalnızca gerçekleşen aşamalar gösterilir."),
+      node(
+        "ui",
+        0,
+        360,
+        "Cortex arayüzü",
+        "Yükleme, silme, reindex ve kurtarma komutları.",
+        "REST commands",
+        "İşler gezinmeden sonra da sürer.",
+      ),
+      node(
+        "api",
+        320,
+        360,
+        "FastAPI komutu",
+        "Komutu doğrular, kalıcı run ve step kayıtlarını oluşturur.",
+        "/api/v1/workflows",
+        "Hatalar standardize edilmiş envelope döner.",
+      ),
+      node(
+        "definition",
+        640,
+        360,
+        "Sürümlü workflow tanımı",
+        "Komutun izinli adımları ve retry sınırları seçilir.",
+        "Versioned definitions",
+        "Uygulanan adımlar kayıtlı tanımla tutarlıdır.",
+      ),
+      node(
+        "state",
+        960,
+        160,
+        "Kalıcı run kaydı",
+        "Run, adım, olay, lock ve recovery state saklanır.",
+        "workflow_runs / workflow_step_runs",
+        "Safe checkpoint’ten retry yapılır.",
+      ),
+      node(
+        "lock-decision",
+        960,
+        500,
+        "Workspace lock uygun mu?",
+        "Tehlikeli eşzamanlı komutlar için workspace kilidi kontrol edilir.",
+        "Workspace lock record",
+        "Çakışan mutasyonlar aynı anda yürütülmez.",
+      ),
+      node(
+        "workflow-redis",
+        1450,
+        500,
+        "Redis + Dramatiq",
+        "İş teslimi ve worker çalıştırma sınırı.",
+        "Dramatiq broker",
+        "API yeniden başlasa bile run kaydı korunur.",
+      ),
+      node(
+        "workflow-worker",
+        1755,
+        500,
+        "Worker",
+        "Ingestion, reindex, GraphRAG ve bakım workflow’larını yürütür.",
+        "Versioned definitions",
+        "Yan etkili adımlar idempotent tasarlanır.",
+      ),
+      node(
+        "checkpoint",
+        1920,
+        300,
+        "Atomik checkpoint",
+        "Başarılı adım sonucu ve sonraki adım atomik kaydedilir.",
+        "Step run + checkpoint",
+        "Yeniden deneme güvenli noktadan başlar.",
+      ),
+      node(
+        "retry-decision",
+        2240,
+        160,
+        "Retry gerekli mi?",
+        "Hata, retry politikası ve iptal sinyali değerlendirilir.",
+        "Recovery policy",
+        "Terminal hata görünür şekilde kalıcıdır.",
+      ),
+      node(
+        "cancel",
+        2240,
+        500,
+        "İptal / recovery komutu",
+        "Kullanıcı iptali veya kesilmiş run kurtarma isteği.",
+        "REST recovery command",
+        "İptal checkpoint sınırında uygulanır.",
+      ),
+      node(
+        "sse",
+        2560,
+        300,
+        "SSE olay akışı",
+        "UI canlı ilerlemeyi izler; bağlantı kesilince geçmişten geri yükler.",
+        "GET /workflows/{id}/events",
+        "Yalnızca gerçekleşen aşamalar gösterilir.",
+      ),
     ],
-    edges: links(["ui", "api"], ["api", "definition"], ["definition", "state"], ["definition", "lock-decision"], ["lock-decision", "workflow-redis", "kilit alındı"], ["lock-decision", "state", "çakışma"], ["workflow-redis", "workflow-worker"], ["workflow-worker", "checkpoint"], ["checkpoint", "retry-decision"], ["retry-decision", "workflow-worker", "devam"], ["retry-decision", "sse", "tamamlandı"], ["retry-decision", "cancel", "iptal / hata"], ["cancel", "state"], ["checkpoint", "state"], ["state", "sse"], ["sse", "ui"]),
+    edges: links(
+      ["ui", "api"],
+      ["api", "definition"],
+      ["definition", "state"],
+      ["definition", "lock-decision"],
+      ["lock-decision", "workflow-redis", "kilit alındı"],
+      ["lock-decision", "state", "çakışma"],
+      ["workflow-redis", "workflow-worker"],
+      ["workflow-worker", "checkpoint"],
+      ["checkpoint", "retry-decision"],
+      ["retry-decision", "workflow-worker", "devam"],
+      ["retry-decision", "sse", "tamamlandı"],
+      ["retry-decision", "cancel", "iptal / hata"],
+      ["cancel", "state"],
+      ["checkpoint", "state"],
+      ["state", "sse"],
+      ["sse", "ui"],
+    ),
   },
 };
 
-// The query map keeps Hybrid and GraphRAG answer paths distinct. GraphRAG transport is a
-// worker boundary, so remove the legacy direct graph edges before adding the durable job path.
-staticMaps.query.edges = staticMaps.query.edges.filter(
-  (edge) => !["graph-ready-graph-local", "graph-ready-graph-global", "graph-local-graph-drift", "graph-global-graph-drift", "graph-drift-evidence", "graph-ready-hybrid"].includes(edge.id),
-);
-staticMaps.query.edges.push(
-  ...links(
-    ["graph-ready", "graph-job", "submit"],
-    ["graph-job", "graph-worker", "Redis / Dramatiq"],
-    ["graph-worker", "graph-local", "Local"],
-    ["graph-worker", "graph-global", "Global map/reduce"],
-    ["graph-worker", "graph-drift", "DRIFT limits"],
-    ["graph-local", "graph-result"],
-    ["graph-global", "graph-result"],
-    ["graph-drift", "graph-result"],
-    ["graph-result", "answer-state", "format only"],
-    ["graph-ready", "hybrid", "explicit fallback policy"],
+const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
+  {
+    id: "v2-query-conversation-context",
+    label: "Conversation Context",
+    boundary: "backend/app/query/context/",
+    documentation: "docs/architecture/query-v2/query-runtime.md",
+    context: "backend/app/query/context/AGENTS.md · CLAUDE.md",
+    description:
+      "Loads durable conversation-local summaries, entities, temporal anchors, and unresolved references within one workspace.",
+    guarantee:
+      "Conversation memory never becomes workspace-global canonical knowledge and cannot cross a workspace boundary.",
+    kind: "storage",
+    variant: "input",
+  },
+  {
+    id: "v2-query-understanding",
+    label: "Query Understanding",
+    boundary: "backend/app/query/understanding/",
+    documentation: "docs/architecture/query-v2/query-runtime.md",
+    context: "backend/app/query/understanding/AGENTS.md · CLAUDE.md",
+    description:
+      "Produces constrained semantic meaning, ambiguity, unresolved references, temporal semantics, and follow-up carry-over without a V2 intent field.",
+    guarantee:
+      "Invalid or ambiguous model output is repaired within bounds or returned as an explicit unresolved state.",
+    kind: "processor",
+    variant: "processing",
+  },
+  {
+    id: "v2-query-ir",
+    label: "Query IR",
+    boundary: "backend/app/query/ir/",
+    documentation: "docs/architecture/query-v2/invariants.md",
+    context: "backend/app/query/ir/AGENTS.md · CLAUDE.md",
+    description:
+      "Lowers semantic meaning into the versioned, typed Logical Query IR DAG.",
+    guarantee:
+      "Schema, operator types, dependencies, workspace scope, and evidence requirements validate before planning.",
+    kind: "processor",
+    variant: "query",
+  },
+  {
+    id: "v2-query-execution-planning",
+    label: "Execution Planning",
+    boundary: "backend/app/query/planning/ · backend/app/query/execution.py",
+    documentation: "docs/architecture/query-v2/execution-planning.md",
+    context: "backend/app/query/planning/AGENTS.md · CLAUDE.md",
+    description:
+      "Builds the physical DAG; its dormant V2 executor resolves one GenerationScope before dense and sparse generation-bound reads.",
+    guarantee:
+      "Internal dense reads require workspace + generation + embedding hash; sparse reads use only the matching candidate BM25 artifact; V1 chat remains active.",
+    kind: "decision",
+    variant: "durable",
+  },
+  {
+    id: "v2-query-structured",
+    label: "Structured Query",
+    boundary: "backend/app/engines/structured/",
+    documentation: "docs/architecture/query-v2/structured-graph-engines.md",
+    context: "backend/app/engines/structured/AGENTS.md · CLAUDE.md",
+    description:
+      "Executes exact list, count, distinct, grouping, projection, ranking, and bounded population operations over canonical records.",
+    guarantee:
+      "Verified exhaustive results require the planned active generation and report their processed population and completeness.",
+    kind: "retrieval",
+    variant: "query",
+  },
+  {
+    id: "v2-query-knowledge-graph",
+    label: "Knowledge Graph",
+    boundary: "backend/app/engines/graph/ · backend/app/knowledge/graph/",
+    documentation: "docs/architecture/query-v2/structured-graph-engines.md",
+    context:
+      "backend/app/engines/graph/AGENTS.md · backend/app/knowledge/graph/AGENTS.md",
+    description:
+      "Queries workspace- and generation-scoped canonical Neo4j entities, relations, events, temporals, claims, facts, conflicts, and provenance.",
+    guarantee:
+      "CanonicalKnowledge is distinct from GraphRAG extracted artifacts and preserves evidence and curation precedence.",
+    kind: "retrieval",
+    variant: "query",
+  },
+  {
+    id: "v2-query-retrieval",
+    label: "Retrieval",
+    boundary: "backend/app/engines/hybrid/ · backend/app/retrieval/",
+    documentation: "docs/architecture/retrieval-boundaries.md",
+    context:
+      "backend/app/engines/hybrid/AGENTS.md · backend/app/retrieval/AGENTS.md",
+    description:
+      "Dormant V2 adapters execute planned Qdrant and candidate-owned BM25 reads with one immutable scope; fusion remains pending.",
+    guarantee:
+      "V2 dense reads require workspace + knowledge generation + embedding hash; sparse reads validate candidate artifact identity and never retry legacy workspace BM25.",
+    kind: "retrieval",
+    variant: "dense",
+  },
+  {
+    id: "v2-query-graphrag",
+    label: "GraphRAG",
+    boundary: "backend/app/graphrag/",
+    documentation: "docs/architecture/graphrag-boundary.md",
+    context: "backend/app/graphrag/AGENTS.md · CLAUDE.md",
+    description:
+      "Runs Microsoft GraphRAG Local, Global, or DRIFT as planned capabilities over extracted GraphRAG projections.",
+    guarantee:
+      "GraphRAG output is a typed non-final finding; it is not canonical truth and does not author the final answer.",
+    kind: "retrieval",
+    variant: "graphrag",
+  },
+  {
+    id: "v2-query-result-evidence",
+    label: "Result & Evidence",
+    boundary: "backend/app/query/orchestration/",
+    documentation: "docs/architecture/query-v2/result-evidence-layer.md",
+    context: "backend/app/query/orchestration/AGENTS.md · CLAUDE.md",
+    description:
+      "Reconciles typed EngineResult values and exact evidence from every planned engine into one ReasoningPackage.",
+    guarantee:
+      "All engines converge here; disagreement, ambiguity, partial failure, provenance, and completeness remain visible.",
+    kind: "safety",
+    variant: "delivery",
+  },
+  {
+    id: "v2-query-reasoning",
+    label: "Reasoning & Composition",
+    boundary: "backend/app/reasoning/",
+    documentation: "docs/architecture/query-v2/reasoning-composition.md",
+    context:
+      "backend/app/reasoning/AGENTS.md · research/AGENTS.md · composition/AGENTS.md",
+    description:
+      "Supports durable decomposition, cross-source research, resumable grounded drafting, and consistency validation.",
+    guarantee:
+      "Every factual sentence retains collected evidence lineage and incomplete research cannot become a falsely complete artifact.",
+    kind: "processor",
+    variant: "durable",
+  },
+  {
+    id: "v2-query-answer",
+    label: "Answer",
+    boundary: "backend/app/chat/execution.py",
+    documentation: "docs/architecture/query-answer-pipeline.md",
+    context: "backend/AGENTS.md",
+    description:
+      "Renders the grounded, partial, or unsupported user-facing answer from the validated evidence or composition artifact.",
+    guarantee:
+      "V1 chat remains active until Phase 13; the V2 answer path cannot activate before the sharp-cutover gate.",
+    kind: "delivery",
+    variant: "delivery",
+  },
+];
+
+const INDEXING_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
+  {
+    id: "v2-index-source",
+    label: "Source Processing",
+    boundary: "backend/app/ingestion/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/AGENTS.md",
+    description:
+      "Validates, fingerprints, parses, and normalizes workspace source versions into an immutable corpus snapshot.",
+    guarantee:
+      "Source IO and parsing run outside SQLite transactions; snapshot membership is workspace-scoped and reproducible.",
+    kind: "input",
+    variant: "input",
+  },
+  {
+    id: "v2-index-document-structure",
+    label: "Document Structure",
+    boundary: "backend/app/ingestion/ · backend/app/knowledge/provenance/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/app/knowledge/provenance/AGENTS.md · CLAUDE.md",
+    description:
+      "Materializes document versions, logical documents, chunks, and exact source-span lineage.",
+    guarantee:
+      "Every extracted assertion can resolve Workspace → Document → Version → LogicalDocument → Chunk → exact span.",
+    kind: "storage",
+    variant: "processing",
+  },
+  {
+    id: "v2-index-entity-mention",
+    label: "Entity / Mention",
+    boundary: "backend/app/knowledge/entities/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/app/knowledge/entities/AGENTS.md · CLAUDE.md",
+    description:
+      "Extracts typed entity proposals and original mentions with strict exact-span evidence.",
+    guarantee:
+      "Provider output is a proposal; invalid spans and dependent assertions are rejected before promotion.",
+    kind: "processor",
+    variant: "processing",
+  },
+  {
+    id: "v2-index-identity",
+    label: "Identity",
+    boundary: "backend/app/knowledge/entities/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/app/knowledge/entities/AGENTS.md · CLAUDE.md",
+    description:
+      "Applies conservative, reversible identity resolution using stable opaque canonical IDs.",
+    guarantee:
+      "Ambiguous mentions remain unresolved and user-curated decisions outrank validated and extracted proposals.",
+    kind: "safety",
+    variant: "processing",
+  },
+  {
+    id: "v2-index-relation",
+    label: "Relation",
+    boundary: "backend/app/knowledge/relations/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/app/knowledge/relations/AGENTS.md · CLAUDE.md",
+    description:
+      "Constructs typed, provenance-bearing relations between resolved canonical subjects and objects.",
+    guarantee:
+      "Co-occurrence alone is never relation evidence and cross-workspace references are rejected.",
+    kind: "processor",
+    variant: "processing",
+  },
+  {
+    id: "v2-index-event",
+    label: "Event",
+    boundary: "backend/app/knowledge/events/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/app/knowledge/events/AGENTS.md · CLAUDE.md",
+    description:
+      "Builds typed events and evidence-linked participant roles from validated extraction proposals.",
+    guarantee:
+      "Event participants and source assertions resolve within the same workspace and generation.",
+    kind: "processor",
+    variant: "processing",
+  },
+  {
+    id: "v2-index-temporal",
+    label: "Temporal",
+    boundary: "backend/app/knowledge/temporal/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/app/knowledge/temporal/AGENTS.md · CLAUDE.md",
+    description:
+      "Preserves original temporal text while recording normalized values, ranges, roles, precision, and uncertainty.",
+    guarantee:
+      "Approximate or unknown dates remain uncertain; normalized values never erase the original source expression.",
+    kind: "processor",
+    variant: "processing",
+  },
+  {
+    id: "v2-index-claim-fact",
+    label: "Claim / Fact",
+    boundary: "backend/app/knowledge/claims/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/app/knowledge/claims/AGENTS.md · CLAUDE.md",
+    description:
+      "Promotes ExtractedClaim to SupportedClaim and VerifiedFact only through evidence and applicable validation.",
+    guarantee:
+      "Conflicts are linked and retained; no unsupported assertion is promoted to a verified fact.",
+    kind: "safety",
+    variant: "processing",
+  },
+  {
+    id: "v2-index-kg-build",
+    label: "KG Build",
+    boundary: "backend/app/knowledge/graph/",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context: "backend/app/knowledge/graph/AGENTS.md · CLAUDE.md",
+    description:
+      "Projects canonical entities, relations, events, temporals, claims, facts, conflicts, and exact evidence into Neo4j.",
+    guarantee:
+      "Canonical graph writes are workspace- and generation-bound and cannot be overwritten by lower-precedence extraction.",
+    kind: "storage",
+    variant: "graphrag",
+  },
+  {
+    id: "v2-index-bm25",
+    label: "BM25",
+    boundary: "backend/app/retrieval/indexing.py",
+    documentation: "docs/architecture/retrieval-boundaries.md",
+    context: "backend/app/retrieval/AGENTS.md",
+    description:
+      "Builds the generation-scoped workspace BM25 corpus and evidence metadata projection.",
+    guarantee:
+      "Sparse readiness is credited only when output and source fingerprints match the candidate generation.",
+    kind: "storage",
+    variant: "dense",
+  },
+  {
+    id: "v2-index-dense",
+    label: "Dense / Qdrant",
+    boundary: "backend/app/retrieval/qdrant.py",
+    documentation: "docs/architecture/retrieval-boundaries.md",
+    context: "backend/app/retrieval/AGENTS.md",
+    description:
+      "Embeds snapshot chunks and writes deterministic, generation-bearing points to shared Qdrant collections.",
+    guarantee:
+      "Workspace filters, embedding configuration compatibility, dimensions, and generation fingerprints are mandatory.",
+    kind: "storage",
+    variant: "dense",
+  },
+  {
+    id: "v2-index-graphrag",
+    label: "GraphRAG",
+    boundary: "backend/app/graphrag/",
+    documentation: "docs/architecture/graphrag-boundary.md",
+    context: "backend/app/graphrag/AGENTS.md · CLAUDE.md",
+    description:
+      "Builds the Microsoft GraphRAG extracted-knowledge projection and its Local, Global, and DRIFT artifacts.",
+    guarantee:
+      "This extracted projection remains separate from canonical KG Build and is bound to the same candidate generation.",
+    kind: "storage",
+    variant: "graphrag",
+  },
+  {
+    id: "v2-index-readiness",
+    label: "Generation / Readiness",
+    boundary:
+      "backend/app/knowledge/construction.py · backend/app/query/cutover.py · backend/app/workflows/knowledge.py",
+    documentation: "docs/architecture/query-v2/knowledge-construction.md",
+    context:
+      "backend/app/knowledge/AGENTS.md · backend/app/workflows/AGENTS.md",
+    description:
+      "Tracks exact-generation projection readiness, detached infrastructure and curation checks, acceptance evaluation, and the atomic workspace runtime pointer.",
+    guarantee:
+      "A failed, partial, stale, mixed-generation, curation-changing, or sub-threshold attempt is audited and cannot change the live runtime.",
+    kind: "safety",
+    variant: "delivery",
+  },
+];
+
+export const SYSTEM_MAP_V2_MANIFEST: Record<
+  "query" | "indexing",
+  SystemMapSubsystem[]
+> = {
+  query: QUERY_V2_SUBSYSTEMS,
+  indexing: INDEXING_V2_SUBSYSTEMS,
+};
+
+const MANIFEST_GROUP_WIDTH = MAP_NODE_WIDTH + MAP_GROUP_HORIZONTAL_PADDING * 2;
+const MANIFEST_GROUP_HEIGHT =
+  MAP_NODE_MIN_HEIGHT + MAP_GROUP_VERTICAL_PADDING * 2;
+const MANIFEST_GROUP_GAP = 24;
+
+function manifestMap(boundaries: SystemMapSubsystem[]): {
+  nodes: MapNode[];
+  edges: Edge[];
+} {
+  const nodes = boundaries.map((subsystem, index) => {
+    const groupX = index * (MANIFEST_GROUP_WIDTH + MANIFEST_GROUP_GAP);
+    const item = node(
+      subsystem.id,
+      groupX + MAP_GROUP_HORIZONTAL_PADDING,
+      MAP_GROUP_VERTICAL_PADDING,
+      subsystem.label,
+      subsystem.description,
+      subsystem.boundary,
+      subsystem.guarantee,
+    );
+    return {
+      ...item,
+      data: {
+        ...item.data,
+        kind: subsystem.kind,
+        layer: subsystem.boundary,
+        documentation: subsystem.documentation,
+        context: subsystem.context,
+      },
+    };
+  });
+  return { nodes, edges: [] };
+}
+
+function manifestFlowGroups(tab: "ingestion" | "query"): FlowGroupNode[] {
+  const boundaries =
+    tab === "query" ? QUERY_V2_SUBSYSTEMS : INDEXING_V2_SUBSYSTEMS;
+  return boundaries.map((subsystem, index) => ({
+    id: "flow-group-" + tab + "-" + subsystem.id,
+    type: "flow-group",
+    position: { x: index * (MANIFEST_GROUP_WIDTH + MANIFEST_GROUP_GAP), y: 0 },
+    data: {
+      label: subsystem.label,
+      variant: subsystem.variant,
+      boundary: subsystem.boundary,
+      documentation: subsystem.documentation,
+      context: subsystem.context,
+    },
+    draggable: false,
+    selectable: false,
+    focusable: false,
+    style: {
+      height: MANIFEST_GROUP_HEIGHT,
+      pointerEvents: "none",
+      width: MANIFEST_GROUP_WIDTH,
+      zIndex: -1,
+    },
+  }));
+}
+
+function connectManifest(source: string, target: string, label?: string): Edge {
+  return links([source, target, label])[0];
+}
+
+staticMaps.query = manifestMap(QUERY_V2_SUBSYSTEMS);
+staticMaps.query.edges = [
+  connectManifest("v2-query-conversation-context", "v2-query-understanding"),
+  connectManifest("v2-query-understanding", "v2-query-ir"),
+  connectManifest("v2-query-ir", "v2-query-execution-planning"),
+  connectManifest(
+    "v2-query-execution-planning",
+    "v2-query-structured",
+    "planned step",
   ),
-);
+  connectManifest(
+    "v2-query-execution-planning",
+    "v2-query-knowledge-graph",
+    "planned step",
+  ),
+  connectManifest(
+    "v2-query-execution-planning",
+    "v2-query-retrieval",
+    "planned step",
+  ),
+  connectManifest(
+    "v2-query-execution-planning",
+    "v2-query-graphrag",
+    "planned capability",
+  ),
+  connectManifest(
+    "v2-query-structured",
+    "v2-query-result-evidence",
+    "EngineResult",
+  ),
+  connectManifest(
+    "v2-query-knowledge-graph",
+    "v2-query-result-evidence",
+    "EngineResult",
+  ),
+  connectManifest(
+    "v2-query-retrieval",
+    "v2-query-result-evidence",
+    "EngineResult",
+  ),
+  connectManifest(
+    "v2-query-graphrag",
+    "v2-query-result-evidence",
+    "typed finding",
+  ),
+  connectManifest(
+    "v2-query-result-evidence",
+    "v2-query-reasoning",
+    "ReasoningPackage",
+  ),
+  connectManifest("v2-query-reasoning", "v2-query-answer", "grounded artifact"),
+];
+
+staticMaps.ingestion = manifestMap(INDEXING_V2_SUBSYSTEMS);
+staticMaps.ingestion.edges = [
+  connectManifest("v2-index-source", "v2-index-document-structure"),
+  connectManifest("v2-index-document-structure", "v2-index-entity-mention"),
+  connectManifest("v2-index-entity-mention", "v2-index-identity"),
+  connectManifest("v2-index-identity", "v2-index-relation"),
+  connectManifest("v2-index-relation", "v2-index-event"),
+  connectManifest("v2-index-event", "v2-index-temporal"),
+  connectManifest("v2-index-temporal", "v2-index-claim-fact"),
+  connectManifest("v2-index-claim-fact", "v2-index-kg-build"),
+  connectManifest("v2-index-kg-build", "v2-index-bm25", "projection"),
+  connectManifest("v2-index-kg-build", "v2-index-dense", "projection"),
+  connectManifest(
+    "v2-index-kg-build",
+    "v2-index-graphrag",
+    "separate projection",
+  ),
+  connectManifest("v2-index-bm25", "v2-index-readiness", "ready"),
+  connectManifest("v2-index-dense", "v2-index-readiness", "ready"),
+  connectManifest("v2-index-graphrag", "v2-index-readiness", "ready"),
+];
 
 function mapNodePosition(id: string, x: number, y: number) {
-  const after = (position: number) => position + MAP_NODE_WIDTH + MAP_NODE_HORIZONTAL_GAP;
-  const below = (position: number) => position + MAP_NODE_MIN_HEIGHT + MAP_NODE_VERTICAL_GAP;
-  const graphIndexPositions: Record<string, { x: number; y: number }> = {
-    "upload-request": { x: 0, y: 360 },
-    "workspace-scope": { x: after(0), y: 360 },
-    "folder-resolution": { x: after(after(0)), y: 360 },
-    "replacement-decision": { x: after(after(after(0))), y: 360 },
-    "file-read": { x: 1400, y: 200 },
-    "upload-validation": { x: 1705, y: 200 },
-    "source-hash": { x: 2010, y: 200 },
-    "content-duplicate": { x: 2315, y: 200 },
-    "source-store": { x: 2620, y: 200 },
-    "text-source-decision": { x: 2925, y: 200 },
-    docling: { x: 3230, y: 80 },
-    "direct-text-read": { x: 3230, y: 400 },
-    normalized: { x: 3535, y: 200 },
-    "document-record": { x: 3840, y: 200 },
-    "version-record": { x: 4145, y: 200 },
-    "logical-documents": { x: 4450, y: 200 },
-    chunks: { x: 4755, y: 200 },
-    relationships: { x: 5060, y: 200 },
-    "system-metadata": { x: 4450, y: 520 },
-    workflow: { x: 5565, y: 400 },
-    "dispatch-decision": { x: 5870, y: 400 },
-    "ingestion-worker": { x: 6175, y: 400 },
-    "checkpoint-parse": { x: 6480, y: 40 },
-    "checkpoint-normalize": { x: 6480, y: below(40) },
-    "checkpoint-logical": { x: 6480, y: below(below(40)) },
-    "checkpoint-chunk": { x: 6480, y: below(below(below(40))) },
-    "checkpoint-index": { x: 6480, y: below(below(below(below(40)))) },
-    "index-state": { x: 6985, y: 260 },
-    "dense-trigger": { x: 6985, y: 20 },
-    "dense-reindex": { x: 7290, y: 20 },
-    "qdrant-index": { x: 7595, y: 20 },
-    "sparse-index": { x: 7290, y: 260 },
-    "graphrag-trigger": { x: 6985, y: 680 },
-    "graphrag-reindex": { x: 7290, y: 680 },
-    "community-detection": { x: 7595, y: 680 },
-    "claims-optional": { x: 7900, y: 680 },
-    "community-reports": { x: 7595, y: 940 },
-    "graphrag-artifacts": { x: 7900, y: 940 },
-    chat: { x: 0, y: 360 },
-    "conversation-context": { x: 320, y: 360 },
-    router: { x: 630, y: 360 },
-    "lookup-intent": { x: 935, y: 360 },
-    hybrid: { x: 1440, y: 120 },
-    dense: { x: 1745, y: 20 },
-    sparse: { x: 1745, y: 280 },
-    fusion: { x: 2050, y: 140 },
-    reranker: { x: 2355, y: 140 },
-    "graph-ready": { x: 1440, y: 620 },
-    "graph-job": { x: 1745, y: 520 },
-    "graph-worker": { x: 2050, y: 520 },
-    "graph-local": { x: 2355, y: 400 },
-    "graph-global": { x: 2355, y: 660 },
-    "graph-drift": { x: 2660, y: 520 },
-    "document-group": { x: 3165, y: 120 },
-    "graph-result": { x: 3165, y: 620 },
-    evidence: { x: 3470, y: 380 },
-    "citation-check": { x: 3775, y: 380 },
-    answer: { x: 4080, y: 380 },
-    "answer-state": { x: 4385, y: 380 },
-    history: { x: 4690, y: 380 },
+  const workflowPositions: Record<string, { x: number; y: number }> = {
     state: { x: 1145, y: 160 },
     "lock-decision": { x: 1145, y: 500 },
     checkpoint: { x: 2060, y: 300 },
@@ -297,75 +742,196 @@ function mapNodePosition(id: string, x: number, y: number) {
     cancel: { x: 2060, y: 540 },
     sse: { x: 2565, y: 300 },
   };
-  return graphIndexPositions[id] ?? { x, y };
+  return workflowPositions[id] ?? { x, y };
 }
 
 function recordKind(interfaces: string): RecordKind | undefined {
   if (/Qdrant/i.test(interfaces)) return "vector";
   if (/cache/i.test(interfaces)) return "cache";
   if (/Filesystem|Parquet|JSON/i.test(interfaces)) return "file";
-  if (/SQLite|workflow_runs|QueryRun persistence/i.test(interfaces)) return "database";
+  if (/SQLite|workflow_runs|QueryRun persistence/i.test(interfaces))
+    return "database";
   return undefined;
 }
 
-function node(id: string, x: number, y: number, label: string, description: string, interfaces: string, guarantee: string): MapNode {
+function node(
+  id: string,
+  x: number,
+  y: number,
+  label: string,
+  description: string,
+  interfaces: string,
+  guarantee: string,
+): MapNode {
   const presentation = nodePresentation(id);
-  return { id, type: "architecture", position: mapNodePosition(id, x, y), data: { label, description, interfaces, guarantee, ...presentation, recordKind: presentation.kind === "storage" ? recordKind(interfaces) : undefined }, style: { minHeight: MAP_NODE_MIN_HEIGHT, width: MAP_NODE_WIDTH, zIndex: 2 } };
-}
-function links(...pairs: [string, string, string?][]): Edge[] { return pairs.map(([source, target, label]) => ({ id: `${source}-${target}`, source, target, label, animated: true, style: { stroke: "var(--cortex-secondary)", strokeWidth: 1.5 }, zIndex: 1, labelStyle: { fill: "var(--cortex-text)", fontSize: 10, fontWeight: 750 }, labelBgPadding: [5, 3], labelBgBorderRadius: 4, labelBgStyle: { fill: "var(--cortex-panel)", fillOpacity: 0.98, stroke: "var(--cortex-line)", strokeWidth: 1 } })); }
-function nodePresentation(id: string): Pick<MapNodeData, "kind" | "layer" | "model"> {
-  if (id === "community-detection") return { kind: "processor", layer: "Algorithmic graph analysis" };
-  if (id === "claims-optional") return { kind: "decision", layer: "Optional GraphRAG stage" };
-  if (id === "community-reports") return { kind: "llm-api", layer: "User-selected GraphRAG model", model: "Community report model" };
-  if (id === "graph-job") return { kind: "service", layer: "Durable request" };
-  if (id === "graph-worker") return { kind: "worker", layer: "Worker-only execution" };
-  if (id === "workflow-redis") return { kind: "service", layer: "Broker" };
-  if (id === "workflow-worker") return { kind: "worker", layer: "Arka plan" };
-  if (id === "graph-result") return { kind: "storage", layer: "Durable final result" };
-  const values: Record<string, Pick<MapNodeData, "kind" | "layer" | "model">> = {
-    ...detailedNodePresentation,
-    upload: { kind: "input", layer: "Kullanıcı girişi" }, "upload-validation": { kind: "safety", layer: "Yükleme güvenliği" }, "duplicate-decision": { kind: "decision", layer: "Sürümleme" }, rejected: { kind: "safety", layer: "Reddedilen istek" }, "source-store": { kind: "storage", layer: "Kaynak depolama" }, "text-source-decision": { kind: "decision", layer: "Belge işleme" }, "direct-text-read": { kind: "processor", layer: "Belge işleme" }, docling: { kind: "processor", layer: "Belge işleme" }, normalized: { kind: "storage", layer: "Normalize kaynak kaydı" }, "document-record": { kind: "storage", layer: "Kalıcı belge kaydı" }, chunks: { kind: "storage", layer: "Kalıcı chunk kaydı" }, workflow: { kind: "storage", layer: "Kalıcı workflow kaydı" }, "ingestion-worker": { kind: "worker", layer: "Arka plan" }, metadata: { kind: "llm-api", layer: "Metadata", model: "Metadata modeli · API" }, embedding: { kind: "llm-local", layer: "Embedding", model: "Embedding modeli · Local" }, qdrant: { kind: "storage", layer: "Dense retrieval" }, "sparse-index": { kind: "storage", layer: "Sparse retrieval" }, "graph-decision": { kind: "decision", layer: "GraphRAG koşulu" }, graphrag: { kind: "llm-api", layer: "Graph indeksleme", model: "GraphRAG provider · API" }, sqlite: { kind: "storage", layer: "Kalıcı durum" },
-    chat: { kind: "input", layer: "İstek" }, "conversation-context": { kind: "processor", layer: "Konuşma kapsamı" }, router: { kind: "decision", layer: "Sorgu planı" }, "lookup-intent": { kind: "decision", layer: "Yanıt biçimi" }, hybrid: { kind: "retrieval", layer: "Hibrit retrieval" }, dense: { kind: "retrieval", layer: "Dense retrieval" }, sparse: { kind: "retrieval", layer: "Sparse retrieval" }, fusion: { kind: "processor", layer: "Aday birleştirme" }, reranker: { kind: "llm-local", layer: "Reranking", model: "BGE reranker · Local" }, "document-group": { kind: "processor", layer: "Belge sonuçları" }, "graph-ready": { kind: "decision", layer: "GraphRAG koşulu" }, "graph-local": { kind: "retrieval", layer: "GraphRAG Local" }, "graph-global": { kind: "retrieval", layer: "GraphRAG Global" }, "graph-drift": { kind: "retrieval", layer: "GraphRAG DRIFT" }, evidence: { kind: "safety", layer: "Kanıt güvenliği" }, "citation-check": { kind: "decision", layer: "Citation kontrolü" }, answer: { kind: "llm-api", layer: "Yanıt sentezi", model: "Yanıt modeli · API" }, "answer-state": { kind: "storage", layer: "Query telemetry" }, history: { kind: "storage", layer: "Kalıcı durum" },
-    ui: { kind: "input", layer: "Kullanıcı arayüzü" }, api: { kind: "service", layer: "Komut sınırı" }, definition: { kind: "service", layer: "Workflow tanımı" }, state: { kind: "storage", layer: "Kalıcı durum" }, "lock-decision": { kind: "decision", layer: "Eşzamanlılık" }, redis: { kind: "service", layer: "Broker" }, worker: { kind: "worker", layer: "Arka plan" }, checkpoint: { kind: "storage", layer: "Dayanıklılık" }, "retry-decision": { kind: "decision", layer: "Recovery" }, cancel: { kind: "safety", layer: "İptal ve recovery" }, sse: { kind: "delivery", layer: "Canlı teslim" },
+  return {
+    id,
+    type: "architecture",
+    position: mapNodePosition(id, x, y),
+    data: {
+      label,
+      description,
+      interfaces,
+      guarantee,
+      ...presentation,
+      recordKind:
+        presentation.kind === "storage" ? recordKind(interfaces) : undefined,
+    },
+    style: { minHeight: MAP_NODE_MIN_HEIGHT, width: MAP_NODE_WIDTH, zIndex: 2 },
   };
-  return { ...values, ...importantIndexingPresentation }[id] ?? { kind: "service", layer: "Platform" };
+}
+function links(...pairs: [string, string, string?][]): Edge[] {
+  return pairs.map(([source, target, label]) => ({
+    id: `${source}-${target}`,
+    source,
+    target,
+    label,
+    animated: true,
+    style: { stroke: "var(--cortex-secondary)", strokeWidth: 1.5 },
+    zIndex: 1,
+    labelStyle: { fill: "var(--cortex-text)", fontSize: 10, fontWeight: 750 },
+    labelBgPadding: [5, 3],
+    labelBgBorderRadius: 4,
+    labelBgStyle: {
+      fill: "var(--cortex-panel)",
+      fillOpacity: 0.98,
+      stroke: "var(--cortex-line)",
+      strokeWidth: 1,
+    },
+  }));
+}
+function nodePresentation(
+  id: string,
+): Pick<MapNodeData, "kind" | "layer" | "model"> {
+  const values: Record<
+    string,
+    Pick<MapNodeData, "kind" | "layer" | "model">
+  > = {
+    frontend: { kind: "input", layer: "User interface" },
+    backend: { kind: "service", layer: "Command and query API" },
+    worker: { kind: "worker", layer: "Background execution" },
+    sqlite: { kind: "storage", layer: "Relational persistence" },
+    redis: { kind: "service", layer: "Broker" },
+    qdrant: { kind: "storage", layer: "Vector persistence" },
+    neo4j: { kind: "storage", layer: "Knowledge graph persistence" },
+    ollama: { kind: "llm-local", layer: "Local provider" },
+    graphrag: { kind: "worker", layer: "GraphRAG execution" },
+    openai: { kind: "llm-api", layer: "API provider" },
+    anthropic: { kind: "llm-api", layer: "API provider" },
+    recovery: { kind: "safety", layer: "Workflow recovery" },
+    reconciliation: { kind: "safety", layer: "Orphan reconciliation" },
+    ui: { kind: "input", layer: "User interface" },
+    api: { kind: "service", layer: "Command boundary" },
+    definition: { kind: "service", layer: "Workflow definition" },
+    state: { kind: "storage", layer: "Durable state" },
+    "lock-decision": { kind: "decision", layer: "Concurrency" },
+    "workflow-redis": { kind: "service", layer: "Broker" },
+    "workflow-worker": { kind: "worker", layer: "Background execution" },
+    checkpoint: { kind: "storage", layer: "Durability" },
+    "retry-decision": { kind: "decision", layer: "Recovery" },
+    cancel: { kind: "safety", layer: "Cancellation and recovery" },
+    sse: { kind: "delivery", layer: "Live delivery" },
+  };
+  return values[id] ?? { kind: "service", layer: "V2 subsystem" };
 }
 
 function ArchitectureNode({ data, selected }: NodeProps<MapNode>) {
-  return <article className={`architecture-node is-${data.kind}${selected ? " is-selected" : ""}`}>
-    <Handle type="target" position={Position.Left} />
-    <span className="architecture-node__layer">{data.layer}</span>
-    <strong>{data.label}</strong>
-    {data.recordKind && <span className={`architecture-node__persistence is-${data.recordKind}`}>{({ database: "Veritabanı", file: "Dosya kaydı", vector: "Vektör deposu", cache: "İndeks cache" } as Record<RecordKind, string>)[data.recordKind]}</span>}
-    {data.kind === "decision" && <span className="architecture-node__decision">Karar noktası</span>}
-    {data.model && <span className={`architecture-node__model-type is-${data.kind}`}>{data.kind === "llm-local" ? "LLM · Local" : data.kind === "llm-api" ? "LLM · API" : "Model · Local"}</span>}
-    <small>{data.description}</small>
-    <Handle type="source" position={Position.Right} />
-  </article>;
+  return (
+    <article
+      className={`architecture-node is-${data.kind}${selected ? " is-selected" : ""}`}
+    >
+      <Handle type="target" position={Position.Left} />
+      <span className="architecture-node__layer">
+        {nodeCategoryLabels[data.kind]}
+      </span>
+      <strong>{data.label}</strong>
+      {data.recordKind && (
+        <span
+          className={`architecture-node__persistence is-${data.recordKind}`}
+        >
+          {
+            (
+              {
+                database: "Veritabanı",
+                file: "Dosya kaydı",
+                vector: "Vektör deposu",
+                cache: "İndeks cache",
+              } as Record<RecordKind, string>
+            )[data.recordKind]
+          }
+        </span>
+      )}
+      {data.kind === "decision" && (
+        <span className="architecture-node__decision">Karar noktası</span>
+      )}
+      {data.model && (
+        <span className={`architecture-node__model-type is-${data.kind}`}>
+          {data.kind === "llm-local"
+            ? "LLM · Local"
+            : data.kind === "llm-api"
+              ? "LLM · API"
+              : "Model · Local"}
+        </span>
+      )}
+      <small>{data.description}</small>
+      <Handle type="source" position={Position.Right} />
+    </article>
+  );
 }
 
 function FlowGroup({ data }: NodeProps<FlowGroupNode>) {
-  return <section className={`flow-group is-${data.variant}`}><span>{data.label}</span></section>;
+  return (
+    <section className={`flow-group is-${data.variant}`}>
+      <span>{data.label}</span>
+    </section>
+  );
 }
 
-const nodeTypes: NodeTypes = { architecture: ArchitectureNode, "flow-group": FlowGroup };
+const nodeTypes: NodeTypes = {
+  architecture: ArchitectureNode,
+  "flow-group": FlowGroup,
+};
 
 function flowGroups(tab: MapTab): FlowGroupNode[] {
-  const groups: Record<MapTab, Array<[string, number, number, number, number, FlowGroupVariant]>> = {
-    system: [["Cortex platform services", -MAP_GROUP_HORIZONTAL_PADDING, -MAP_GROUP_VERTICAL_PADDING, 1105, 1300, "platform"]],
+  if (tab === "ingestion" || tab === "query") return manifestFlowGroups(tab);
+  const groups: Record<
+    MapTab,
+    Array<[string, number, number, number, number, FlowGroupVariant]>
+  > = {
+    system: [
+      [
+        "Cortex platform services",
+        -MAP_GROUP_HORIZONTAL_PADDING,
+        -MAP_GROUP_VERTICAL_PADDING,
+        1105,
+        1300,
+        "platform",
+      ],
+    ],
     ingestion: [
       ["Giriş ve doğrulama", -100, -40, 1320, 1100, "input"],
       ["Belge işleme ve kalıcı kayıt", 1300, -40, 4065, 1100, "processing"],
       ["Dayanıklı ingestion", 5465, -40, 1320, 1280, "durable"],
       ["Dense indeksleme", 6885, -80, 1015, 580, "dense"],
-      ["GraphRAG indeksleme", 6885, 600, 1320, 600, "graphrag"],
+      ["GraphRAG ve canonical knowledge", 6885, 600, 2850, 600, "graphrag"],
     ],
     query: [
       ["İstek ve planlama", -100, -60, 1340, 1000, "input"],
-      ["Retrieval ve GraphRAG", 1340, -60, 1625, 1000, "query"],
-      ["Kanıt ve yanıt", 3065, -60, 1930, 1000, "delivery"],
+      [
+        "Normal QA, GraphRAG ve verified aggregation",
+        1340,
+        -60,
+        2235,
+        1260,
+        "query",
+      ],
+      ["Kanıt, citation ve yanıt", 3675, -60, 1625, 1000, "delivery"],
     ],
-    workflows: [["Komut ve tanım", -100, -40, 1045, 900, "input"], ["Durable orchestration", 1045, -40, 1320, 900, "durable"], ["İlerleme teslimi", 2465, -40, 405, 900, "delivery"]],
+    workflows: [
+      ["Komut ve tanım", -100, -40, 1045, 900, "input"],
+      ["Durable orchestration", 1045, -40, 1320, 900, "durable"],
+      ["İlerleme teslimi", 2465, -40, 405, 900, "delivery"],
+    ],
   };
   return groups[tab].map(([label, x, y, width, height, variant], index) => ({
     id: `flow-group-${tab}-${index}`,
@@ -380,7 +946,9 @@ function flowGroups(tab: MapTab): FlowGroupNode[] {
 }
 
 function nodeWidth(node: MapNode) {
-  return typeof node.style?.width === "number" ? node.style.width : MAP_NODE_WIDTH;
+  return typeof node.style?.width === "number"
+    ? node.style.width
+    : MAP_NODE_WIDTH;
 }
 
 function nodeHeight(node: MapNode) {
@@ -397,83 +965,364 @@ function groupHeight(group: FlowGroupNode) {
   return typeof group.style?.height === "number" ? group.style.height : 0;
 }
 
-function assertMapLayout(tab: MapTab, nodes: MapNode[], groups: FlowGroupNode[]) {
+function assertMapLayout(
+  tab: MapTab,
+  nodes: MapNode[],
+  groups: FlowGroupNode[],
+) {
   for (const node of nodes) {
     const width = nodeWidth(node);
     const height = nodeHeight(node);
-    const containingGroups = groups.filter((group) =>
-      node.position.x >= group.position.x + MAP_GROUP_HORIZONTAL_PADDING &&
-      node.position.y >= group.position.y + MAP_GROUP_VERTICAL_PADDING &&
-      node.position.x + width <= group.position.x + groupWidth(group) - MAP_GROUP_HORIZONTAL_PADDING &&
-      node.position.y + height <= group.position.y + groupHeight(group) - MAP_GROUP_VERTICAL_PADDING,
+    const containingGroups = groups.filter(
+      (group) =>
+        node.position.x >= group.position.x + MAP_GROUP_HORIZONTAL_PADDING &&
+        node.position.y >= group.position.y + MAP_GROUP_VERTICAL_PADDING &&
+        node.position.x + width <=
+          group.position.x + groupWidth(group) - MAP_GROUP_HORIZONTAL_PADDING &&
+        node.position.y + height <=
+          group.position.y + groupHeight(group) - MAP_GROUP_VERTICAL_PADDING,
     );
     if (containingGroups.length !== 1)
-      throw new Error(`${tab}: ${node.id} must be inside exactly one padded group`);
+      throw new Error(
+        `${tab}: ${node.id} must be inside exactly one padded group`,
+      );
   }
 
   for (let index = 0; index < nodes.length; index += 1) {
-    for (let candidateIndex = index + 1; candidateIndex < nodes.length; candidateIndex += 1) {
+    for (
+      let candidateIndex = index + 1;
+      candidateIndex < nodes.length;
+      candidateIndex += 1
+    ) {
       const current = nodes[index];
       const candidate = nodes[candidateIndex];
       const separatedHorizontally =
-        current.position.x + nodeWidth(current) + MAP_NODE_HORIZONTAL_GAP <= candidate.position.x ||
-        candidate.position.x + nodeWidth(candidate) + MAP_NODE_HORIZONTAL_GAP <= current.position.x;
+        current.position.x + nodeWidth(current) + MAP_NODE_HORIZONTAL_GAP <=
+          candidate.position.x ||
+        candidate.position.x + nodeWidth(candidate) + MAP_NODE_HORIZONTAL_GAP <=
+          current.position.x;
       const separatedVertically =
-        current.position.y + nodeHeight(current) + MAP_NODE_VERTICAL_GAP <= candidate.position.y ||
-        candidate.position.y + nodeHeight(candidate) + MAP_NODE_VERTICAL_GAP <= current.position.y;
+        current.position.y + nodeHeight(current) + MAP_NODE_VERTICAL_GAP <=
+          candidate.position.y ||
+        candidate.position.y + nodeHeight(candidate) + MAP_NODE_VERTICAL_GAP <=
+          current.position.y;
       if (!separatedHorizontally && !separatedVertically)
-        throw new Error(`${tab}: ${current.id} and ${candidate.id} violate the layout gap`);
+        throw new Error(
+          `${tab}: ${current.id} and ${candidate.id} violate the layout gap`,
+        );
     }
   }
 }
 
+const detailTabs: DetailTab[] = [
+  "description",
+  "interfaces",
+  "guarantee",
+  "documentation",
+  "context",
+];
+
+const detailTabLabels: Record<DetailTab, string> = {
+  description: "Açıklama",
+  interfaces: "Sınır",
+  guarantee: "Garanti",
+  documentation: "Doküman",
+  context: "AI context",
+};
+
+function selectedDetail(selected: MapNode | undefined, detailTab: DetailTab) {
+  if (!selected) return "";
+  if (detailTab === "description") return selected.data.description;
+  if (detailTab === "interfaces") return selected.data.interfaces;
+  if (detailTab === "guarantee") return selected.data.guarantee;
+  if (detailTab === "documentation")
+    return (
+      selected.data.documentation ??
+      "Bu bileşenin kanonik dokümanı sistem haritası indeksinde kayıtlıdır."
+    );
+  return (
+    selected.data.context ??
+    "Bu bileşen en yakın üst AGENTS.md bağlamını kullanır."
+  );
+}
+
 export function ASystemMap() {
-  const [services, setServices] = useState<Record<string, string>>({ backend: "unknown" });
+  const [services, setServices] = useState<Record<string, string>>({
+    backend: "unknown",
+  });
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [activeTab, setActiveTab] = useState<MapTab>("system");
   const [selectedId, setSelectedId] = useState("backend");
   const [detailTab, setDetailTab] = useState<DetailTab>("description");
   const [detailsOpen, setDetailsOpen] = useState(false);
   useEffect(() => {
-    const refresh = () => Promise.all([apiClient.getHealth(), apiClient.diagnostics()]).then(([health, diagnostics]) => setServices({ ...health.services, recovery: diagnostics.workflows.interrupted ? "attention" : "healthy", reconciliation: diagnostics.reconciliation.state })).catch(() => setServices({ backend: "unavailable" }));
-    void refresh(); const timer = window.setInterval(() => void refresh(), 15_000); return () => window.clearInterval(timer);
+    const refresh = () =>
+      Promise.all([apiClient.getHealth(), apiClient.diagnostics()])
+        .then(([health, diagnostics]) =>
+          setServices({
+            ...health.services,
+            recovery: diagnostics.workflows.interrupted
+              ? "attention"
+              : "healthy",
+            reconciliation: diagnostics.reconciliation.state,
+          }),
+        )
+        .catch(() => setServices({ backend: "unavailable" }));
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15_000);
+    return () => window.clearInterval(timer);
   }, []);
-  useEffect(() => { void apiClient.getSettings().then(({ settings: values }) => setSettings(values)).catch(() => undefined); }, []);
-  const systemMap = useMemo(() => ({
-    nodes: [["frontend", "healthy"], ...Object.entries(services).filter(([id]) => id !== "frontend")].map(([id, status], index): MapNode => ({
-      ...node(id, (index % 3) * 320, Math.floor(index / 3) * (MAP_NODE_MIN_HEIGHT + MAP_NODE_VERTICAL_GAP), `${id.replaceAll("_", " ")} · ${status}`, serviceDescription(id), serviceInterface(id), serviceGuarantee(id)),
-      style: { minHeight: MAP_NODE_MIN_HEIGHT, width: MAP_NODE_WIDTH, zIndex: 2 },
-    })),
-    edges: links(["frontend", "backend"], ["backend", "sqlite"], ["backend", "redis"], ["backend", "qdrant"], ["backend", "ollama"], ["redis", "worker"], ["worker", "qdrant"], ["worker", "graphrag"]),
-  }), [services]);
+  useEffect(() => {
+    void apiClient
+      .getSettings()
+      .then(({ settings: values }) => setSettings(values))
+      .catch(() => undefined);
+  }, []);
+  const systemMap = useMemo(
+    () => ({
+      nodes: [
+        ["frontend", "healthy"],
+        ...Object.entries(services).filter(([id]) => id !== "frontend"),
+      ].map(
+        ([id, status], index): MapNode => ({
+          ...node(
+            id,
+            (index % 3) * 320,
+            Math.floor(index / 3) *
+              (MAP_NODE_MIN_HEIGHT + MAP_NODE_VERTICAL_GAP),
+            `${id.replaceAll("_", " ")} · ${status}`,
+            serviceDescription(id),
+            serviceInterface(id),
+            serviceGuarantee(id),
+          ),
+          style: {
+            minHeight: MAP_NODE_MIN_HEIGHT,
+            width: MAP_NODE_WIDTH,
+            zIndex: 2,
+          },
+        }),
+      ),
+      edges: links(
+        ["frontend", "backend"],
+        ["backend", "sqlite"],
+        ["backend", "redis"],
+        ["backend", "qdrant"],
+        ["backend", "ollama"],
+        ["redis", "worker"],
+        ["worker", "qdrant"],
+        ["worker", "graphrag"],
+      ),
+    }),
+    [services],
+  );
   const baseMap = activeTab === "system" ? systemMap : staticMaps[activeTab];
-  const map = useMemo(() => ({
-    ...baseMap,
-    nodes: baseMap.nodes.map((item) => ({
-      ...item,
-      data: { ...item.data, model: modelLabel(item.id, item.data.model, settings) },
-    })),
-  }), [baseMap, settings]);
-  const selected = map.nodes.find((item) => item.id === selectedId) ?? map.nodes[0];
+  const map = useMemo(
+    () => ({
+      ...baseMap,
+      nodes: baseMap.nodes.map((item) => ({
+        ...item,
+        data: {
+          ...item.data,
+          model: modelLabel(item.id, item.data.model, settings),
+        },
+      })),
+    }),
+    [baseMap, settings],
+  );
+  const selected =
+    map.nodes.find((item) => item.id === selectedId) ?? map.nodes[0];
   const mapNodes = useMemo(() => {
     const groups = flowGroups(activeTab);
     assertMapLayout(activeTab, map.nodes, groups);
     return [...groups, ...map.nodes];
   }, [activeTab, map.nodes]);
-  const selectTab = (tab: MapTab) => { setActiveTab(tab); setSelectedId((tab === "system" ? systemMap : staticMaps[tab]).nodes[0]?.id ?? ""); setDetailTab("description"); setDetailsOpen(false); };
-  const visibleEdges = map.edges.filter((edge) => map.nodes.some((item) => item.id === edge.source) && map.nodes.some((item) => item.id === edge.target));
-  return <section className="system-map page-stack">
-    <ATabs className="system-map__tabs" aria-label="Sistem haritası görünümleri">{(Object.keys(tabLabels) as MapTab[]).map((tab) => <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} className={activeTab === tab ? "is-active" : undefined} onClick={() => selectTab(tab)}>{tabLabels[tab]}</button>)}</ATabs>
-    <div className="system-map__legend" aria-label="Düğüm renkleri lejantı">{legendGroups.map((group) => <section key={group.label} className="system-map__legend-group"><strong>{group.label}</strong><div>{group.items.map((item) => <span key={item.kind} className={`system-map__legend-item is-${item.kind}`}><i aria-hidden="true" />{item.label}</span>)}</div></section>)}</div>
-    <div className={`system-map__layout${detailsOpen ? " is-detail-open" : ""}`}><ACard title={tabLabels[activeTab]}><AFlowCanvas nodes={mapNodes} edges={visibleEdges} nodeTypes={nodeTypes} onNodeClick={(id) => { setSelectedId(id); setDetailTab("description"); setDetailsOpen(true); }} height={620} showMiniMap /></ACard><aside className="system-map__sidebar" aria-hidden={!detailsOpen}><div className="system-map__sidebar-header"><div><span>Seçili bileşen</span><h2 className="text-lg">{selected?.data.label}</h2></div><button type="button" className="system-map__sidebar-close" aria-label="Seçili bileşen ayrıntılarını kapat" onClick={() => setDetailsOpen(false)}>×</button></div><ATabs className="system-map__detail-tabs" aria-label="Bileşen ayrıntıları">{(["description", "interfaces", "guarantee"] as DetailTab[]).map((tab) => <button key={tab} type="button" role="tab" aria-selected={detailTab === tab} className={detailTab === tab ? "is-active" : undefined} onClick={() => setDetailTab(tab)}>{({ description: "Açıklama", interfaces: "Arayüz", guarantee: "Garanti" } as Record<DetailTab, string>)[tab]}</button>)}</ATabs>{detailTab === "description" && selected?.data.model && <div className="system-map__model-detail"><strong>{selected.data.kind === "llm-local" ? "LLM · Local" : selected.data.kind === "llm-api" ? "LLM · API" : "Yerel model"}</strong><span>{selected.data.model}</span><p>{modelDescription(selected.data.kind, selected.data.model)}</p></div>}<p>{detailTab === "description" ? selected?.data.description : detailTab === "interfaces" ? selected?.data.interfaces : selected?.data.guarantee}</p></aside></div>
-    <AInfoPanel title="Okuma biçimi">Yeşil düğümler canlı sağlık kontrolünden gelir. Belge akışı yükleme sırasında uygulanan sıralı yolu gösterir: Markdown ve metin doğrudan okunur; PDF ve DOCX Docling üzerinden ayrıştırılır. DOCX Heading 2 stilleri Markdown ## sınırlarına dönüşür ve her sınır chunking öncesinde ayrı bir mantıksal belge olur. Kalıcı kayıt düğümleri kaynak dosyayı, normalize Markdown’ı, belge sürümünü, mantıksal belgeleri, chunk’ları, workflow run’ını ve checkpoint’leri gösterir. Dense reindex ve GraphRAG reindex, bu hattın dalları değil; ayrı tetiklenen dayanıklı işlerdir.</AInfoPanel>
-  </section>;
+  const selectTab = (tab: MapTab) => {
+    setActiveTab(tab);
+    setSelectedId(
+      (tab === "system" ? systemMap : staticMaps[tab]).nodes[0]?.id ?? "",
+    );
+    setDetailTab("description");
+    setDetailsOpen(false);
+  };
+  const visibleEdges = map.edges.filter(
+    (edge) =>
+      map.nodes.some((item) => item.id === edge.source) &&
+      map.nodes.some((item) => item.id === edge.target),
+  );
+  return (
+    <section className="system-map page-stack">
+      <ATabs
+        className="system-map__tabs"
+        aria-label="Sistem haritası görünümleri"
+      >
+        {(Object.keys(tabLabels) as MapTab[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            className={activeTab === tab ? "is-active" : undefined}
+            onClick={() => selectTab(tab)}
+          >
+            {tabLabels[tab]}
+          </button>
+        ))}
+      </ATabs>
+      <div className="system-map__legend" aria-label="Düğüm renkleri lejantı">
+        {legendGroups.map((group) => (
+          <section key={group.label} className="system-map__legend-group">
+            <strong>{group.label}</strong>
+            <div>
+              {group.items.map((item) => (
+                <span
+                  key={item.kind}
+                  className={`system-map__legend-item is-${item.kind}`}
+                >
+                  <i aria-hidden="true" />
+                  {item.label}
+                </span>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+      <div
+        className={`system-map__layout${detailsOpen ? " is-detail-open" : ""}`}
+      >
+        <ACard title={tabLabels[activeTab]}>
+          <AFlowCanvas
+            nodes={mapNodes}
+            edges={visibleEdges}
+            nodeTypes={nodeTypes}
+            onNodeClick={(id) => {
+              setSelectedId(id);
+              setDetailTab("description");
+              setDetailsOpen(true);
+            }}
+            height={620}
+            showMiniMap
+          />
+        </ACard>
+        <aside className="system-map__sidebar" aria-hidden={!detailsOpen}>
+          <div className="system-map__sidebar-header">
+            <div>
+              <span>Seçili bileşen</span>
+              <h2 className="text-lg">{selected?.data.label}</h2>
+            </div>
+            <button
+              type="button"
+              className="system-map__sidebar-close"
+              aria-label="Seçili bileşen ayrıntılarını kapat"
+              onClick={() => setDetailsOpen(false)}
+            >
+              ×
+            </button>
+          </div>
+          <ATabs
+            className="system-map__detail-tabs"
+            aria-label="Bileşen ayrıntıları"
+          >
+            {detailTabs.map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={detailTab === tab}
+                className={detailTab === tab ? "is-active" : undefined}
+                onClick={() => setDetailTab(tab)}
+              >
+                {detailTabLabels[tab]}
+              </button>
+            ))}
+          </ATabs>
+          {detailTab === "description" && selected?.data.model && (
+            <div className="system-map__model-detail">
+              <strong>
+                {selected.data.kind === "llm-local"
+                  ? "LLM · Local"
+                  : selected.data.kind === "llm-api"
+                    ? "LLM · API"
+                    : "Yerel model"}
+              </strong>
+              <span>{selected.data.model}</span>
+              <p>{modelDescription(selected.data.kind, selected.data.model)}</p>
+            </div>
+          )}
+          <p>{selectedDetail(selected, detailTab)}</p>
+        </aside>
+      </div>
+      <AInfoPanel title="Runtime architecture manifest">
+        {activeTab === "query"
+          ? "Query V2 groups are implemented subsystem boundaries. Execution Planning owns engine work; Structured Query, Knowledge Graph, Retrieval, and GraphRAG converge only through Result & Evidence. Phase 13 still owns runtime activation."
+          : activeTab === "ingestion"
+            ? "Indexing V2 follows one candidate generation from source processing through canonical KG construction and the separate BM25, Dense/Qdrant, and GraphRAG projections. Generation / Readiness is the fail-closed activation gate."
+            : "Every node describes a real runtime boundary. Select a node to inspect its interface, guarantee, canonical documentation, and scoped AI-development context."}
+      </AInfoPanel>
+    </section>
+  );
 }
 
-function serviceDescription(id: string) { return ({ frontend: "React/Vite kullanıcı arayüzü.", backend: "FastAPI komut ve sorgu sınırı.", worker: "Dramatiq tabanlı kalıcı iş yürütücüsü.", sqlite: "İlişkisel kayıt teknolojisi: workspace, belge, durum ve telemetry için SQLite.", redis: "Dramatiq broker ve iş teslimi.", qdrant: "Vektör kayıt teknolojisi: workspace filtreli dense retrieval için Qdrant Vector DB.", ollama: "Yerel embedding ve model sağlayıcısı.", graphrag: "Worker-owned GraphRAG bağımlılığı; kanonik çıktılar Parquet/JSON dosyalarıdır.", openai: "İsteğe bağlı OpenAI sağlayıcı bağlantısı.", anthropic: "İsteğe bağlı Anthropic sağlayıcı bağlantısı.", recovery: "Kesilmiş workflow kurtarma durumu.", reconciliation: "Orphan kaynak uzlaştırma durumu." } as Record<string, string>)[id] ?? "Cortex servis bileşeni."; }
-function serviceInterface(id: string) { return ({ frontend: "Browser → /api proxy", backend: "REST + SSE", worker: "Dramatiq actors", sqlite: "SQLAlchemy 2 + WAL", redis: "Redis 7 broker", qdrant: "Qdrant client", ollama: "Ollama HTTP API", graphrag: "Microsoft GraphRAG CLI" } as Record<string, string>)[id] ?? "Health ve tanılama API’si"; }
-function serviceGuarantee(id: string) { return ({ sqlite: "Tüm workspace-scoped kayıtlar workspace_id taşır.", qdrant: "Tüm sorgu ve silmeler workspace payload filtresi içerir.", worker: "Workflow adımları idempotent ve checkpoint tabanlıdır.", backend: "Hatalar sanitize edilmiş Cortex envelope ile döner.", frontend: "Uzun süren iş ilerlemesi yeniden bağlanabilir.", graphrag: "Kanonik graph bilgisi ayrı workspace kökünde saklanır." } as Record<string, string>)[id] ?? "Canlı durum backend health kontrolünden yenilenir."; }
-function modelLabel(id: string, fallback: string | undefined, settings: Record<string, unknown>) {
+function serviceDescription(id: string) {
+  return (
+    (
+      {
+        frontend: "React/Vite kullanıcı arayüzü.",
+        backend: "FastAPI komut ve sorgu sınırı.",
+        worker: "Dramatiq tabanlı kalıcı iş yürütücüsü.",
+        sqlite:
+          "İlişkisel kayıt teknolojisi: workspace, belge, durum ve telemetry için SQLite.",
+        redis: "Dramatiq broker ve iş teslimi.",
+        qdrant:
+          "Vektör kayıt teknolojisi: workspace filtreli dense retrieval için Qdrant Vector DB.",
+        neo4j:
+          "Query V2 persistent knowledge graph; workspace-scoped extracted ve canonical katmanlar.",
+        ollama: "Yerel embedding ve model sağlayıcısı.",
+        graphrag:
+          "Worker-owned GraphRAG extracted-knowledge producer; native çıktılar Parquet/JSON dosyalarıdır.",
+        openai: "İsteğe bağlı OpenAI sağlayıcı bağlantısı.",
+        anthropic: "İsteğe bağlı Anthropic sağlayıcı bağlantısı.",
+        recovery: "Kesilmiş workflow kurtarma durumu.",
+        reconciliation: "Orphan kaynak uzlaştırma durumu.",
+      } as Record<string, string>
+    )[id] ?? "Cortex servis bileşeni."
+  );
+}
+function serviceInterface(id: string) {
+  return (
+    (
+      {
+        frontend: "Browser → /api proxy",
+        backend: "REST + SSE",
+        worker: "Dramatiq actors",
+        sqlite: "SQLAlchemy 2 + WAL",
+        redis: "Redis 7 broker",
+        qdrant: "Qdrant client",
+        neo4j: "Neo4j Bolt driver",
+        ollama: "Ollama HTTP API",
+        graphrag: "Microsoft GraphRAG CLI",
+      } as Record<string, string>
+    )[id] ?? "Health ve tanılama API’si"
+  );
+}
+function serviceGuarantee(id: string) {
+  return (
+    (
+      {
+        sqlite: "Tüm workspace-scoped kayıtlar workspace_id taşır.",
+        qdrant: "Tüm sorgu ve silmeler workspace payload filtresi içerir.",
+        worker: "Workflow adımları idempotent ve checkpoint tabanlıdır.",
+        backend: "Hatalar sanitize edilmiş Cortex envelope ile döner.",
+        frontend: "Uzun süren iş ilerlemesi yeniden bağlanabilir.",
+        graphrag: "Kanonik graph bilgisi ayrı workspace kökünde saklanır.",
+      } as Record<string, string>
+    )[id] ?? "Canlı durum backend health kontrolünden yenilenir."
+  );
+}
+function modelLabel(
+  id: string,
+  fallback: string | undefined,
+  settings: Record<string, unknown>,
+) {
   if (id === "embedding") return providerModel(settings, "embedding");
   if (id === "metadata") return providerModel(settings, "metadata");
   if (id === "answer") return providerModel(settings, "answer");
@@ -486,7 +1335,9 @@ function providerModel(settings: Record<string, unknown>, layer: string) {
   return `${provider} · ${model} · ${provider === "ollama" ? "Local" : "API"}`;
 }
 function modelDescription(kind: NodeKind, model: string) {
-  if (kind === "llm-local") return `${model} bu makinede Ollama veya yerel model adaptörü üzerinden çalışır; içerik harici bir sağlayıcıya gönderilmez.`;
-  if (kind === "llm-api") return `${model} yapılandırılmış sağlayıcının API’si üzerinden çağrılır; sağlayıcı ve model ayarları Ayarlar ekranından gelir.`;
+  if (kind === "llm-local")
+    return `${model} bu makinede Ollama veya yerel model adaptörü üzerinden çalışır; içerik harici bir sağlayıcıya gönderilmez.`;
+  if (kind === "llm-api")
+    return `${model} yapılandırılmış sağlayıcının API’si üzerinden çağrılır; sağlayıcı ve model ayarları Ayarlar ekranından gelir.`;
   return `${model} retrieval adaylarını yerel olarak yeniden sıralamak için kullanılır.`;
 }

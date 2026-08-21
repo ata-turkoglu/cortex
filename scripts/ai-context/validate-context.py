@@ -10,10 +10,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MAP_PATH = ROOT / ".ai" / "project-map.yaml"
 ADAPTER = "# Cortex\n\nFollow the canonical repository instructions in [`AGENTS.md`](AGENTS.md).\n"
+SCOPED_ADAPTER = (
+    "# Cortex scoped context\n\n"
+    "Follow the canonical scoped instructions in [`AGENTS.md`](AGENTS.md).\n"
+)
 
 
 def read_map() -> dict:
-    # The map deliberately uses JSON syntax, which is valid YAML 1.2, so Phase 1 needs no parser dependency.
+    # JSON syntax is valid YAML 1.2, so Phase 1 needs no parser dependency.
     return json.loads(MAP_PATH.read_text(encoding="utf-8"))
 
 
@@ -61,6 +65,19 @@ def main() -> int:
         if (ROOT / adapter).read_text(encoding="utf-8") != ADAPTER:
             errors.append(
                 f"adapter is stale or contains duplicated instructions: {adapter}"
+            )
+    for relative_path in project_map.get("scoped_adapters", []):
+        directory = ROOT / relative_path
+        agents_path = directory / "AGENTS.md"
+        adapter_path = directory / "CLAUDE.md"
+        if not agents_path.is_file():
+            errors.append(f"missing scoped instructions: {agents_path.relative_to(ROOT)}")
+        if not adapter_path.is_file():
+            errors.append(f"missing scoped adapter: {adapter_path.relative_to(ROOT)}")
+        elif adapter_path.read_text(encoding="utf-8") != SCOPED_ADAPTER:
+            errors.append(
+                "scoped adapter is stale or contains duplicated instructions: "
+                f"{adapter_path.relative_to(ROOT)}"
             )
     excluded = {".git", "node_modules", ".venv", "data", ".pnpm-store"}
     for markdown in iter_markdown_files(excluded):

@@ -13,6 +13,7 @@ const navigation: NavItem[] = [
   { to: "/upload", label: "Yükle", icon: "upload" },
   { to: "/documents", label: "Belgeler", icon: "documents" },
   { to: "/graph", label: "Graf", icon: "graph" },
+  { to: "/knowledge", label: "Canonical Bilgi", icon: "database" },
   { to: "/chat", label: "Sohbet", icon: "chat" },
 ];
 const bottomNavigation: NavItem[] = [

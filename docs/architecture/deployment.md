@@ -1,9 +1,16 @@
 # Deployment Boundary
 
-Cortex Compose will run frontend, backend, worker, Redis, and Qdrant with exact image
+Cortex Compose runs frontend, backend, worker, Redis, Qdrant, and Neo4j with exact image
 tags. SQLite and runtime data use configurable host mounts. Cortex must not create a second
 Ollama container or duplicate KnowledgeOS models; Docker Desktop services use
 `OLLAMA_BASE_URL=http://host.docker.internal:11434`, while host processes use localhost.
+
+Query V2 pins Neo4j Community `2026.07.1` and the official Python driver `6.2.0`. Neo4j persists
+under `data/neo4j`, publishes Browser HTTP on 7474 and Bolt on 7687, and exposes an authenticated
+`cypher-shell` health check. Backend and worker connect over `bolt://neo4j:7687`; the password comes
+from `CORTEX_NEO4J_PASSWORD` or the encrypted Cortex secret store and is never persisted in global
+settings. The checked-in Compose fallback is local-development only and must be overridden outside
+that environment. Neo4j Community Edition is GPLv3; distribution review remains mandatory.
 
 The production backend targets Python 3.11 on Linux/x86_64 containers. `backend/uv.lock` is
 generated inside that Linux runtime with uv 0.12.1; Windows 11 is a host development platform,
@@ -25,9 +32,10 @@ requests served on port 3000 never incorrectly target the Vite port.
 Runtime containers use `TZ=Europe/Istanbul` for local operational timestamps. Persistent API
 timestamps remain UTC and the frontend explicitly formats them for the Istanbul time zone.
 
-For no-build host development, Redis and Qdrant are published on `localhost:6379` and
-`localhost:6333`. Set `VITE_API_PROXY_TARGET=http://host.docker.internal:4000`, recreate only the
-frontend/Redis/Qdrant Compose services, then run the backend and worker from `backend/.venv` with
+For no-build host development, Redis, Qdrant, and Neo4j are published on `localhost:6379`,
+`localhost:6333`, and `localhost:7687`. Set the host backend's Neo4j URI to
+`bolt://localhost:7687` and `VITE_API_PROXY_TARGET=http://host.docker.internal:4000`, recreate the
+frontend/Redis/Qdrant/Neo4j Compose services, then run backend and worker from `backend/.venv` with
 the same mounted `data` directory. The normal Compose default remains `http://backend:8000`.
 
 The Dockerfile has two build targets. `runtime` is the API image and installs only the `query`

@@ -11,6 +11,7 @@ import { ProcessesPage } from "../pages/ProcessesPage";
 import { ChatPage } from "../pages/ChatPage";
 import { OperationalSettingsPage } from "../pages/OperationalSettingsPage";
 import { FailedJobsPage } from "../pages/FailedJobsPage";
+import { KnowledgeCurationPage } from "../pages/KnowledgeCurationPage";
 import { DashboardPage, DocumentDetailPage, DocumentsPage, GraphPage, HealthPage, UploadPage, WorkspaceOverviewPage, WorkspacesPage } from "../pages/WorkspacePages";
 const routes: Record<string, [string, string]> = {
   "/": ["Dashboard", ""],
@@ -24,6 +25,7 @@ const routes: Record<string, [string, string]> = {
   "/processes": ["Processes", "Background workflows and diagnostics."],
   "/failed-jobs": ["Failed jobs", "Sanitized technical details."],
   "/graph": ["Graf", ""],
+  "/knowledge": ["Canonical bilgi", "Entity, evidence ve curation kararları."],
   "/system-map": ["System map", "Component and data-flow map."],
   "/settings": ["Settings", "Global configuration."],
   "/settings/providers": [
@@ -161,6 +163,7 @@ export function App() {
             : path === "/documents/:documentId" ? <ContentRoute title={title}><DocumentDetailPage /></ContentRoute>
             : path === "/upload" ? <ContentRoute title={title}><UploadPage /></ContentRoute>
             : path === "/graph" ? <ContentRoute title={title}><GraphPage /></ContentRoute>
+            : path === "/knowledge" ? <ContentRoute title={title}><KnowledgeCurationPage /></ContentRoute>
             : path === "/health" ? <ContentRoute title={title}><HealthPage /></ContentRoute>
             : path === "/failed-jobs" ? <FailedJobsRoute />
             : path === "/chat" ? <ChatRoute title="Chat" />

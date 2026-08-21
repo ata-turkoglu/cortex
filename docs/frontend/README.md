@@ -4,7 +4,7 @@ The application shell is Sidebar + (Header + Content), with a collapsed sidebar 
 and drawer behavior on narrow screens. Main V1 routes cover Dashboard, Workspaces, workspace
 overview, Documents, document details/versions, upload/import, Chat, Conversations,
 Processes, failed-job diagnostics, Graph explorer, System map, Settings, provider/model
-settings, appearance settings, and Health/status.
+settings, appearance settings, canonical Knowledge curation, and Health/status.
 The expanded sidebar owns the active workspace selection for workspace-scoped pages. The
 selection is persisted in browser localStorage and restored when the platform starts; if the
 stored workspace is unavailable, the first available workspace becomes active.
@@ -51,37 +51,26 @@ The default palette uses the subdued Nord blue (`#5e81ac`) and slate (`#4c566a`)
 light panel surfaces and fine slate borders; the default PrimeReact preset is `saga-blue`, and
 the same token system supplies its dark variant.
 
-The System map assigns every node a semantic color. Its legend groups application flow, data and
-retrieval, control, LLM source, and platform nodes; local and API LLM nodes remain visibly
-distinct. The canvas uses labeled, color-coded background groups with solid boundaries for the
-main flow stages; GraphRAG indexing is isolated from dense indexing in its own group, with a
-minimum visual gap between adjacent nodes and stage boundaries; every node belongs to exactly
-one stage group. The layout rule uses a 205 px node width, 160 px minimum node height, a
-100 px horizontal gap, and an 80 px vertical gap: a next node starts only after the prior
-node's right or bottom edge plus the matching-axis gap. Every group retains a 100 px
-horizontal and 80 px vertical inner padding, while
-selecting a node opens its contextual detail sidebar, which can be dismissed without changing
-the active map. Persistent-store nodes use a dedicated slate color and a "Kalıcı kayıt" badge.
-The query map uses separately spaced hybrid and GraphRAG lanes with Bezier edges to keep
-route branches readable. Decision nodes render their positive and negative outcomes explicitly;
-edge labels are concise and use an opaque background so they remain legible between nodes. The
-document flow makes format-dependent behavior explicit: Markdown and plain
-text are read directly as UTF-8, while PDF and DOCX pass through Docling (and its OCR path when
-needed) before normalized Markdown is stored. Storage nodes explicitly mark both the persisted
-record and its technology: source and normalized files use the workspace filesystem; document,
-version, chunk, workflow-run, and checkpoint records use SQLite; dense vectors use Qdrant; sparse
-corpora use workspace cache files; and canonical GraphRAG artifacts use workspace Parquet/JSON
-files before their vector mirror is written to Qdrant.
-For multi-document DOCX sources, the ingestion map includes Heading-2 normalization and
-logical-boundary detection between the source version and chunking. It shows that every Markdown
-`##` section becomes a `logical_documents` record, without archive-prefix matching, and that
-chunks and GraphRAG inputs inherit those identities rather than only the DOCX filename.
-The query flow likewise names the technology each branch reads from: SQLite for conversation,
-citation, and telemetry records; Qdrant for dense vectors; workspace cache files for BM25S; and
-GraphRAG Parquet/JSON artifacts plus their Qdrant mirror for graph routes.
-Its planner also shows the `entity_document_lookup`/`needs_list` decision and the document-grouping
-branch that deduplicates matching chunks into one result and citation per document. These are
-internal stages of the existing query run, not separate background workflow checkpoints.
+The System Map assigns every node a semantic color and keeps React Flow behind the Cortex-owned
+canvas abstraction. The Live system and Background workflows tabs retain operational health and
+durability views. The Query V2 and Indexing V2 tabs are generated from the exported
+`SYSTEM_MAP_V2_MANIFEST`: every visual group names one real implementation boundary, canonical
+architecture document, and nearest scoped `AGENTS.md`/`CLAUDE.md` context. Selecting a node opens
+description, boundary, guarantee, documentation, and AI-context detail tabs.
+
+Query V2 shows Conversation Context → Query Understanding → Query IR → Execution Planning.
+Execution Planning is a separate parent for Structured Query, Knowledge Graph, Retrieval, and
+GraphRAG. All four converge through Result & Evidence before Reasoning & Composition and Answer.
+GraphRAG is explicitly non-final and separate from canonical Knowledge Graph execution.
+
+Indexing V2 shows Source Processing, Document Structure, Entity/Mention, Identity, Relation,
+Event, Temporal, Claim/Fact, and canonical KG Build, followed by separate BM25, Dense/Qdrant, and
+GraphRAG projections converging at Generation/Readiness. The map describes implemented boundaries
+without claiming Phase 13 runtime activation or full-corpus completeness.
+
+The layout rule retains a 205 px node width, 160 px minimum node height, 100 px horizontal and
+80 px vertical inner padding, and a minimum 100 px node gap. Edge labels use opaque backgrounds,
+and persistent-store nodes retain the dedicated slate presentation.
 
 The Graph explorer is separate from the System map: it selects a workspace, reports the
 GraphRAG state, queues its durable reindex workflow on explicit user action, and renders the
@@ -92,6 +81,10 @@ their type badges map to the input, service, retrieval, processing, local-model,
 persistent-data palette. Selecting a card toggles a small description tooltip, keeping the
 canvas readable while preserving the entity detail. The compact legend uses the same colors,
 and relationship labels retain opaque backgrounds on dashed Bezier edges.
+The Canonical Knowledge page is also separate from the extracted Graph explorer. It uses generated
+OpenAPI types to list canonical entities, inspect exact-span mention evidence, add or tombstone
+aliases, merge identities, partition all active mentions during split, and review lossless identity
+history. Every mutation requires a visible reason and remains scoped to the selected workspace.
 The Processes page renders the full versioned workflow schema for the selected run, including
 steps that have not yet persisted a checkpoint; live SQLite/SSE step states are overlaid on
 those nodes so queued runs remain understandable from their first event. `workflowSchemas.ts`

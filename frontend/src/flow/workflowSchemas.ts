@@ -62,6 +62,23 @@ export const workflowSchemas: Record<string, WorkflowSchema> = {
       { id: "mirror", label: "Vektör aynasını güncelle", description: "GraphRAG kaynak türleri ayrıştırılmış Qdrant vektör aynasına yazılır.", technology: "Qdrant + GraphRAG artifacts", guarantee: "Entity, report ve text-unit vektörleri birbirine karıştırılmaz." },
     ],
   },
+  knowledge_reindex: {
+    label: "Knowledge construction reindex",
+    version: "v1 · knowledge-reindex",
+    steps: [
+      { id: "source_relational", label: "Source snapshot", description: "Captures the active workspace corpus and source fingerprint.", technology: "SQLite", guarantee: "Only one workspace-scoped candidate generation is used." },
+      { id: "entity_mention", label: "Entity and mention extraction", description: "Extracts exact-span proposals through the configured provider.", technology: "Knowledge extractor", guarantee: "Hallucinated or cross-workspace spans are rejected." },
+      { id: "identity_resolution", label: "Identity resolution", description: "Applies conservative evidence-based identity decisions.", technology: "Knowledge identity", guarantee: "Ambiguous matches remain unresolved." },
+      { id: "relation", label: "Relation extraction", description: "Builds exact-evidence relation proposals.", technology: "Knowledge relations", guarantee: "Chunk co-occurrence is not relation evidence." },
+      { id: "event", label: "Event extraction", description: "Builds evidence-bound events and participants.", technology: "Knowledge events", guarantee: "Participants stay workspace-scoped." },
+      { id: "temporal", label: "Temporal processing", description: "Preserves original temporal text and uncertainty.", technology: "Knowledge temporal", guarantee: "Approximate values remain uncertain." },
+      { id: "claim_fact", label: "Claim and fact validation", description: "Produces supported claims and validated facts.", technology: "Knowledge claims", guarantee: "Confidence alone never verifies a fact." },
+      { id: "canonical_graph", label: "Canonical graph promotion", description: "Promotes exact-evidence proposals without overwriting curation.", technology: "Neo4j", guarantee: "Authority precedence is enforced." },
+      { id: "bm25", label: "BM25 projection", description: "Builds the workspace sparse projection.", technology: "bm25s", guarantee: "Output is bound to the candidate fingerprint." },
+      { id: "dense_qdrant", label: "Dense/Qdrant projection", description: "Builds workspace-filtered dense vectors.", technology: "Qdrant", guarantee: "Output is bound to the candidate fingerprint." },
+      { id: "graphrag", label: "GraphRAG projection", description: "Builds and verifies the GraphRAG projection.", technology: "Microsoft GraphRAG", guarantee: "A different GraphRAG generation cannot activate this candidate." },
+    ],
+  },
   document_delete: {
     label: "Belge silme", version: "v1 · document-delete", steps: [
       { id: "mark", label: "Silme için işaretle", description: "Belge silme isteği durable run olarak kaydedilir.", technology: "SQLite", guarantee: "Silme akışı idempotenttir." },

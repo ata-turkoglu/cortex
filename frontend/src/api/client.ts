@@ -18,8 +18,9 @@ export type WorkflowRun = {
   created_at: string;
   updated_at: string;
   finished_at: string | null;
-  source_filename: string | null;
+  source_filename?: string | null;
   steps: WorkflowStep[];
+  usage?: { recorded: boolean; model_calls: number; input_tokens: number | null; output_tokens: number | null; total_tokens: number | null; cost: string | null; currency: string | null; calls: unknown[] };
 };
 export type WorkflowEvent = {
   id: string;
@@ -29,7 +30,18 @@ export type WorkflowEvent = {
 };
 export type Conversation = components["schemas"]["ConversationRead"];
 export type ChatMessage = components["schemas"]["MessageRead"];
-export type QueryDebug = components["schemas"]["QueryDebug"];
+export type QueryDebug = components["schemas"]["QueryDebug"] & {
+  usage: {
+    recorded: boolean;
+    model_calls: number;
+    input_tokens: number | null;
+    output_tokens: number | null;
+    total_tokens: number | null;
+    cost: string | null;
+    currency: string | null;
+    calls: unknown[];
+  };
+};
 export type Workspace = components["schemas"]["WorkspaceRead"];
 export type CatalogDocument = components["schemas"]["DocumentRead"];
 export type WorkspaceOverview = components["schemas"]["WorkspaceOverview"];
@@ -67,6 +79,28 @@ export type GraphExplorer = {
   nodes: { id: string; label: string; description: string; attributes: Record<string, string> }[];
   edges: { id: string; source: string; target: string; label: string | null }[];
 };
+export type CanonicalEntity = components["schemas"]["CanonicalEntityRead"];
+export type EntityEvidence = components["schemas"]["EntityEvidenceRead"];
+export type IdentityOperation = components["schemas"]["IdentityOperationRead"];
+export type MergeCurationRequest = components["schemas"]["MergeCurationRequest"];
+export type SplitCurationRequest = components["schemas"]["SplitCurationRequest"];
+export type KnowledgeGeneration = {
+  generation_id: string;
+  workflow_run_id: string | null;
+  state: string;
+  source_fingerprint: string;
+  created_at: string;
+  activated_at: string | null;
+  failure: Record<string, unknown> | null;
+  stages: {
+    stage: string;
+    state: string;
+    input_fingerprint: string | null;
+    output_fingerprint: string | null;
+    metrics: Record<string, unknown>;
+    error: Record<string, unknown> | null;
+  }[];
+};
 const base = "/api/v1";
 function mutationMessage(path: string, method: string) {
   if (path === "/workspaces" && method === "POST") return "Çalışma alanı oluşturuldu.";
@@ -86,6 +120,7 @@ function mutationMessage(path: string, method: string) {
   if (path.startsWith("/workflows/")) return "Süreç güncellendi.";
   if (path === "/workflows" && method === "POST") return "Süreç başlatıldı.";
   if (path === "/settings" && method === "PUT") return "Ayarlar kaydedildi.";
+  if (path.includes("/knowledge/")) return "Canonical bilgi düzenlendi.";
   return "İşlem tamamlandı.";
 }
 
@@ -113,6 +148,30 @@ export const apiClient = {
   overview: () => request<DashboardOverview>("/overview"),
   workspaceOverview: (workspaceId: string) => request<WorkspaceOverview>(`/workspaces/${workspaceId}/overview`),
   graph: (workspaceId: string) => request<GraphExplorer>(`/workspaces/${workspaceId}/graph`),
+  knowledgeReadiness: (workspaceId: string) =>
+    request<KnowledgeGeneration[]>(`/workspaces/${workspaceId}/knowledge/readiness`),
+  listCanonicalEntities: (workspaceId: string) =>
+    request<CanonicalEntity[]>(`/workspaces/${workspaceId}/knowledge/entities`),
+  entityEvidence: (workspaceId: string, entityId: string) =>
+    request<EntityEvidence[]>(`/workspaces/${workspaceId}/knowledge/entities/${entityId}/evidence`),
+  identityHistory: (workspaceId: string) =>
+    request<IdentityOperation[]>(`/workspaces/${workspaceId}/knowledge/identity-history`),
+  addCanonicalAlias: (workspaceId: string, entityId: string, value: string, reason: string) =>
+    request<IdentityOperation>(`/workspaces/${workspaceId}/knowledge/entities/${entityId}/aliases`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value, reason }),
+    }),
+  removeCanonicalAlias: (workspaceId: string, entityId: string, value: string, reason: string) =>
+    request<IdentityOperation>(`/workspaces/${workspaceId}/knowledge/entities/${entityId}/aliases/remove`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value, reason }),
+    }),
+  mergeCanonicalEntities: (workspaceId: string, payload: MergeCurationRequest) =>
+    request<IdentityOperation>(`/workspaces/${workspaceId}/knowledge/entities/merge`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  splitCanonicalEntity: (workspaceId: string, entityId: string, payload: SplitCurationRequest) =>
+    request<IdentityOperation>(`/workspaces/${workspaceId}/knowledge/entities/${entityId}/split`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
   listDocuments: (workspaceId: string) => request<CatalogDocument[]>(`/workspaces/${workspaceId}/documents`),
   documentDetails: (workspaceId: string, documentId: string) => request<DocumentDetail>(`/workspaces/${workspaceId}/documents/${documentId}`),
   upload: async (workspaceId: string, files: File[]) => {
@@ -138,7 +197,7 @@ export const apiClient = {
   listWorkflows: async () => request<WorkflowRun[]>("/workflows"),
   clearWorkflowHistory: () => request<{ deleted: number }>("/workflows/history", { method: "DELETE" }),
   workflow: (id: string) => request<WorkflowRun>(`/workflows/${id}`),
-  createWorkflow: (workspaceId: string, jobType: "graphrag_reindex") =>
+  createWorkflow: (workspaceId: string, jobType: "graphrag_reindex" | "knowledge_reindex") =>
     request<WorkflowRun>("/workflows", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

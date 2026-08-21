@@ -159,7 +159,7 @@ export function ChatPage() {
           <div className="cortex-chat__composer"><ATextarea value={content} onChange={(event) => setContent(event.target.value)} onKeyDown={onComposerKeyDown} rows={3} placeholder="Belgeleriniz hakkında bir soru sorun…" autoResize /><AButton icon="send" aria-label="Gönder" disabled={!content.trim() || sending} onClick={submit} /></div>
           <p>Göndermek için Enter, yeni satır için Shift + Enter kullanın.</p>
         </div>}
-        {debug && <div className="cortex-chat__debug">Rota: {debug.routes.join(" + ")} · {debug.reason} · {debug.latency_ms} ms · ${debug.estimated_cost_usd}</div>}
+        {debug && <div className="cortex-chat__debug">Rota: {debug.routes.join(" + ")} · {debug.reason} · {debug.latency_ms} ms · {debug.usage.recorded ? `${debug.usage.total_tokens ?? "?"} token · ${debug.usage.cost ? `$${debug.usage.cost}` : "ücret oranı yok"}` : "kullanım kaydı yok"}</div>}
       </section>
     </div>
     <ADialog header={source?.document_title ?? "Kaynak"} visible={Boolean(source)} onHide={() => setSource(undefined)}><p>Sürüm {source?.version_number}</p><p className="whitespace-pre-wrap">{source?.content}</p></ADialog>

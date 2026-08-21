@@ -7,6 +7,8 @@ smallest relevant module before searching files.
 
 Before changing query, retrieval, aggregation, normalization, citation, or answer architecture,
 also read `docs/architecture/CORTEX_RULEBOOK.md`.
+For project orientation, read the relevant compact file in `docs/chatgpt-context/`. Architectural
+changes represented on `/system-map` must update that diagram and its linked documentation.
 
 ## Working rules
 

@@ -30,11 +30,24 @@ def main() -> int:
     changed = changed_paths()
     # An empty history is expected during repository bootstrap; validate only changed mapped areas.
     errors: list[str] = []
-    for module in project_map["modules"]:
-        prefix = module["path"].rstrip("/") + "/"
-        touched = any(
-            path == module["path"] or path.startswith(prefix) for path in changed
-        )
+    modules = project_map["modules"]
+    owning_paths: set[str] = set()
+    for changed_path in changed:
+        matches = [
+            module
+            for module in modules
+            if changed_path == module["path"]
+            or changed_path.startswith(module["path"].rstrip("/") + "/")
+        ]
+        if matches:
+            most_specific_length = max(len(module["path"]) for module in matches)
+            owning_paths.update(
+                module["path"]
+                for module in matches
+                if len(module["path"]) == most_specific_length
+            )
+    for module in modules:
+        touched = module["path"] in owning_paths
         documented = any(doc in changed for doc in module.get("docs", []))
         if touched and not documented:
             errors.append(f"{module['path']} changed without its mapped documentation")
