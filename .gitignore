@@ -61,3 +61,11 @@ reports/licenses/
 frontend/src/api/generated/*.tmp
 /codex-prompts/
 /uploaded_files/
+
+# Local-only validation and unpublished test work
+/.tmp/
+/backend/app/evaluation/
+/backend/evaluation/
+/backend/tests/test_*.py
+/frontend/src/**/*.test.tsx
+/docs/architecture/evaluation.md
