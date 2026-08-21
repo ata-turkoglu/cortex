@@ -16,7 +16,9 @@ dependency inventory is generated from pinned manifests and lockfiles with
 | Docling   | 2.114.0 | MIT                  | Document normalization     |
 | Qdrant client | 1.13.2 | Apache-2.0       | Vector-store adapter       |
 | Redis client | 5.2.1 | MIT                | Worker broker client       |
-| Microsoft GraphRAG | 2.6.0 | MIT             | Canonical graph indexing   |
+| Neo4j Community | 2026.07.1 | GPL-3.0       | Persistent knowledge graph |
+| Neo4j Python driver | 6.2.0 | Apache-2.0 AND Python-2.0 | Bolt adapter |
+| Microsoft GraphRAG | 2.6.0 | MIT             | Extracted graph producer   |
 | LlamaIndex Core | 0.12.32 | MIT             | Query/workflow adapters    |
 | bm25s     | 0.3.9   | MIT                  | Sparse retrieval           |
 | Sentence Transformers | 3.4.1 | Apache-2.0    | Local BGE reranking        |

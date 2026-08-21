@@ -20,8 +20,13 @@ class LLMProvider(Protocol):
 @dataclass(frozen=True)
 class GeneratedText:
     text: str
-    input_tokens: int = 0
-    output_tokens: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    request_id: str | None = None
+    usage_payload: dict[str, object] | None = None
 
 
 class EmbeddingProvider(Protocol):

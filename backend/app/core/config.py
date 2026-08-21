@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/sqlite/cortex.db"
     redis_url: str = "redis://redis:6379/0"
     qdrant_url: str = "http://qdrant:6333"
+    neo4j_uri: str = "bolt://neo4j:7687"
+    neo4j_database: str = "neo4j"
+    neo4j_username: str = "neo4j"
+    neo4j_password: str | None = None
+    neo4j_connection_timeout_seconds: int = Field(default=5, ge=1, le=60)
     ollama_base_url: str = "http://host.docker.internal:11434"
     data_path: Path = Path("./data")
     sqlite_busy_timeout_ms: int = 5000
@@ -91,6 +96,15 @@ class Settings(BaseSettings):
     answer_model: str = "gpt-5.6-luna"
     router_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     router_model: str = "gpt-5.6-luna"
+    semantic_planner_simple_provider: Literal["openai", "anthropic", "ollama"] = "openai"
+    semantic_planner_simple_model: str = "gpt-5.6-luna"
+    semantic_planner_standard_provider: Literal["openai", "anthropic", "ollama"] = "openai"
+    semantic_planner_standard_model: str = "gpt-5.6-luna"
+    semantic_planner_complex_provider: Literal["openai", "anthropic", "ollama"] = "openai"
+    semantic_planner_complex_model: str = "gpt-5.6-luna"
+    semantic_planner_repair_attempts: int = Field(default=1, ge=0, le=3)
+    semantic_planner_escalation_enabled: bool = True
+    semantic_planner_confidence_threshold: float = Field(default=0.75, ge=0, le=1)
     summary_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     summary_model: str = "gpt-5.6-luna"
     query_expansion_provider: Literal["openai", "anthropic", "ollama"] = "openai"
@@ -100,8 +114,6 @@ class Settings(BaseSettings):
     daily_soft_budget_usd: float = 0.0
     monthly_soft_budget_usd: float = 0.0
     budget_warning_percent: int = 80
-    openai_input_cost_per_1k_usd: float = 0.0
-    openai_output_cost_per_1k_usd: float = 0.0
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
 

@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -80,6 +90,93 @@ class GraphRagState(Base):
     pending_document_count: Mapped[int] = mapped_column(Integer, default=0)
     graph_root: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class KnowledgeGeneration(Base):
+    """A workspace-scoped, all-or-nothing knowledge/index projection generation."""
+
+    __tablename__ = "knowledge_generations"
+    __table_args__ = (Index("ix_knowledge_generation_workspace_state", "workspace_id", "state"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    failure_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class KnowledgeStageState(Base):
+    """Durable readiness checkpoint for exactly one generation and mandatory stage."""
+
+    __tablename__ = "knowledge_stage_states"
+    __table_args__ = (UniqueConstraint("generation_id", "stage"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    generation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    stage: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    output_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    metrics_json: Mapped[str | None] = mapped_column(Text)
+    error_json: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class KnowledgeReindexRunContext(Base):
+    """Retry-safe references for one durable knowledge reindex run; never stores source text."""
+
+    __tablename__ = "knowledge_reindex_run_contexts"
+    __table_args__ = (UniqueConstraint("workflow_run_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    workflow_run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.id"), nullable=False)
+    generation_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_generations.id"), nullable=False
+    )
+    source_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    state_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class QueryRuntimeActivation(Base):
+    """The single workspace-scoped live query architecture pointer."""
+
+    __tablename__ = "query_runtime_activations"
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), primary_key=True
+    )
+    runtime_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    generation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_generations.id")
+    )
+    source_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    evaluation_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    curation_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class QueryCutoverAttempt(Base):
+    """Immutable audit record for a passed or rejected V2 cutover attempt."""
+
+    __tablename__ = "query_cutover_attempts"
+    __table_args__ = (
+        Index("ix_query_cutover_workspace_created", "workspace_id", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False
+    )
+    generation_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_generations.id"), nullable=False
+    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    report_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class GraphRagStageReport(Base):
@@ -296,6 +393,44 @@ class QueryRun(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class UsageEvent(Base):
+    """An append-only accounting record for one completed provider request."""
+
+    __tablename__ = "usage_events"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key"),
+        Index("ix_usage_events_workspace_query", "workspace_id", "query_run_id"),
+        Index("ix_usage_events_workspace_workflow", "workspace_id", "workflow_run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    query_run_id: Mapped[str | None] = mapped_column(ForeignKey("query_runs.id"))
+    workflow_run_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_runs.id"))
+    workflow_step_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_step_runs.id"))
+    stage: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider_request_id: Mapped[str | None] = mapped_column(String(255))
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
+    cached_input_tokens: Mapped[int | None] = mapped_column(Integer)
+    cache_creation_tokens: Mapped[int | None] = mapped_column(Integer)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer)
+    embedding_tokens: Mapped[int | None] = mapped_column(Integer)
+    usage_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    cost_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    cost_amount: Mapped[object | None] = mapped_column(Numeric(20, 10))
+    currency: Mapped[str | None] = mapped_column(String(8))
+    pricing_version: Mapped[str | None] = mapped_column(String(128))
+    pricing_snapshot_json: Mapped[str | None] = mapped_column(Text)
+    diagnostic: Mapped[str | None] = mapped_column(String(255))
+    provider_usage_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class QueryStepRun(Base):
     __tablename__ = "query_step_runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -316,6 +451,70 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class ConversationContextRecord(Base):
+    """Durable Query V2 state that is local to one workspace conversation."""
+
+    __tablename__ = "conversation_contexts"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "conversation_id"),
+        Index("ix_conversation_contexts_workspace_updated", "workspace_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ResearchRunRecord(Base):
+    """Durable Query V2 research state; provider calls use detached snapshots."""
+
+    __tablename__ = "research_runs"
+    __table_args__ = (
+        Index("ix_research_runs_workspace_updated", "workspace_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"))
+    schema_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    goal: Mapped[str] = mapped_column(Text, nullable=False)
+    generation_id: Mapped[str | None] = mapped_column(String(128))
+    checkpoint_json: Mapped[str] = mapped_column(Text, nullable=False)
+    failure_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class CompositionRunRecord(Base):
+    """Durable long-form outline, section, provenance, and validation state."""
+
+    __tablename__ = "composition_runs"
+    __table_args__ = (
+        Index("ix_composition_runs_workspace_updated", "workspace_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    research_run_id: Mapped[str] = mapped_column(ForeignKey("research_runs.id"), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    checkpoint_json: Mapped[str] = mapped_column(Text, nullable=False)
+    failure_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Message(Base):

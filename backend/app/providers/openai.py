@@ -18,6 +18,25 @@ _NON_TEXT_MODEL_MARKERS = (
 )
 
 
+def _response_text(payload: dict[str, object]) -> str:
+    """Read text from both convenience mocks and the wire Responses shape."""
+    direct = payload.get("output_text")
+    if isinstance(direct, str) and direct:
+        return direct
+    for output in payload.get("output", []) if isinstance(payload.get("output"), list) else []:
+        if not isinstance(output, dict):
+            continue
+        content = output.get("content")
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "output_text":
+                text = item.get("text")
+                if isinstance(text, str):
+                    return text
+    return ""
+
+
 def _capability(model: str) -> ModelCapability | None:
     normalized = model.lower()
     if "embedding" in normalized:
@@ -60,7 +79,7 @@ class OpenAIProvider:
         api_key = get_settings().openai_api_key or SecretStore().get("openai_api_key")
         if not api_key:
             raise RuntimeError("OpenAI is not configured")
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             response = await client.post(
                 "https://api.openai.com/v1/responses",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -69,8 +88,84 @@ class OpenAIProvider:
             response.raise_for_status()
         payload = response.json()
         usage = payload.get("usage") or {}
+        input_details = usage.get("input_tokens_details") or {}
+        output_details = usage.get("output_tokens_details") or {}
+        input_tokens = int(usage["input_tokens"]) if usage.get("input_tokens") is not None else None
+        output_tokens = (
+            int(usage["output_tokens"]) if usage.get("output_tokens") is not None else None
+        )
         return GeneratedText(
-            text=str(payload.get("output_text") or ""),
-            input_tokens=int(usage.get("input_tokens") or 0),
-            output_tokens=int(usage.get("output_tokens") or 0),
+            text=_response_text(payload),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=(
+                int(usage["total_tokens"])
+                if usage.get("total_tokens") is not None
+                else (
+                    input_tokens + output_tokens
+                    if input_tokens is not None and output_tokens is not None
+                    else None
+                )
+            ),
+            cached_input_tokens=(
+                int(input_details["cached_tokens"])
+                if input_details.get("cached_tokens") is not None
+                else None
+            ),
+            reasoning_tokens=(
+                int(output_details["reasoning_tokens"])
+                if output_details.get("reasoning_tokens") is not None
+                else None
+            ),
+            request_id=str(payload["id"]) if payload.get("id") is not None else None,
+            usage_payload=usage,
+        )
+
+    async def generate_structured(
+        self,
+        model: str,
+        instructions: str,
+        input_text: str,
+        *,
+        schema_name: str,
+        json_schema: dict[str, object],
+    ) -> GeneratedText:
+        """Use Responses Structured Outputs; callers still validate the returned JSON."""
+        api_key = get_settings().openai_api_key or SecretStore().get("openai_api_key")
+        if not api_key:
+            raise RuntimeError("OpenAI is not configured")
+        async with httpx.AsyncClient(timeout=180) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/responses",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model,
+                    "instructions": instructions,
+                    "input": input_text,
+                    "text": {
+                        "format": {
+                            "type": "json_schema",
+                            "name": schema_name,
+                            "strict": True,
+                            "schema": json_schema,
+                        }
+                    },
+                },
+            )
+            response.raise_for_status()
+        payload = response.json()
+        usage = payload.get("usage") or {}
+        return GeneratedText(
+            text=_response_text(payload),
+            input_tokens=(
+                int(usage["input_tokens"]) if usage.get("input_tokens") is not None else None
+            ),
+            output_tokens=(
+                int(usage["output_tokens"]) if usage.get("output_tokens") is not None else None
+            ),
+            total_tokens=(
+                int(usage["total_tokens"]) if usage.get("total_tokens") is not None else None
+            ),
+            request_id=str(payload["id"]) if payload.get("id") is not None else None,
+            usage_payload=usage,
         )

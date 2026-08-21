@@ -19,13 +19,20 @@ services:
       CORTEX_DATA_PATH: /data
       CORTEX_REDIS_URL: redis://redis:6379/0
       CORTEX_QDRANT_URL: http://qdrant:6333
+      CORTEX_NEO4J_URI: bolt://neo4j:7687
+      CORTEX_NEO4J_DATABASE: neo4j
+      CORTEX_NEO4J_USERNAME: neo4j
+      CORTEX_NEO4J_PASSWORD: ${CORTEX_NEO4J_PASSWORD:-cortex-local-neo4j}
       CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
       CORTEX_SECRET_STORE_PATH: /data/secrets
       CORTEX_OPENAI_API_KEY: ${CORTEX_OPENAI_API_KEY:-}
       CORTEX_ANTHROPIC_API_KEY: ${CORTEX_ANTHROPIC_API_KEY:-}
     volumes: ["../data:/data"]
     extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on: [redis, qdrant]
+    depends_on:
+      redis: { condition: service_started }
+      qdrant: { condition: service_started }
+      neo4j: { condition: service_healthy }
     stop_grace_period: 30s
   worker:
     build: { context: .., dockerfile: backend/Dockerfile, target: worker }
@@ -36,13 +43,20 @@ services:
       CORTEX_DATA_PATH: /data
       CORTEX_REDIS_URL: redis://redis:6379/0
       CORTEX_QDRANT_URL: http://qdrant:6333
+      CORTEX_NEO4J_URI: bolt://neo4j:7687
+      CORTEX_NEO4J_DATABASE: neo4j
+      CORTEX_NEO4J_USERNAME: neo4j
+      CORTEX_NEO4J_PASSWORD: ${CORTEX_NEO4J_PASSWORD:-cortex-local-neo4j}
       CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
       CORTEX_SECRET_STORE_PATH: /data/secrets
       CORTEX_OPENAI_API_KEY: ${CORTEX_OPENAI_API_KEY:-}
       CORTEX_ANTHROPIC_API_KEY: ${CORTEX_ANTHROPIC_API_KEY:-}
     volumes: ["../data:/data"]
     extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on: [redis, qdrant]
+    depends_on:
+      redis: { condition: service_started }
+      qdrant: { condition: service_started }
+      neo4j: { condition: service_healthy }
     stop_grace_period: 30s
   redis:
     image: redis:7.4.2-alpine3.21
@@ -51,6 +65,24 @@ services:
     image: qdrant/qdrant:v1.13.2
     ports: ["6333:6333"]
     volumes: ["../data/qdrant:/qdrant/storage"]
+  neo4j:
+    image: neo4j:2026.07.1
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${CORTEX_NEO4J_PASSWORD:-cortex-local-neo4j}
+    volumes: ["../data/neo4j:/data"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          cypher-shell -u neo4j -p "$${NEO4J_AUTH#*/}" "RETURN 1"
+          >/dev/null 2>&1 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 volumes:
   frontend-node-modules:
   frontend-package-node-modules:

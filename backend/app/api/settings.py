@@ -130,6 +130,15 @@ class SettingsUpdate(BaseModel):
     answer_model: str | None = None
     router_provider: Provider | None = None
     router_model: str | None = None
+    semantic_planner_simple_provider: Provider | None = None
+    semantic_planner_simple_model: str | None = Field(default=None, min_length=1)
+    semantic_planner_standard_provider: Provider | None = None
+    semantic_planner_standard_model: str | None = Field(default=None, min_length=1)
+    semantic_planner_complex_provider: Provider | None = None
+    semantic_planner_complex_model: str | None = Field(default=None, min_length=1)
+    semantic_planner_repair_attempts: int | None = Field(default=None, ge=0, le=3)
+    semantic_planner_escalation_enabled: bool | None = None
+    semantic_planner_confidence_threshold: float | None = Field(default=None, ge=0, le=1)
     summary_provider: Provider | None = None
     summary_model: str | None = None
     query_expansion_provider: Provider | None = None
@@ -399,8 +408,6 @@ async def budget_status():
         "enforcement": "pause-queued-cost-incurring-work",
         "query_expansion_enabled": settings.query_expansion_enabled,
         "automatic_quality_escalation_enabled": settings.automatic_quality_escalation_enabled,
-        "openai_input_cost_per_1k_usd": settings.openai_input_cost_per_1k_usd,
-        "openai_output_cost_per_1k_usd": settings.openai_output_cost_per_1k_usd,
     }
 
 
@@ -436,9 +443,7 @@ def _catalog_from_html(html: str, kind: str) -> list[dict[str, object]]:
             {
                 "name": match.group(1),
                 "description": (
-                    _catalog_text(description.group(1))
-                    if description
-                    else "Ollama Library model"
+                    _catalog_text(description.group(1)) if description else "Ollama Library model"
                 ),
                 "capabilities": _catalog_values(card, "x-test-capability"),
                 "sizes": _catalog_values(card, "x-test-size"),
