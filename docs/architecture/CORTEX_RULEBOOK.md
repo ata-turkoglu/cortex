@@ -38,3 +38,7 @@ aggregation, normalization, citations, or answer generation. Binding V1 decision
 ## Documentation rule
 
 Architecture changes update the owning document and its pipeline diagram in the same change.
+Any architectural change affecting a process represented on `/system-map` updates the corresponding
+React Flow diagram and linked architecture Markdown in the same change. Any project-level behavior
+summarized in `docs/chatgpt-context/` updates the affected context file in the same change; unrelated
+context files do not need mechanical updates.

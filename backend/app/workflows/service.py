@@ -38,9 +38,27 @@ DEFINITIONS = {
     ),
     "graphrag_reindex": (
         "graphrag-reindex",
-        "1",
+        "2",
         "GraphRAG reindex",
-        ("snapshot", "materialize", "index", "mirror"),
+        ("snapshot", "materialize", "index", "neo4j_sync", "mirror"),
+    ),
+    "knowledge_reindex": (
+        "knowledge-reindex",
+        "1",
+        "Knowledge construction reindex",
+        (
+            "source_relational",
+            "entity_mention",
+            "identity_resolution",
+            "relation",
+            "event",
+            "temporal",
+            "claim_fact",
+            "canonical_graph",
+            "bm25",
+            "dense_qdrant",
+            "graphrag",
+        ),
     ),
     "document_delete": (
         "document-delete",
@@ -60,6 +78,7 @@ LOCK_TYPES = {
     "ingestion": "index",
     "dense_reindex": "index",
     "graphrag_reindex": "graph",
+    "knowledge_reindex": "index",
     "document_delete": "delete",
     "workspace_delete": "delete",
 }
@@ -77,6 +96,8 @@ def concurrency_limit(job_type: str) -> int:
         return settings.workflow_dense_reindex_concurrency
     if job_type == "graphrag_reindex":
         return settings.workflow_graphrag_reindex_concurrency
+    if job_type == "knowledge_reindex":
+        return 1
     return settings.workflow_deletion_concurrency
 
 
@@ -321,6 +342,10 @@ def execute_run(session: Session, run_id: str) -> None:
     run = session.get(WorkflowRun, run_id)
     if run is None or run.state not in ("queued", "running", "cancelling"):
         return
+    if run.job_type == "knowledge_reindex":
+        raise RuntimeError(
+            "knowledge_reindex requires the specialized generation-aware worker executor"
+        )
     if run.state == "cancelling":
         run.state = "cancelled"
         run.finished_at = now()

@@ -120,5 +120,6 @@ hybrid results. If `graphrag_query_fallback_to_hybrid` is enabled, the worker ca
 `HybridRetrievalRuntime` boundary described above; it never reintroduces the former SQLite
 lexical scan.
 
-COUNT, entity resolution, aggregation, query-planner redesign, and Hybrid/GraphRAG fusion remain
-out of scope for this pipeline.
+Entity resolution and verified property aggregation are implemented as the separate boundaries
+described above. Hybrid and GraphRAG remain distinct execution paths and are not fused. See the
+**Sorgu akışı** tab of `/system-map` and `system-map-index.md` for the live diagram/source mapping.

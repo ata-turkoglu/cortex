@@ -1,0 +1,48 @@
+"""Query execution, result reconciliation, and answer ownership boundary."""
+
+from .reconciliation import EvidenceReconciliationError, reconcile_engine_results
+from .schemas import (
+    AggregateResult,
+    ClaimResult,
+    CompletenessReport,
+    EngineFailure,
+    EngineResult,
+    EngineTrace,
+    EntityResult,
+    ExactEvidenceSpan,
+    ExpectedResultStep,
+    GraphPathResult,
+    GraphRAGFinding,
+    GroundedItem,
+    MaterializedCitation,
+    ProvenanceLink,
+    ReasoningPackage,
+    ReconciliationContract,
+    ResultAmbiguity,
+    ResultConflict,
+    TrustedSource,
+)
+
+__all__ = [
+    "AggregateResult",
+    "ClaimResult",
+    "CompletenessReport",
+    "EngineFailure",
+    "EngineResult",
+    "EngineTrace",
+    "EntityResult",
+    "ExpectedResultStep",
+    "EvidenceReconciliationError",
+    "ExactEvidenceSpan",
+    "GraphPathResult",
+    "GraphRAGFinding",
+    "GroundedItem",
+    "MaterializedCitation",
+    "ProvenanceLink",
+    "ReasoningPackage",
+    "ReconciliationContract",
+    "ResultAmbiguity",
+    "ResultConflict",
+    "TrustedSource",
+    "reconcile_engine_results",
+]

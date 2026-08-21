@@ -5,11 +5,12 @@ import json
 import logging
 import re
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..accounting import NormalizedUsage, persist_usage
 from ..core.config import get_settings
-from ..models import Chunk, Conversation, Message, QueryRun
+from ..models import Chunk, Conversation, Message, QueryRun, UsageEvent
 from ..providers.openai import OpenAIProvider
 
 logger = logging.getLogger(__name__)
@@ -211,12 +212,13 @@ def budget_allows_synthesis(session: Session, query_run_id: str) -> bool:
     if limit <= 0:
         return True
     spent = float(
-        session.execute(
-            text(
-                "SELECT COALESCE(SUM(estimated_cost_usd), 0) FROM usage_records "
-                "WHERE created_at >= date('now')"
+        session.scalar(
+            select(func.coalesce(func.sum(UsageEvent.cost_amount), 0)).where(
+                UsageEvent.created_at >= func.date("now"),
+                UsageEvent.cost_status.in_(("exact", "local_zero")),
             )
-        ).scalar_one()
+        )
+        or 0
     )
     if spent < limit:
         return True
@@ -232,8 +234,8 @@ def apply_synthesis(
     session: Session,
     query_run_id: str,
     text: str,
-    input_tokens: int,
-    output_tokens: int,
+    input_tokens: int | None,
+    output_tokens: int | None,
     *,
     raw_evidence_guard_triggered: bool = False,
     regeneration_attempted: bool = False,
@@ -267,15 +269,10 @@ def apply_synthesis(
     }
     metadata["citation_summary"] = citation_summary(metadata, final_citations)
     assistant.metadata_json = json.dumps(metadata, ensure_ascii=False)
-    run.input_tokens += input_tokens
-    run.output_tokens += output_tokens
-    settings = get_settings()
-    estimated_cost = (
-        input_tokens * settings.openai_input_cost_per_1k_usd
-        + output_tokens * settings.openai_output_cost_per_1k_usd
-    ) / 1000
-    run.estimated_cost_usd += estimated_cost
-    metadata["estimated_cost_usd"] = estimated_cost
+    # Legacy summary columns remain for API compatibility; accounting derives from events.
+    run.input_tokens += input_tokens or 0
+    run.output_tokens += output_tokens or 0
+    # Monetary totals are derived exclusively from immutable usage events after persistence.
     assistant.metadata_json = json.dumps(metadata, ensure_ascii=False)
 
 
@@ -308,6 +305,7 @@ def synthesize_with_openai(query_run_id: str, session_factory) -> None:
             session.close()
         return
     generated = asyncio.run(OpenAIProvider().generate(settings.answer_model, *snapshot))
+    generated_calls = [generated]
     encoded_evidence = snapshot[1].split("Selected evidence:\n", 1)[1].split("\n\nCitations:", 1)[0]
     evidence = json.loads(encoded_evidence)
     guard_triggered = raw_evidence_guard(generated.text, evidence)
@@ -333,6 +331,7 @@ def synthesize_with_openai(query_run_id: str, session_factory) -> None:
         ):
             raise RuntimeError("synthesis_guard_rejected")
         generated = retry
+        generated_calls.append(retry)
     session = session_factory()
     try:
         apply_synthesis(
@@ -344,6 +343,30 @@ def synthesize_with_openai(query_run_id: str, session_factory) -> None:
             raw_evidence_guard_triggered=guard_triggered,
             regeneration_attempted=regenerated,
         )
+        for attempt, call in enumerate(generated_calls):
+            event_key = (
+                f"query:{query_run_id}:synthesis:{attempt}:"
+                f"{call.request_id or 'no-provider-id'}"
+            )
+            persist_usage(
+                session,
+                workspace_id=session.get(QueryRun, query_run_id).workspace_id,
+                query_run_id=query_run_id,
+                stage="answer_synthesis" if attempt == 0 else "answer_regeneration",
+                provider="openai",
+                model=settings.answer_model,
+                usage=NormalizedUsage(
+                    call.input_tokens,
+                    call.output_tokens,
+                    call.total_tokens,
+                    cached_input_tokens=call.cached_input_tokens,
+                    reasoning_tokens=call.reasoning_tokens,
+                    source="provider_reported" if call.usage_payload is not None else "unavailable",
+                    raw=call.usage_payload,
+                ),
+                idempotency_key=event_key,
+                provider_request_id=call.request_id,
+            )
         session.commit()
     except Exception:
         session.rollback()

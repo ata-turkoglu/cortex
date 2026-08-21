@@ -1,5 +1,13 @@
 # Backend Foundation
 
+## Query V2 ownership packages
+
+The backend now exposes navigation-first V2 ownership packages under `app/query/`,
+`app/knowledge/`, `app/engines/`, and `app/reasoning/`. They contain scoped instructions and Python
+package markers but do not alter the active V1 runtime. Existing implementations remain at their V1
+paths until the owning V2 phase migrates them; see `query-v2/repository-boundaries.md` for the
+no-duplication map.
+
 FastAPI OpenAPI is the API contract. SQLite uses WAL, foreign keys, a busy timeout,
 bounded lock retry, and short transactions. LLM, embedding, network, and parsing calls do
 not execute inside open transactions. Secrets never live as plaintext in SQLite or API
@@ -27,6 +35,15 @@ the same source content from being uploaded again.
 Startup identifies stale running work; jobs become interrupted or resume from a safe
 checkpoint. Deletions are idempotent workflows, and partial cleanup schedules reconciliation
 across SQLite, Qdrant, bm25s, GraphRAG, NetworkX, uploads, normalized files, and caches.
+
+Neo4j access is separately bound to one workspace by `Neo4jGraphAdapter`; direct driver imports
+outside `app/knowledge/graph/` are prohibited. The health map treats Neo4j as a required Query V2
+service and distinguishes missing credentials from connection failure.
+Canonical writes enforce `user_curated > validated > extracted`, persist complete exact-span
+lineage, and never delete merge/split/alias history. Provider-neutral entity, relation, event,
+temporal, claim, fact, validation, and contradiction contracts live in the smallest
+`app/knowledge/` child package. The workspace-scoped knowledge API is a thin curation boundary over
+that adapter; automatic extraction/promotion remains Phase 05 work.
 
 Retrieval configuration is global in V1. Changing an embedding configuration creates one
 durable dense-reindex request and prevents incompatible dense vectors from serving results until

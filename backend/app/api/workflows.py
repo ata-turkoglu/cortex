@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..accounting import totals as usage_totals
 from ..models import DocumentVersion, WorkflowEvent, WorkflowRun, WorkflowStepRun
 from ..workflows.service import (
     clear_workflow_history,
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 class WorkflowCreate(BaseModel):
     workspace_id: str
     job_type: str = Field(
-        pattern="^(ingestion|dense_reindex|graphrag_reindex|document_delete|workspace_delete|reconcile)$"
+        pattern="^(ingestion|dense_reindex|graphrag_reindex|knowledge_reindex|document_delete|workspace_delete|reconcile)$"
     )
     payload: dict[str, object] = Field(default_factory=dict)
 
@@ -57,6 +58,7 @@ class WorkflowRead(BaseModel):
     finished_at: datetime | None
     source_filename: str | None
     steps: list[StepRead] = []
+    usage: dict[str, object]
 
 
 class WorkflowEventRead(BaseModel):
@@ -88,8 +90,8 @@ def serialize(session: Session, run: WorkflowRun) -> WorkflowRead:
                     "recovery_state",
                     "created_at",
                     "updated_at",
-                "finished_at",
-            )
+                    "finished_at",
+                )
             },
             "source_filename": version.source_filename if version else None,
             "steps": session.scalars(
@@ -97,6 +99,7 @@ def serialize(session: Session, run: WorkflowRun) -> WorkflowRead:
                 .where(WorkflowStepRun.workflow_run_id == run.id)
                 .order_by(WorkflowStepRun.created_at)
             ).all(),
+            "usage": usage_totals(session, workspace_id=run.workspace_id, workflow_run_id=run.id),
         }
     )
 

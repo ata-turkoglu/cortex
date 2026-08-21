@@ -12,6 +12,7 @@ from .api.chat import router as chat_router
 from .api.graph import router as graph_router
 from .api.health import router as health_router
 from .api.ingestion_diagnostics import router as ingestion_diagnostics_router
+from .api.knowledge import router as knowledge_router
 from .api.settings import router as settings_router
 from .api.uploads import router as uploads_router
 from .api.workflows import router as workflows_router
@@ -119,3 +120,4 @@ app.include_router(uploads_router, prefix="/api/v1")
 app.include_router(workflows_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(ingestion_diagnostics_router, prefix="/api/v1")
+app.include_router(knowledge_router, prefix="/api/v1")

@@ -65,9 +65,20 @@ workspace's canonical GraphRAG entity and relationship artifacts for the graph e
 never reads another workspace's graph root and limits the response to 150 entities and 300
 relationships.
 
-The generated frontend OpenAPI schema includes the Chat request, conversation, message,
-citation, and query-debug models. Chat feature code consumes those generated component types
-through the Cortex API-client boundary.
+Query V2 canonical curation is workspace-scoped under
+`/workspaces/{workspace_id}/knowledge`. `GET /entities`,
+`GET /readiness`,
+`GET /entities/{entity_id}/evidence`, and `GET /identity-history` expose canonical identities,
+their exact source spans, and lossless decision history. Alias add/remove, entity merge, and entity
+split are explicit POST commands. Every mutation requires a user reason; merge/split carry selected
+evidence IDs, split must partition every active mention exactly once, and alias removal creates a
+tombstone rather than deleting history. These endpoints operate only on the Neo4j canonical layer;
+they do not promote GraphRAG extracted artifacts automatically.
+The readiness response lists active, building, failed, and superseded generations with their
+workflow run, source fingerprint, failure summary, and all mandatory stage fingerprints/metrics.
+
+The generated frontend OpenAPI schema includes Chat and canonical-knowledge curation models.
+Feature code consumes those generated component types through the Cortex API-client boundary.
 
 `GET /settings/budgets` exposes safe query defaults: Query Expansion and automatic
 quality escalation are disabled unless global configuration explicitly enables them.
@@ -77,14 +88,22 @@ configuration. Secrets and connection locations remain environment/credential-st
 Updates are Pydantic validated and model assignments are checked against provider
 capabilities. Changing chunking or embedding settings marks every workspace index as
 `reindex_required` and its GraphRAG projection as `stale`.
+Query V2 adds global simple, standard, and complex semantic-planner provider/model assignments,
+a bounded repair count, an escalation switch, and a confidence threshold. These settings are
+exposed for configuration but do not change V1 chat routing before the explicit V2 cutover.
+GET /api/v1/workspaces/{workspace_id}/knowledge/cutover returns the workspace's sole live runtime
+version/generation pointer, source/evaluation/curation fingerprints, activation time, and bounded
+immutable attempt history. It is read-only; activation is an operational acceptance action and is
+not accepted from a client-authored readiness payload.
 GraphRAG exposes separate local Ollama or OpenAI API provider/model assignments for extraction,
 claims, community reports, and Local, Global, and DRIFT query methods. Entity and relationship
 extraction share Microsoft GraphRAG's single upstream `extract_graph` stage. Changing any of
 these assignments marks the GraphRAG projection stale without invalidating dense or sparse
 retrieval indexes.
 
-`GET /health` returns both a service map and component list. The system map renders these
-live states; an unavailable optional provider is shown as unavailable rather than healthy.
+`GET /health` returns both a service map and component list, including authenticated Neo4j
+connectivity. The system map renders these live states; an unavailable optional provider is shown
+as unavailable rather than healthy, while missing/unreachable Neo4j degrades the V2 service map.
 
 `POST /settings/providers/{provider}/validate` stores a supplied credential in the OS
 credential store and records only safe validation state. In Docker, when the host OS

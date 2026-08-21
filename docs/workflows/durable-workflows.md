@@ -32,10 +32,11 @@ is rebuilt by only one ingestion run at a time. Completed runs are soft-deleted 
 actor after the configured number of days.
 
 A GraphRAG reindex performs real worker-owned work, outside a SQLite transaction: it snapshots
-the workspace documents, materializes GraphRAG inputs, runs the canonical GraphRAG index and
-NetworkX projection, then mirrors entity/report/text-unit artifacts to Qdrant. Each stage writes
-its checkpoint only after that stage completes; failures leave the graph state `stale` and the
-workflow `failed` rather than reporting a synthetic completion.
+the workspace documents, materializes GraphRAG inputs, runs GraphRAG extraction and the NetworkX
+projection, atomically synchronizes the workspace/generation extracted layer to Neo4j at the
+`neo4j_sync` checkpoint, then mirrors entity/report/text-unit artifacts to Qdrant. Each stage writes
+its checkpoint only after that stage completes; failures—including Neo4j unavailability—leave the
+graph state `stale` and the workflow `failed` rather than reporting a synthetic completion.
 
 Upload ingestion v3 commits its workflow run and initial checkpoints (`parse`, `normalize`,
 logical-document detection, `chunk`, and `index`) before dispatching to Dramatiq. Logical-document
@@ -102,3 +103,15 @@ workspace-scoped conversation for subsequent provider synthesis.
 Phase 10 regression coverage verifies cancellation, retry, stale-run recovery, stage blocking,
 retention cleanup, deletion repair scheduling, and idempotent orphan reconciliation using the
 durable SQLite state machine.
+
+Query V2 `knowledge_reindex` uses a specialized generation-aware Dramatiq executor. It retains one
+durable run context, resumes the same candidate and completed per-chunk extraction artifacts,
+mirrors all eleven workflow/generation checkpoints, and releases its index lock on every terminal
+path. Activation is atomic only after source, typed knowledge, canonical graph, BM25, Qdrant, and
+GraphRAG report matching readiness.
+
+Phase 11 adds `research_runs` and `composition_runs` as independent durable state machines. A
+research run checkpoints goal decomposition, multiple Query IR/physical-plan slots, reconciled
+evidence packages, cross-source claims, and validation. A composition run checkpoints its outline,
+each section, consistency state, and sentence-level evidence map. Planner/composer calls receive
+detached snapshots between short SQLite transactions, and retries skip persisted sections.

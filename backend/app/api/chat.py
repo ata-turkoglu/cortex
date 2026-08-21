@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..accounting import totals as usage_totals
 from ..chat.service import (
     ask,
     backfill_default_conversation_titles,
@@ -89,9 +90,10 @@ class QueryDebug(BaseModel):
     confidence: float | None
     answer_state: str | None
     latency_ms: int | None
-    input_tokens: int
-    output_tokens: int
-    estimated_cost_usd: float
+    input_tokens: int | None
+    output_tokens: int | None
+    estimated_cost_usd: float | None
+    usage: dict[str, object]
     plan: dict[str, object] | None = None
     retrieval_queries: list[str] = Field(default_factory=list)
 
@@ -330,6 +332,7 @@ def debug(  # noqa: B008
         select(Message).where(Message.query_run_id == run.id, Message.role == "assistant")
     )
     metadata = json.loads(assistant.metadata_json or "{}") if assistant else {}
+    usage = usage_totals(session, workspace_id=workspace_id, query_run_id=run.id)
     return QueryDebug(
         id=run.id,
         routes=json.loads(run.selected_routes_json or "[]"),
@@ -337,9 +340,10 @@ def debug(  # noqa: B008
         confidence=run.route_confidence,
         answer_state=run.answer_state,
         latency_ms=run.latency_ms,
-        input_tokens=run.input_tokens,
-        output_tokens=run.output_tokens,
-        estimated_cost_usd=run.estimated_cost_usd,
+        input_tokens=usage["input_tokens"],
+        output_tokens=usage["output_tokens"],
+        estimated_cost_usd=float(usage["cost"]) if usage["cost"] is not None else None,
+        usage=usage,
         plan=metadata.get("query_plan"),
         retrieval_queries=metadata.get("retrieval_queries", []),
     )
