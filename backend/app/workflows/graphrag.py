@@ -12,6 +12,7 @@ from ..core.qdrant import get_qdrant_client
 from ..core.workspaces import WorkspaceContext
 from ..graphrag.adapter import GraphRAGAdapter
 from ..graphrag.input import GraphRAGInputMaterializer
+from ..graphrag.neo4j import sync_graph_to_neo4j
 from ..graphrag.qdrant import GraphRAGQdrantAdapter, mirror_graph_outputs
 from ..graphrag.reporting import record_stage_usage
 from ..graphrag.updates import (
@@ -197,6 +198,20 @@ def execute(run_id: str, run_with_lock_retry) -> bool:
                 )
 
         run_with_lock_retry(finish_index)
+
+        run_with_lock_retry(lambda session: start_external_step(session, run_id, "neo4j_sync"))
+        neo4j_result = sync_graph_to_neo4j(adapter, run_id)
+        run_with_lock_retry(
+            lambda session: finish_external_step(
+                session,
+                run_id,
+                "neo4j_sync",
+                generation=neo4j_result.graph.generation,
+                node_count=neo4j_result.graph.node_count,
+                relationship_count=neo4j_result.graph.relationship_count,
+                skipped_relationship_count=neo4j_result.skipped_relationship_count,
+            )
+        )
 
         run_with_lock_retry(lambda session: start_external_step(session, run_id, "mirror"))
         settings = get_settings()

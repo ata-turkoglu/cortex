@@ -37,6 +37,9 @@ class RetrievalTrace:
     reranker_input_count: int = 0
     reranker_output_count: int = 0
     final_evidence_count: int = 0
+    # Internal, sanitized identifiers for evaluation-stage diagnostics.  Production callers
+    # may omit this field; it intentionally carries no chunk text.
+    stage_rankings: dict[str, list[str | None]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -59,6 +62,7 @@ class RetrievalTrace:
                 "output_count": self.reranker_output_count,
             },
             "final_evidence_count": self.final_evidence_count,
+            "stage_rankings": self.stage_rankings,
         }
 
 

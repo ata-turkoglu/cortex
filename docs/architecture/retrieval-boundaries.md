@@ -1,5 +1,11 @@
 # Retrieval Boundary
 
+## Query V2 ownership
+
+`app/retrieval/` remains the implementation boundary for the V2 Retrieval Engine. It is not copied
+under `app/engines/`; typed cross-engine composition belongs to `app/engines/hybrid/`. The Phase 02
+package scaffold changes navigation only and leaves current retrieval behavior intact.
+
 LlamaIndex routes Hybrid Search and separate GraphRAG Local, Global, and DRIFT engines.
 Hybrid search combines workspace-filtered Qdrant dense retrieval, bm25s sparse retrieval,
 fusion, and a local BGE reranker. Embedding configuration changes require dense reindexing;

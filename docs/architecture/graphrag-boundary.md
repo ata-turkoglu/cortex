@@ -1,9 +1,30 @@
 # GraphRAG Boundary
 
-Microsoft GraphRAG is canonical and exposed through a dedicated adapter with explicit
-schemas and integration tests. NetworkX is secondary. Each workspace owns an isolated
-GraphRAG root, while Qdrant resource types remain separate and every operation uses the
-workspace filter.
+## Query V2 ownership
+
+`app/graphrag/` remains the Microsoft GraphRAG implementation and adapter boundary during V2. It is
+not copied under `app/engines/`; future typed composition belongs to `app/engines/hybrid/`, while
+the Neo4j-backed adapter work remains owned here. The Phase 02 scaffold changes navigation only.
+
+Microsoft GraphRAG is an extracted-knowledge producer exposed through a dedicated adapter with
+explicit schemas and integration tests; it is not canonical truth in V2. Each workspace owns an
+isolated GraphRAG root, while Qdrant resource types remain separate and every operation uses the
+workspace filter. Neo4j is the persistent/queryable canonical graph store; NetworkX remains a
+secondary visualization projection.
+
+## Neo4j-backed extraction path
+
+GraphRAG reindex workflow v2 adds a durable `neo4j_sync` checkpoint after native indexing and
+before Qdrant mirroring. `Neo4jBackedGraphRAGAdapter` converts entities, reports, text units,
+documents, and resolvable relations into provenance-bearing nodes/edges. The Cortex-owned
+`Neo4jGraphAdapter` atomically replaces only the current workspace's `ExtractedKnowledge` layer and
+never deletes `CanonicalKnowledge`. Every node and relation carries workspace, layer, generation,
+external ID, original GraphRAG attributes, and available logical-document provenance.
+
+Upstream Microsoft GraphRAG 2.6 has no native Neo4j storage provider. Cortex therefore preserves
+native Parquet/JSON as the Local/Global/DRIFT runtime source while synchronizing the extracted view
+to Neo4j through its adapter. `GraphRAGEngineOutput` is the non-final typed finding contract for the
+later Result & Evidence cutover; active V1 queries retain their existing behavior in this phase.
 
 ## Upstream compatibility and limitations
 
@@ -107,7 +128,8 @@ The native GraphRAG answer is final and carries route/provider/model/duration me
 regular Cortex synthesis worker skips it. Hybrid fallback is an explicit global policy and is off
 by default. DRIFT has configurable conservative depth, follow-up, primer, concurrency, and
 maximum-call limits. CLI usage fields unavailable from GraphRAG remain null in Cortex reports.
-The native GraphRAG artifacts and Qdrant mirror remain duplicated intentionally for V1.
+The native GraphRAG artifacts, Neo4j extracted layer, and Qdrant mirror coexist intentionally
+during the staged V2 migration.
 
 In Docker, the API never imports GraphRAG execution modules or invokes the GraphRAG CLI. It writes
 a durable `QueryRun`, submits its ID through Redis/Dramatiq, and waits only for the configured

@@ -56,6 +56,7 @@ class HybridRetriever:
         sparse = self.sparse_index.search(query, self.limits.bm25_top_k)
         candidates = reciprocal_rank_fusion(dense, sparse, limit=self.limits.fusion_candidate_limit)
         fusion_candidate_count = len(candidates)
+        fusion_candidate_ids = [item.document_id for item in candidates]
         reranker_executed = False
         reranker_input_count = 0
         reranker_output_count = 0
@@ -90,6 +91,12 @@ class HybridRetriever:
                 reranker_input_count=reranker_input_count,
                 reranker_output_count=reranker_output_count,
                 final_evidence_count=len(final),
+                stage_rankings={
+                    "bm25": [item.document_id for item in sparse],
+                    "dense": [item.document_id for item in dense],
+                    "fusion": fusion_candidate_ids,
+                    "final": [item.document_id for item in final],
+                },
             ),
         )
 

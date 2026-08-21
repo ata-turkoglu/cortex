@@ -128,6 +128,14 @@ def execute_workflow(run_id: str) -> None:
 
         execute_graphrag(run_id, run_with_lock_retry)
         return
+    if run and run.job_type == "knowledge_reindex":
+        from ..knowledge.production_executor import create_production_executor
+        from ..workflows.knowledge import execute as execute_knowledge
+
+        execute_knowledge(run_id, SessionLocal, create_production_executor(run.workspace_id))
+        logger.info("knowledge workflow completed: run_id=%s", run_id)
+        dispatch_queued_workflows("knowledge_reindex", limit=1)
+        return
     if run and run.job_type in {"ingestion", "dense_reindex"}:
         from ..retrieval.indexing import rebuild_active_workspace
 

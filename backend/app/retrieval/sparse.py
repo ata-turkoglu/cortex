@@ -3,8 +3,12 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .schemas import Evidence
+
+if TYPE_CHECKING:
+    from app.query.scope import GenerationScope
 
 
 @dataclass(frozen=True)
@@ -29,12 +33,14 @@ class WorkspaceBM25Index:
         workspace_id: str,
         documents: list[SparseDocument] | None = None,
         storage_path: Path | None = None,
+        generation_id: str | None = None,
     ) -> None:
         if not workspace_id:
             raise ValueError("workspace_id is required for sparse retrieval")
         self.workspace_id = workspace_id
         self.documents = documents or []
         self.storage_path = storage_path
+        self.generation_id = generation_id
         self._retriever = None
 
     def build(self, documents: list[SparseDocument] | None = None) -> None:
@@ -57,6 +63,7 @@ class WorkspaceBM25Index:
             self._retriever.save(self.storage_path, show_progress=False)
         payload = {
             "workspace_id": self.workspace_id,
+            "generation_id": self.generation_id,
             "documents": [
                 {
                     "chunk_id": item.chunk_id,
@@ -95,9 +102,36 @@ class WorkspaceBM25Index:
             )
             for item in payload["documents"]
         ]
-        index = cls(workspace_id, documents, storage_path)
+        index = cls(
+            workspace_id,
+            documents,
+            storage_path,
+            generation_id=payload.get("generation_id"),
+        )
         if documents:
             index._retriever = bm25s.BM25.load(storage_path, load_corpus=False)
+        return index
+
+    @classmethod
+    def load_generation(
+        cls, scope: "GenerationScope", candidates_root: Path
+    ) -> "WorkspaceBM25Index":
+        """Load only the immutable scope's candidate-owned sparse artifact."""
+        storage_path = candidates_root / scope.generation_id / "bm25"
+        try:
+            index = cls.load(scope.workspace_id, storage_path)
+        except FileNotFoundError as error:
+            raise RuntimeError("GENERATION_BM25_NOT_READY") from error
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+            raise RuntimeError("GENERATION_ARTIFACT_INVALID") from error
+        if index.generation_id != scope.generation_id:
+            raise RuntimeError("GENERATION_MISMATCH")
+        if any(
+            item.evidence.workspace_id != scope.workspace_id
+            or item.evidence.metadata.get("knowledge_generation_id") != scope.generation_id
+            for item in index.documents
+        ):
+            raise RuntimeError("GENERATION_MISMATCH")
         return index
 
     def search(self, query: str, limit: int) -> list[Evidence]:
@@ -118,3 +152,18 @@ class WorkspaceBM25Index:
             Evidence(**{**self.documents[int(index)].evidence.__dict__, "score": float(score)})
             for index, score in zip(results[0], scores[0], strict=True)
         ]
+
+
+@dataclass(frozen=True)
+class GenerationBM25Store:
+    """Generation-owned candidate BM25 reader with no legacy workspace fallback."""
+
+    data_root: Path
+
+    def search_generation(
+        self, scope: "GenerationScope", query: str, limit: int
+    ) -> list[Evidence]:
+        candidates_root = (
+            self.data_root / "workspaces" / scope.workspace_id / "knowledge-candidates"
+        )
+        return WorkspaceBM25Index.load_generation(scope, candidates_root).search(query, limit)
