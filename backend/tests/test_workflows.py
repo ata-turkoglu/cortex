@@ -59,6 +59,40 @@ def test_workflow_steps_events_and_workspace_lock_are_durable():
     assert len(session.query(WorkflowEvent).all()) >= 2
 
 
+def test_graphrag_reindex_includes_the_neo4j_sync_checkpoint():
+    session, workspace_id = session_with_workspace()
+    run = create_run(session, workspace_id, "graphrag_reindex")
+    steps = [
+        step.step_name
+        for step in session.query(WorkflowStepRun)
+        .filter_by(workflow_run_id=run.id)
+        .order_by(WorkflowStepRun.created_at, WorkflowStepRun.id)
+    ]
+    assert set(steps) == {"snapshot", "materialize", "index", "neo4j_sync", "mirror"}
+
+
+def test_knowledge_reindex_has_every_generation_readiness_checkpoint():
+    session, workspace_id = session_with_workspace()
+    run = create_run(session, workspace_id, "knowledge_reindex")
+    steps = {
+        step.step_name
+        for step in session.query(WorkflowStepRun).filter_by(workflow_run_id=run.id)
+    }
+    assert steps == {
+        "source_relational",
+        "entity_mention",
+        "identity_resolution",
+        "relation",
+        "event",
+        "temporal",
+        "claim_fact",
+        "canonical_graph",
+        "bm25",
+        "dense_qdrant",
+        "graphrag",
+    }
+
+
 def test_cancellation_and_restart_recovery_are_visible():
     session, workspace_id = session_with_workspace()
     run = create_run(session, workspace_id, "ingestion")

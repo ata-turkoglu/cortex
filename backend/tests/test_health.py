@@ -7,3 +7,4 @@ def test_health_has_service_map():
     response = TestClient(app).get("/api/v1/health")
     assert response.status_code == 200
     assert "sqlite" in response.json()["services"]
+    assert "neo4j" in response.json()["services"]

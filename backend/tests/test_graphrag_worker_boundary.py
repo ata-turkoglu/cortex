@@ -19,5 +19,8 @@ def test_worker_image_is_the_only_graphrag_dependency_target():
     dockerfile = (BACKEND_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
     assert "FROM query-deps AS backend-builder" in dockerfile
-    assert "uv sync --frozen --no-dev --group query --no-editable" in dockerfile
+    assert (
+        "uv sync --frozen --no-dev --group query --group retrieval --no-editable"
+        in dockerfile
+    )
     assert WORKER_DEPENDENCY_SYNC in dockerfile

@@ -11,6 +11,12 @@
 - Context and license inventory: `python scripts/ai-context/validate-context.py`,
   `python scripts/ai-context/check-context-freshness.py`, and
   `python scripts/license-report.py`.
+
+- Query V2 scoped navigation is declared through `.ai/project-map.yaml` `scoped_adapters`.
+  `generate-adapters.py` creates thin child `CLAUDE.md` files from each canonical `AGENTS.md`, and
+  `validate-context.py` rejects missing or stale scoped adapters. Context freshness assigns a
+  changed path to its most-specific mapped module so nested subsystem changes require their owning
+  document without mechanically requiring every parent module document.
 - The generated OpenAPI schema is contract-tested in the backend suite. API validation and
   handled HTTP errors now return the standard Cortex envelope with a correlation ID.
 

@@ -20,13 +20,37 @@ def test_migrations_apply_from_empty_database(tmp_path):
     assert result.returncode == 0, result.stderr
     connection = sqlite3.connect(database)
     indexes = connection.execute(
-        "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'document_versions'"
+        "SELECT name, sql FROM sqlite_master WHERE type = 'index' "
+        "AND tbl_name = 'document_versions'"
     ).fetchall()
+    knowledge_tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name IN ("
+            "'knowledge_generations', 'knowledge_stage_states', 'conversation_contexts', "
+            "'query_runtime_activations', 'query_cutover_attempts'"
+            ")"
+        ).fetchall()
+    }
+    context_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(conversation_contexts)")
+    }
     connection.close()
     assert any(
         name == "ux_document_versions_workspace_active_source_hash"
         and "WHERE deleted_at IS NULL" in sql
         for name, sql in indexes
+    )
+    assert knowledge_tables == {
+        "knowledge_generations",
+        "knowledge_stage_states",
+        "conversation_contexts",
+        "query_runtime_activations",
+        "query_cutover_attempts",
+    }
+    assert {"workspace_id", "conversation_id", "schema_version", "revision", "state_json"} <= (
+        context_columns
     )
 
 

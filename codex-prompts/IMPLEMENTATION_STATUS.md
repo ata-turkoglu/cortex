@@ -15,15 +15,148 @@ Codex must keep this file updated.
 - [x] Phase 9 — Settings and system map
 - [x] Phase 10 — Validation and hardening
 
+## Query Architecture V2
+
+- [x] Phase 01 — V2 architecture contract
+- [x] Phase 02 — Repository boundaries and AI navigation
+- [x] Phase 03 — Neo4j-backed Microsoft GraphRAG foundation
+- [x] Phase 04 — Canonical knowledge model, identity, and provenance
+- [x] Phase 05 — Indexing V2 / knowledge construction
+- [x] Phase 06 — Conversation context and semantic query understanding
+- [x] Phase 07 — Logical Query IR
+- [x] Phase 08 — Execution planning
+- [x] Phase 09 — Engine result and evidence layer
+- [x] Phase 10 — Structured and graph query engines
+- [x] Phase 11 — Reasoning, research, and composition
+- [x] Phase 12 — System map V2
+- [ ] Phase 13 — Full reindex and sharp cutover
+- [ ] Phase 14 — Evaluation and acceptance
+- [ ] Phase 15 — Final integration audit
+
 ## Current phase
 
-- Phase: Phase 4.4 — Entity-bound property facts and ownership span binding
-- Status: Complete in source; focused validation passed. Live regression remains blocked by the local backend's SQLite disk I/O startup failure.
-- Active validation target: None
-- Started: 2026-08-02
-- Last updated: 2026-08-15
+- Phase: Query Architecture V2 Phase 13 — Full Reindex and Sharp Cutover
+- Status: In progress. Durable fail-closed cutover gates are implemented and the local schema is
+  migrated; full two-workspace rebuild, V2 runtime evaluation, and activation have not passed.
+- Next target: Complete the real all-workspace rebuild and activate only after every gate passes.
+- Started: 2026-08-21
+- Last updated: 2026-08-21
 
 ## Completed work
+
+- Started Query Architecture V2 Phase 13: added workspace-scoped live runtime pointers and
+  immutable cutover-attempt audit records; exact-generation, fresh-corpus, schema/config/Neo4j/
+  runtime, curation-preservation, and versioned evaluation gates; a deterministic Neo4j fingerprint
+  over user-curated entities, aliases/tombstones, and identity operations; a read-only cutover
+  status API; migration 0020; focused failure-safety, isolation, curation, API, and migration tests;
+  and the corresponding System Map/architecture contracts. Rejected attempts leave V1 unchanged.
+  No V2 runtime activation or full-corpus completeness is claimed yet.
+
+- Completed Query Architecture V2 Phase 12: replaced the displayed V1 intent/route-led query and
+  document-flow diagrams with an exported runtime architecture manifest containing all eleven
+  Query V2 and thirteen Indexing V2 subsystem groups. Each group names its real implementation
+  boundary, canonical documentation, and scoped AGENTS/CLAUDE context. Execution Planning is a
+  separate parent for Structured Query, Knowledge Graph, Retrieval, and GraphRAG; all engine
+  outputs converge through Result & Evidence before Reasoning & Composition and Answer. Indexing
+  separates canonical KG Build from the BM25, Dense/Qdrant, and GraphRAG projections and converges
+  only at Generation/Readiness. The detail panel exposes boundary, guarantee, documentation, and
+  AI context. V1 chat remains active; Phase 13 still owns the full rebuild and sharp cutover.
+- Completed Query Architecture V2 Phase 11: added versioned durable `ResearchCheckpoint` and
+  `CompositionCheckpoint` contracts backed by workspace-isolated, optimistic-revision
+  `research_runs` and `composition_runs`. Research supports dependency-ordered decomposition into
+  multiple Logical Query IR/physical-plan slots, reconciled evidence-package collection,
+  generation isolation, cross-source grounded claims, explicit partial/unsupported state, and
+  detached planner execution between short transactions. Composition supports contiguous outlines,
+  independently resumable sections, paragraph/sentence provenance, collected-evidence validation,
+  consistency gates, and final assembly whose sentence-evidence map must exactly match the internal
+  draft. V1 chat is unchanged; Phase 12 still owns the full V2 System Map and Phase 13 owns cutover.
+- Completed Query Architecture V2 Phase 05A production delivery: registered the specialized
+  `knowledge_reindex` worker executor; added same-generation retry, stale-lock recovery, durable
+  per-chunk extraction artifacts, strict OpenAI Structured Outputs, bounded exact-span repair and
+  assertion-level rejection, conservative identity, typed canonical promotion, generation-scoped
+  BM25/Qdrant/GraphRAG projections, and readiness API/UI. Live acceptance on the selected 19-chunk
+  workspace activated generation `8d4665b6-7426-4abd-a95a-6df02cddc20a` only after all eleven
+  checkpoints were ready (251 entities, 32 relations, 8 events, 14 temporals, 75 claims). This is
+  not the Phase 13 full-corpus rebuild or Query V2 runtime cutover.
+
+- Completed Query Architecture V2 Phase 10: added deterministic structured execution for canonical
+  enumeration, filter/join/distinct/group/count and distinct count, min/max/sum/average,
+  rank/top-N, sort/limit/project, temporal filter, existence, and population comparison. Added a
+  concrete bounded canonical-population reader with exact candidate/confirmed counts and explicit
+  unresolved/not-safely-enumerable state instead of approximate or top-k completeness. Added the
+  canonical Knowledge Graph Engine for evidence-bound identity lookup, relation traversal through
+  ten hops, event participation, temporal constraints, provenance traversal, and conflict
+  inspection. Extended the Cortex Neo4j adapter to materialize and query workspace/generation-bound
+  canonical relation, participant, and temporal links while preserving exact source lineage. Both
+  engines emit Phase 09 `EngineResult`, perform no SQLite/model calls, cannot author final prose,
+  and remain disconnected from V1 chat. No V2 indexing cutover, production end-to-end engine run,
+  readiness UI, or corpus completeness is claimed.
+- Completed Query Architecture V2 Phase 09: added versioned `EngineResult` and `ReasoningPackage`
+  contracts for structured rows/entities, graph paths, aggregates, exact text evidence, GraphRAG
+  findings, claims/facts, provenance, completeness, confidence, ambiguity, conflicts, failures,
+  citations, and sanitized traces. Added physical-plan step/capability binding; workspace and
+  generation validation; detached trusted-source exact-substring verification; fail-closed
+  conflicting evidence-ID handling; compatible result/evidence deduplication; disagreement
+  preservation; deterministic evidence ranking and exact citation materialization; mandatory-step,
+  projection, candidate-count, and completeness validation; and explicit grounded,
+  corpus-complete, partial, unsupported, and ambiguous states. Engine and reasoning schemas forbid
+  final-answer fields, and reconciliation performs no external call or persistence. V1 chat and the
+  current System Map remain unchanged; no V2 indexing cutover, production engine acceptance,
+  readiness UI, or corpus completeness is claimed.
+- Completed Query Architecture V2 Phase 08: added versioned, typed physical execution DAGs with
+  explicit capability, dependency, I/O, workspace/generation/projection readiness, coverage,
+  failure/fallback, and trace contracts. Added correctness-first capability selection in the fixed
+  evidence/coverage/reasoning/latency/cost order; canonical structured operations; graph traversal,
+  multi-hop and temporal reasoning; hybrid/semantic retrieval; GraphRAG Local/Global/DRIFT and
+  community context; contradiction analysis; long-form research; ambiguity candidates; and a
+  mandatory evidence reconciliation root. Exhaustive work fails closed on readiness or generation
+  mismatch and cannot fall back to grounded retrieval. Planning performs no database, model, or
+  engine calls. V1 chat and the current System Map remain unchanged; no V2 indexing cutover,
+  production engine acceptance, readiness UI, or corpus completeness is claimed.
+- Completed Query Architecture V2 Phase 07: added versioned `LogicalQueryIR` schema `1.0` with all
+  nineteen required discriminated operator families, composable ambiguity candidate DAGs, explicit
+  workspace scope, temporal predicates, coverage, output projection, evidence requirements, and
+  governed custom capabilities. Added fail-closed schema/DAG/type/upstream-lineage/workspace/
+  vocabulary/coverage/evidence validation, schema-governed dynamic relations, meaning-preserving
+  safe repair, and deterministic Phase 06 semantic lowering. Exhaustive list/count/group/min/max/
+  rank/top-N/population comparison cannot use discovery/top-k coverage or weak provenance. V1 chat
+  and the current System Map remain unchanged pending later planning and sharp cutover phases.
+- Completed Query Architecture V2 Phase 06: added durable, revisioned conversation-local context
+  state isolated by workspace and conversation; bounded detached history snapshots; strict source
+  message validation; a versioned semantic schema with no V2 `intent` or engine choice; configurable
+  simple/standard/complex planner tiers; strict Responses JSON Schema output; bounded repair and
+  state/confidence escalation; explicit ambiguity/unresolved outcomes; typed event/document/mentioned,
+  range, before/after, approximate, and partial temporal semantics; and deterministic follow-up
+  entity/temporal carry-over. Updated the generated settings contract and architecture/context docs.
+  V1 chat remains unchanged, and neither V2 indexing cutover nor corpus completeness is claimed.
+- Completed Query Architecture V2 Phase 04: added the stable upper ontology, opaque UUID canonical
+  identities, original mentions, aliases, conservative evidence-based resolution, reversible
+  merge/split and alias history, `user_curated > validated > extracted` precedence, exact-span
+  provenance, typed relations/events/temporal expressions, evidence-gated claim/fact transitions,
+  validators, and explicit retained contradictions. Extended the workspace-scoped Neo4j adapter
+  with precedence-safe canonical/entity/claim persistence, evidence lineage, curation operations,
+  and conflict links; added generated-contract REST endpoints and a `/knowledge` curation UI for
+  merge, split, alias add/remove, evidence inspection, and history. Updated `/system-map` and the
+  owning architecture/API/frontend/context documentation while keeping Phase 05 automatic
+  construction explicitly inactive.
+- Completed Query Architecture V2 Phase 03: pinned Neo4j Community and
+  its official Python driver; added authenticated Compose/config/health integration; introduced the
+  only permitted workspace-scoped Neo4j driver boundary; separated `ExtractedKnowledge` from
+  `CanonicalKnowledge`; added atomic, generation-bearing GraphRAG extraction synchronization and a
+  non-final typed finding envelope; versioned the durable GraphRAG workflow with `neo4j_sync`; and
+  updated `/system-map`, architecture, workflow, AI context, and licensing documentation. Live
+  Compose acceptance verified authenticated health, schema creation, GraphRAG persistence, and
+  destructive-replacement isolation across two workspaces.
+- Completed Query Architecture V2 Phase 02: added first-class `query`, `knowledge`, `engines`,
+  and `reasoning` ownership packages with child boundaries, canonical scoped instructions, generated
+  thin Claude adapters, project-map/index routing, and a documented no-duplication map. Existing
+  `retrieval` and `graphrag` implementations remain their V2 engine boundaries, while active V1
+  imports and runtime behavior remain unchanged.
+- Completed Query Architecture V2 Phase 01: established the binding target architecture for
+  Conversation Context, Query Understanding, Logical Query IR, Execution Planning, all four
+  execution engines, the common Result & Evidence Layer, Reasoning & Composition, Answer Engine,
+  canonical knowledge construction, provenance, generation readiness, and sharp-cutover policy.
+  Active V1 documentation and `/system-map` remain explicitly current-state until implementation.
 
 - Created the Git-backed Cortex monorepo skeleton and runtime-data ignore policy.
 - Added canonical/scoped AI instructions, project map, adapter generator, context validation, and freshness checks.
@@ -114,8 +247,19 @@ Codex must keep this file updated.
   guard and regeneration outcomes.
 
 ## In progress
-
-- No active implementation phase.
+- Phase 13 full rebuild delivery completed for both active local workspaces: each candidate has one
+  active exact-generation checkpoint set after real BM25, Qdrant, and GraphRAG execution. The V2
+  Answer Engine rendering boundary now accepts only reconciled ReasoningPackage input; the live
+  orchestration/evaluation gate and sharp runtime activation remain incomplete.
+- Phase 13 now has dormant internal dense and sparse execution reads: an existing physical plan
+  resolves one immutable GenerationScope, uses generation-bound Qdrant plus only the matching
+  candidate-owned BM25 artifact, and emits separate in-memory result counts with logical sparse
+  artifact identity. Workspace, generation, embedding, mismatch, no-fallback, and pointer-snapshot
+  tests pass. V1 remains live; fusion, canonical EngineResult/provenance, exact span validation,
+  reconciliation, AnswerEngine delivery, uploaded-file acceptance, and atomic activation remain
+  pending.
+- Added a deterministic golden-question evaluation subsystem with versioned synthetic suites,
+  production chat orchestration, layer-specific diagnostics, retrieval metrics, and CLI output.
 - Completed structured query planning, workspace-evidence entity resolution, bounded resolved-name
   retrieval expansion, operation-aware evidence selection, synchronous OpenAI hybrid synthesis,
   and query-plan debug output. COUNT/LIST answers explicitly retain aggregation/completeness
@@ -124,11 +268,33 @@ Codex must keep this file updated.
 
 ## Blocking issues
 
-- No implementation blocking issue remains. A live GraphRAG run requires user-provisioned
-  provider credentials and model configuration; this is an operational prerequisite, not a
-  code or deployment blocker.
+- Phase 13 live acceptance is still open: both active local workspaces now have rebuilt active
+  generations, but V2 runtime orchestration, evaluation, and the atomic pointer change must pass
+  before Phase 13 can be marked complete. V1 chat remains the active runtime.
+- Phase 13 selected-model planner smoke against a rebuilt workspace returned a valid unresolved
+  understanding for an ordinary archive-summary request because the detached planner has no
+  workspace corpus/schema awareness or retrieval execution bridge. This is an activation blocker:
+  routing live chat to V2 would currently turn ordinary questions into clarification failures.
 
 ## Validation history
+
+| 2026-08-21 | Query Architecture V2 Phase 13 cutover foundation | Ruff; 21 focused cutover/API/Neo4j/generation tests; 2 fresh/upgrade migration tests; local schema revision 0020; live Neo4j curation-fingerprint smoke; 9 frontend/System Map tests; generated OpenAPI types; frontend production build/lint; generated 26 AI-context adapters; context validation/freshness; git diff --check | Passed (existing Vite bundle-size advisory; full rebuild/runtime activation still open) |
+| 2026-08-21 | Query Architecture V2 Phase 13 planner live smoke | One selected-model, detached semantic-planner request against a rebuilt workspace | Valid strict-schema output, but unresolved; blocked because no workspace corpus/schema awareness or retrieval execution bridge |
+| 2026-08-21 | Query Architecture V2 Phase 13 generation-bound dense skeleton | Immutable GenerationScope; dormant physical-plan executor; generation-bound Qdrant read and adversarial execution isolation tests | Passed (internal only; V1 live; BM25/reconciliation/activation pending) |
+| 2026-08-21 | Query Architecture V2 Phase 13 generation-bound BM25 read | Candidate-owned BM25 loader/identity validation; dormant sparse adapter; sparse isolation, no-fallback, mismatch, and pointer-snapshot tests; dense executor and retrieval regression | Passed (internal only; V1 live; fusion/reconciliation/activation pending) |
+| 2026-08-21 | Query Architecture V2 Phase 12 | Exported 24-group runtime manifest acceptance; 2 focused System Map tests; 9 complete frontend tests; production TypeScript/Vite build; ESLint; generated 26 AI-context adapters; context validation/freshness; `git diff --check` | Passed (existing Vite bundle-size advisory only) |
+| 2026-08-18 | Query Architecture V2 Phase 11 | Ruff; 97 focused backend regression tests across Phases 05A and 06-11, including four durable research/composition tests and migration acceptance; final 18-test Phase 05A/11 gate; 8 frontend tests; frontend production build/lint; generated context adapters; context validation/freshness; `git diff --check` | Passed (existing Vite bundle-size warning only) |
+| 2026-08-18 | Query Architecture V2 Phase 05A production delivery | Selected-model live 19-chunk candidate completed all eleven readiness stages and activated generation `8d4665b6-7426-4abd-a95a-6df02cddc20a`; 392 evidence spans, 251 mentions/canonical entities, 32 relations, 8 events, 14 temporals, 75 claims, 19 BM25 chunks, 19 Qdrant chunks, and GraphRAG ready; 2 opt-in live Neo4j tests; focused backend/API and frontend readiness tests | Passed (temporary HTTP smoke check was not run; no V2 cutover or corpus-completeness claim) |
+| 2026-08-18 | Query Architecture V2 Phase 10 | Ruff; 83 focused backend tests covering detached canonical populations, surname filtering, exact list/count/distinct/group/min/max/rank/top-N/projection/population comparison, bounded uncertainty, population adapter scope, EngineResult evidence, canonical identity resolution, multi-hop/event/temporal/provenance/conflict graph execution, Neo4j canonical edge materialization and workspace/generation/hop bounds, Phase 06–09 and V1 query regression; 8 frontend/System Map tests; context validation/freshness; `git diff --check` | Passed |
+| 2026-08-18 | Query Architecture V2 Phase 09 | Ruff; 55 focused backend tests covering EngineResult/ReasoningPackage answer ownership, planned-step binding, workspace/generation isolation, exact-span traceability, trusted-source validation, compatible deduplication, disagreement preservation, GraphRAG finding grounding, evidence ranking, completeness/projection gates, ambiguity and partial-failure visibility, Phase 06–08 and V1 query regression; 8 frontend/System Map tests; context validation/freshness; `git diff --check` | Passed |
+| 2026-08-18 | Query Architecture V2 Phase 08 | Ruff; 41 focused backend tests covering typed physical DAGs, exhaustive generation/projection readiness, workspace isolation, dependent and parallel multi-engine composition, GraphRAG modes, temporal/contradiction/research capabilities, ambiguity, fallback quality ordering, Phase 06/07 and V1 query regression; 8 frontend/System Map tests; context validation/freshness; `git diff --check` | Passed |
+| 2026-08-18 | Query Architecture V2 Phase 07 | Ruff; 41 focused backend tests covering every operator family, schema/DAG/type/workspace/vocabulary/coverage/evidence rejection, ambiguity, temporal lowering, safe repair, Phase 06 and V1 query regression; System Map test; context validation/freshness; `git diff --check` | Passed (existing Pydantic warning only) |
+| 2026-08-18 | Query Architecture V2 Phase 06 | Ruff; 36 focused backend tests including migration, workspace/conversation isolation, strict semantic schema, repair/escalation, temporal/carry-over and V1 chat regression; generated OpenAPI client; System Map test; frontend build/lint; context validation/freshness; `git diff --check` | Passed (existing Pydantic and bundle-size warnings only) |
+| 2026-08-18 | Query Architecture V2 Phase 05 foundation | Ruff; 31 focused backend tests including empty migration, generation mismatch/failure/workspace isolation and exact-span extraction; 8 frontend tests; context validation; `git diff --check` | Passed |
+| 2026-08-18 | Query Architecture V2 Phase 04 | Ruff; 65 focused backend tests; live Neo4j precedence/curation/exact-provenance/conflict acceptance; regenerated OpenAPI client; 8 frontend tests; frontend build/lint; context validation/freshness; `git diff --check` | Passed (existing Pydantic and bundle-size warnings only) |
+| 2026-08-18 | Query Architecture V2 Phase 03 | `neo4j:2026.07.1` Compose health; authenticated live GraphRAG sync/schema/two-workspace isolation; Ruff; 49 focused tests plus opt-in live acceptance; System Map test; frontend build/lint; `uv lock --check`; quiet Compose config; context validation/freshness; `git diff --check` | Passed (existing Pydantic and bundle-size warnings only) |
+| 2026-08-18 | Query Architecture V2 Phase 02 | scoped package import smoke; 33 focused query/retrieval/GraphRAG tests; context validation/freshness; `git diff --check` | Passed (2 existing warnings) |
+| 2026-08-17 | Query Architecture V2 Phase 01 | `python scripts/ai-context/validate-context.py` and `git diff --check` | Passed |
 
 | 2026-08-15 | Phase 4.4 entity-bound facts | focused ruff/pytest, context validation, and `git diff --check` | Passed (31 focused tests; existing upstream Pydantic warning) |
 

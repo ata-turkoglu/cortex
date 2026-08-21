@@ -1,52 +1,114 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "../api/client";
-import { ASystemMap } from "./ASystemMap";
+import { ASystemMap, SYSTEM_MAP_V2_MANIFEST } from "./ASystemMap";
+
+const queryGroups = [
+  "Conversation Context",
+  "Query Understanding",
+  "Query IR",
+  "Execution Planning",
+  "Structured Query",
+  "Knowledge Graph",
+  "Retrieval",
+  "GraphRAG",
+  "Result & Evidence",
+  "Reasoning & Composition",
+  "Answer",
+];
+
+const indexingGroups = [
+  "Source Processing",
+  "Document Structure",
+  "Entity / Mention",
+  "Identity",
+  "Relation",
+  "Event",
+  "Temporal",
+  "Claim / Fact",
+  "KG Build",
+  "BM25",
+  "Dense / Qdrant",
+  "GraphRAG",
+  "Generation / Readiness",
+];
 
 describe("ASystemMap", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("renders live health and switches detailed map tabs", async () => {
+  it("declares every V2 subsystem with a real boundary, docs, and scoped context", () => {
+    expect(SYSTEM_MAP_V2_MANIFEST.query.map((item) => item.label)).toEqual(
+      queryGroups,
+    );
+    expect(SYSTEM_MAP_V2_MANIFEST.indexing.map((item) => item.label)).toEqual(
+      indexingGroups,
+    );
+
+    for (const subsystem of [
+      ...SYSTEM_MAP_V2_MANIFEST.query,
+      ...SYSTEM_MAP_V2_MANIFEST.indexing,
+    ]) {
+      expect(subsystem.boundary.startsWith("backend/")).toBe(true);
+      expect(subsystem.documentation.startsWith("docs/")).toBe(true);
+      expect(subsystem.context).toContain("AGENTS.md");
+      expect(subsystem).not.toHaveProperty("intent");
+    }
+
+    const graph = SYSTEM_MAP_V2_MANIFEST.query.find(
+      (item) => item.label === "Knowledge Graph",
+    );
+    const graphrag = SYSTEM_MAP_V2_MANIFEST.query.find(
+      (item) => item.label === "GraphRAG",
+    );
+    expect(graph?.boundary).toContain("knowledge/graph");
+    expect(graphrag?.boundary).toBe("backend/app/graphrag/");
+    expect(graphrag?.guarantee).toContain("not canonical truth");
+    const planning = SYSTEM_MAP_V2_MANIFEST.query.find(
+      (item) => item.label === "Execution Planning",
+    );
+    const retrieval = SYSTEM_MAP_V2_MANIFEST.query.find(
+      (item) => item.label === "Retrieval",
+    );
+    expect(planning?.boundary).toContain("execution.py");
+    expect(retrieval?.guarantee).toContain("knowledge generation");
+  });
+
+  it("renders live health and the V2 query and indexing manifests", async () => {
     vi.spyOn(apiClient, "getHealth").mockResolvedValue({
       status: "healthy",
       services: { backend: "healthy", worker: "healthy" },
     });
     vi.spyOn(apiClient, "diagnostics").mockResolvedValue({
-      windows: { data_path: "D:\\Cortex", ollama_base_url: "http://localhost" },
+      windows: { data_path: "D:/Cortex", ollama_base_url: "http://localhost" },
       workflows: { interrupted: 0, failed: 0, repairing: 0 },
       reconciliation: { state: "idle", message: "idle" },
     });
+
     render(<ASystemMap />);
-    await waitFor(() => expect(screen.getAllByText(/backend/).length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getAllByText(/recovery/).length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole("tab", { name: "Belge akışı" }));
-    expect(screen.getByText("Düz metin kaynağı mı?")).toBeInTheDocument();
-    expect(screen.getByText("Docling ayrıştırma")).toBeInTheDocument();
-    expect(screen.getByText("Doğrudan UTF-8 okuma")).toBeInTheDocument();
-    expect(screen.getByText("Kaynak dosya kaydı · Disk")).toBeInTheDocument();
-    expect(screen.getByText("Normalize Markdown · Disk")).toBeInTheDocument();
-    expect(screen.getByText("Chunk kayıtları · SQLite")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getAllByText(/backend/).length).toBeGreaterThan(0),
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Indexing V2" }));
+    for (const label of indexingGroups)
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     expect(
-      screen.getByText("Heading 2 → mantıksal belgeler · SQLite"),
+      screen.getByText((content) =>
+        content.includes(
+          "separate BM25, Dense/Qdrant, and GraphRAG projections",
+        ),
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Replacement isteği mi?")).toBeInTheDocument();
-    expect(screen.getByText("Ingestion run · SQLite")).toBeInTheDocument();
-    expect(screen.getByText("Index checkpoint · SQLite")).toBeInTheDocument();
-    expect(screen.getByText("Qdrant dense vektörleri")).toBeInTheDocument();
-    expect(screen.getByText("GraphRAG reindex workflow")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Sorgu akışı" }));
-    expect(screen.getAllByText("Dense retrieval").length).toBeGreaterThan(0);
-    expect(screen.getByText(/Kayıt kaynağı: Qdrant Vector DB/)).toBeInTheDocument();
-    expect(screen.getByText(/Kayıt kaynağı: workspace’e özel bm25s cache dosyaları/)).toBeInTheDocument();
-    expect(screen.getByText("Graph DRIFT")).toBeInTheDocument();
-    expect(screen.getAllByText("GraphRAG query job").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("GraphRAG Worker").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("GraphRAG final answer").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Query V2" }));
+    for (const label of queryGroups)
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/converge only through Result & Evidence/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("GraphRAG final answer")).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("tab", { name: /Arka plan/ }));
     expect(screen.getByText("Atomik checkpoint")).toBeInTheDocument();
-    expect(screen.getByText(/SSE olay/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: /Sorgu/ }));
-    expect(screen.getByText("Yanıt biçimi niyeti")).toBeInTheDocument();
-    expect(screen.getByText("Belgeye göre grupla")).toBeInTheDocument();
   });
 });

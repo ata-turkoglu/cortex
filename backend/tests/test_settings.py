@@ -8,10 +8,20 @@ from app.main import app
 from app.models import GlobalSettings
 
 
-def test_provider_status_never_returns_secret():
+def test_provider_status_never_returns_secret(monkeypatch):
+    monkeypatch.setattr("app.api.settings.OpenAIProvider.configured", lambda _self: False)
     body = TestClient(app).get("/api/v1/settings/providers").json()
     assert "openai_api_key" not in str(body)
     assert body["providers"][0]["configured"] is False
+
+
+def test_runtime_settings_never_return_neo4j_credentials():
+    engine = create_engine("sqlite:///:memory:")
+    GlobalSettings.__table__.create(engine)
+    with Session(engine) as session:
+        values = load_runtime_settings(session)
+    assert "neo4j_password" not in values
+    assert "neo4j_uri" not in values
 
 
 def test_ollama_model_pull_rejects_an_invalid_model_name():
