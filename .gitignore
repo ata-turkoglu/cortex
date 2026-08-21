@@ -49,6 +49,8 @@ data/sqlite/
 .env.*
 !.env.example
 /notes
+backend/evaluation/local/
+backend/evaluation/results/
 .vscode/
 .idea/
 *.log
@@ -57,3 +59,5 @@ data/sqlite/
 frontend/src/api/generated/
 reports/licenses/
 frontend/src/api/generated/*.tmp
+/codex-prompts/
+/uploaded_files/
