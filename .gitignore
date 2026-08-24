@@ -27,6 +27,8 @@ backend/.coverage
 backend/.mypy_cache/
 backend/.test-tmp-*/
 tmp-pytest-*/
+/.pytest-*/
+backend/.pytest-*/
 *.sqlite
 *.sqlite3
 *.db
@@ -67,5 +69,10 @@ frontend/src/api/generated/*.tmp
 /backend/app/evaluation/
 /backend/evaluation/
 /backend/tests/test_*.py
+!/backend/app/evaluation/
+!/backend/app/evaluation/*.py
+!/backend/tests/test_query_v2_uploaded_file_acceptance.py
+!/backend/tests/test_query_v2_graphrag_bridge.py
 /frontend/src/**/*.test.tsx
 /docs/architecture/evaluation.md
+!/docs/architecture/evaluation.md
