@@ -8,7 +8,22 @@ from sqlalchemy.orm import sessionmaker
 from app.chat.service import ask, create_conversation, lookup_target, select_routes
 from app.models import Base, Chunk, Document, DocumentVersion, Workspace
 from app.retrieval.document_lookup import build_document_context, group_evidence_by_document
-from app.retrieval.schemas import Evidence
+from app.retrieval.schemas import AnswerState, Evidence, RetrievalResult, RetrievalTrace
+
+
+class StaticRetrievalRuntime:
+    """Deterministic V1 retrieval seam for document-list presentation tests."""
+
+    def __init__(self, evidence: tuple[Evidence, ...]) -> None:
+        self.evidence = evidence
+
+    def search(self, _session, _workspace_id, _query, *, final_evidence_limit=None):
+        return RetrievalResult(
+            self.evidence,
+            AnswerState.GROUNDED,
+            trace=RetrievalTrace(final_evidence_count=len(self.evidence)),
+        )
+
 
 LOOKUP_QUERIES = (
     "Hüseyin Hüsnü Subaşı hangi belgelerde geçmektedir?",
@@ -42,7 +57,9 @@ def test_document_grouping_deduplicates_chunks_and_preserves_metadata():
     }
     evidence = [
         Evidence("w", "source", "Hüseyin malik.", 0.9, "d", "v", "c1", metadata=metadata),
-        Evidence("w", "source", "Hüseyin mal sahibi.", 0.8, "d", "v", "c2", metadata=metadata),
+        Evidence(
+            "w", "source", "Hüseyin mal sahibi.", 0.8, "d", "v", "c2", metadata=metadata
+        ),
     ]
     documents = group_evidence_by_document(evidence, exact_text="Hüseyin")
     assert len(documents) == 1
@@ -65,6 +82,7 @@ def test_chat_returns_one_concise_row_and_citation_per_document():
             updated_at=now,
         )
     )
+    evidence: list[Evidence] = []
     for index, title in enumerate(("B-2/ı", "A-21/b")):
         document_id, version_id = str(uuid4()), str(uuid4())
         session.add(
@@ -95,17 +113,37 @@ def test_chat_returns_one_concise_row_and_citation_per_document():
         # More chunks than the document limit verifies that one document cannot crowd
         # another document out of an entity-list result.
         for ordinal in range(55 if index == 0 else 1):
+            chunk_id = str(uuid4())
+            content = "Hüseyin Hüsnü Subaşı tapu kaydında mal sahibi olarak geçer."
+            metadata = {
+                "document_code": title,
+                "title": title,
+                "heading": "Tapu sahibi",
+                "page": str(ordinal + 1),
+            }
             session.add(
                 Chunk(
-                    id=str(uuid4()),
+                    id=chunk_id,
                     workspace_id=workspace_id,
                     document_id=document_id,
                     document_version_id=version_id,
                     ordinal=ordinal,
-                    content="Hüseyin Hüsnü Subaşı tapu kaydında mal sahibi olarak geçer.",
+                    content=content,
                     content_hash=str(uuid4()),
-                    metadata_json=json.dumps({"heading": "Tapu sahibi", "page": ordinal + 1}),
+                    metadata_json=json.dumps(metadata),
                     created_at=now,
+                )
+            )
+            evidence.append(
+                Evidence(
+                    workspace_id,
+                    title,
+                    content,
+                    1.0,
+                    document_id,
+                    version_id,
+                    chunk_id,
+                    metadata=metadata,
                 )
             )
     session.commit()
@@ -116,6 +154,7 @@ def test_chat_returns_one_concise_row_and_citation_per_document():
         conversation.id,
         "Hüseyin Hüsnü Subaşı hangi belgelerde geçmektedir?",
         "automatic",
+        retrieval_runtime=StaticRetrievalRuntime(tuple(evidence)),
     )
     citations = json.loads(answer.citations_json)
     metadata = json.loads(answer.metadata_json)

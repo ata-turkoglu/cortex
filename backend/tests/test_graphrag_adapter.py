@@ -57,6 +57,30 @@ def test_graphrag_routes_remain_distinct_and_networkx_is_rebuildable(tmp_path):
     assert (root / "networkx.graphml").exists()
 
 
+@pytest.mark.parametrize("missing_identity", ("workspace_id", "knowledge_generation_id"))
+def test_v2_graphrag_findings_require_artifact_workspace_and_generation(tmp_path, missing_identity):
+    root = tmp_path / "workspace" / "graphrag"
+    root.mkdir(parents=True)
+    attributes = {
+        "workspace_id": "workspace-a",
+        "knowledge_generation_id": "generation-a",
+        "document_id": "document-a",
+        "document_version_id": "version-a",
+        "logical_document_id": "logical-a",
+        "chunk_id": "chunk-a",
+        "content_hash": "hash-a",
+    }
+    attributes.pop(missing_identity)
+    (root / "entities.json").write_text(
+        json.dumps([{"id": "a", "text": "trusted finding", "attributes": attributes}]),
+        encoding="utf-8",
+    )
+
+    assert GraphRAGAdapter("workspace-a", root).query_findings(
+        GraphRoute.LOCAL, "trusted", "generation-a"
+    ) == ()
+
+
 def test_missing_graph_is_an_explicit_fallback(tmp_path):
     adapter = GraphRAGAdapter("workspace-a", tmp_path / "missing")
     result = adapter.query(GraphRoute.LOCAL, "anything")

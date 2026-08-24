@@ -44,16 +44,23 @@ def test_graph_explorer_resolves_graph_rag_human_readable_relationship_ids(tmp_p
     root = tmp_path / "graphrag"
     root.mkdir()
     (root / "entities.json").write_text(
-        json.dumps([
-            {"id": "uuid-a", "attributes": {"human_readable_id": "0", "title": "Ankara"}},
-            {"id": "uuid-b", "attributes": {"human_readable_id": "1", "title": "Türkiye"}},
-        ]),
+        json.dumps(
+            [
+                {"id": "uuid-a", "attributes": {"human_readable_id": "0", "title": "Ankara"}},
+                {"id": "uuid-b", "attributes": {"human_readable_id": "1", "title": "Türkiye"}},
+            ]
+        ),
         encoding="utf-8",
     )
     (root / "relationships.json").write_text(
-        json.dumps([
-            {"id": "relationship-0", "attributes": {"source": "0", "target": "1", "relationship": "located_in"}},
-        ]),
+        json.dumps(
+            [
+                {
+                    "id": "relationship-0",
+                    "attributes": {"source": "0", "target": "1", "relationship": "located_in"},
+                },
+            ]
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(
