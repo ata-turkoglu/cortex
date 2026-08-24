@@ -4,19 +4,25 @@ import { apiClient } from "../api/client";
 import { ASystemMap, SYSTEM_MAP_V2_MANIFEST } from "./ASystemMap";
 
 const queryGroups = [
+  "POST /chat",
+  "V2 Query Service",
   "Conversation Context",
-  "Query Understanding",
-  "Query IR",
-  "Execution Planning",
-  "Structured Query",
+  "Semantic Planner",
+  "Canonical Entity Resolution",
+  "Governed Vocabulary Validation",
+  "Deferred V2 Semantics",
+  "Logical IR",
+  "Physical Plan / GenerationScope",
+  "StructuredQueryEngine / Canonical Population",
+  "Governed Filter / CountNode",
   "Knowledge Graph",
-  "Retrieval",
+  "Dense + Sparse / RRF",
   "GraphRAG",
-  "Result & Evidence",
-  "Reasoning & Composition",
-  "Answer",
+  "Final-root Reconciliation",
+  "ReasoningPackage",
+  "AnswerEngine",
+  "Citations / Response",
 ];
-
 const indexingGroups = [
   "Source Processing",
   "Document Structure",
@@ -64,10 +70,10 @@ describe("ASystemMap", () => {
     expect(graphrag?.boundary).toBe("backend/app/graphrag/");
     expect(graphrag?.guarantee).toContain("not canonical truth");
     const planning = SYSTEM_MAP_V2_MANIFEST.query.find(
-      (item) => item.label === "Execution Planning",
+      (item) => item.label === "Physical Plan / GenerationScope",
     );
     const retrieval = SYSTEM_MAP_V2_MANIFEST.query.find(
-      (item) => item.label === "Retrieval",
+      (item) => item.label === "Dense + Sparse / RRF",
     );
     expect(planning?.boundary).toContain("execution.py");
     expect(retrieval?.guarantee).toContain("knowledge generation");
@@ -103,9 +109,7 @@ describe("ASystemMap", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Query V2" }));
     for (const label of queryGroups)
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
-    expect(
-      screen.getByText(/converge only through Result & Evidence/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Production chat is V2-only/)).toBeInTheDocument();
     expect(screen.queryByText("GraphRAG final answer")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /Arka plan/ }));

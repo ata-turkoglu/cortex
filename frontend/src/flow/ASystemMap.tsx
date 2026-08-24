@@ -113,7 +113,7 @@ const legendGroups: Array<{
     label: "Veri",
     items: [
       { kind: "storage", label: "Kalıcı veri" },
-      { kind: "retrieval", label: "Retrieval" },
+      { kind: "retrieval", label: "Dense + Sparse / RRF" },
     ],
   },
   { label: "Koruma", items: [{ kind: "safety", label: "Güvenlik" }] },
@@ -265,13 +265,40 @@ const staticMaps: Record<
 
 const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   {
+    id: "v2-query-chat-api",
+    label: "POST /chat",
+    boundary: "backend/app/api/chat.py",
+    documentation: "docs/api/contract.md",
+    context: "backend/AGENTS.md",
+    description:
+      "Accepts the stable chat API contract and dispatches every production query through V2.",
+    guarantee:
+      "There is no V1 branch, runtime selector, or automatic V1 fallback on the production endpoint.",
+    kind: "input",
+    variant: "input",
+  },
+  {
+    id: "v2-query-service",
+    label: "V2 Query Service",
+    boundary:
+      "backend/app/query/production_chat.py · backend/app/query/production.py · backend/app/query/service.py",
+    documentation: "docs/architecture/query-v2/query-runtime.md",
+    context: "backend/app/query/orchestration/AGENTS.md · CLAUDE.md",
+    description:
+      "Loads detached persisted runtime inputs, binds one production generation, and coordinates the retrieval-backed V2 request.",
+    guarantee:
+      "One immutable workspace + generation + embedding hash scope survives planning, retrieval, validation, answering, and persistence.",
+    kind: "service",
+    variant: "input",
+  },
+  {
     id: "v2-query-conversation-context",
     label: "Conversation Context",
     boundary: "backend/app/query/context/",
     documentation: "docs/architecture/query-v2/query-runtime.md",
     context: "backend/app/query/context/AGENTS.md · CLAUDE.md",
     description:
-      "Loads durable conversation-local summaries, entities, temporal anchors, and unresolved references within one workspace.",
+      "Loads durable conversation-local summaries, entities, temporal anchors, unresolved references, and final canonical result sets within one workspace.",
     guarantee:
       "Conversation memory never becomes workspace-global canonical knowledge and cannot cross a workspace boundary.",
     kind: "storage",
@@ -279,7 +306,7 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-understanding",
-    label: "Query Understanding",
+    label: "Semantic Planner",
     boundary: "backend/app/query/understanding/",
     documentation: "docs/architecture/query-v2/query-runtime.md",
     context: "backend/app/query/understanding/AGENTS.md · CLAUDE.md",
@@ -291,8 +318,47 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
     variant: "processing",
   },
   {
+    id: "v2-query-canonical-resolution",
+    label: "Canonical Entity Resolution",
+    boundary: "backend/app/query/briefing.py",
+    documentation: "docs/architecture/query-v2/query-runtime.md",
+    context: "backend/app/query/understanding/AGENTS.md · CLAUDE.md",
+    description:
+      "Resolves exact display-name or alias matches from the selected generation's canonical identity catalogue.",
+    guarantee:
+      "Traversal starts from opaque canonical IDs; ambiguous names remain unresolved and historical generations do not read latest identity state.",
+    kind: "safety",
+    variant: "query",
+  },
+  {
+    id: "v2-query-governed-vocabulary",
+    label: "Governed Vocabulary Validation",
+    boundary: "backend/app/query/ir/validation.py · backend/app/query/runtime_inputs.py",
+    documentation: "docs/architecture/query-v2/query-runtime.md",
+    context: "backend/app/query/ir/AGENTS.md · CLAUDE.md",
+    description:
+      "Validates entity-type-specific, generation-bound typed filters before lowering or material execution.",
+    guarantee:
+      "An undeclared field or entity/property combination fails closed; it cannot use arbitrary Neo4j properties or retrieval as an exhaustive substitute.",
+    kind: "safety",
+    variant: "query",
+  },
+  {
+    id: "v2-query-deferred-semantics",
+    label: "Deferred V2 Semantics",
+    boundary: "backend/app/query/understanding/ · backend/app/query/ir/ · backend/app/query/planning/",
+    documentation: "docs/architecture/query-v2/query-runtime.md",
+    context: "backend/app/query/understanding/AGENTS.md · backend/app/query/ir/AGENTS.md",
+    description:
+      "Temporal ranges, fuzzy and relative dates have no production semantic lowering.",
+    guarantee:
+      "Exact-day event membership and governed surname GROUP/RANK/COMPARE are active; these remaining requests stay unsupported or unresolved.",
+    kind: "safety",
+    variant: "query",
+  },
+  {
     id: "v2-query-ir",
-    label: "Query IR",
+    label: "Logical IR",
     boundary: "backend/app/query/ir/",
     documentation: "docs/architecture/query-v2/invariants.md",
     context: "backend/app/query/ir/AGENTS.md · CLAUDE.md",
@@ -305,28 +371,41 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-execution-planning",
-    label: "Execution Planning",
+    label: "Physical Plan / GenerationScope",
     boundary: "backend/app/query/planning/ · backend/app/query/execution.py",
     documentation: "docs/architecture/query-v2/execution-planning.md",
     context: "backend/app/query/planning/AGENTS.md · CLAUDE.md",
     description:
-      "Builds the physical DAG; its dormant V2 executor resolves one GenerationScope before dense and sparse generation-bound reads.",
+      "Builds the physical DAG and resolves one immutable GenerationScope before any generation-bound retrieval read.",
     guarantee:
-      "Internal dense reads require workspace + generation + embedding hash; sparse reads use only the matching candidate BM25 artifact; V1 chat remains active.",
+      "Dense and sparse reads share the exact workspace + generation + embedding hash scope fixed at request start.",
     kind: "decision",
     variant: "durable",
   },
   {
     id: "v2-query-structured",
-    label: "Structured Query",
+    label: "StructuredQueryEngine / Canonical Population",
     boundary: "backend/app/engines/structured/",
     documentation: "docs/architecture/query-v2/structured-graph-engines.md",
     context: "backend/app/engines/structured/AGENTS.md · CLAUDE.md",
     description:
-      "Executes exact list, count, distinct, grouping, projection, ranking, and bounded population operations over canonical records.",
+      "Loads the fixed workspace + knowledge-generation canonical population and executes governed LIST/COUNT/GROUP/RANK/COMPARE; document source scans remain non-material retrieval prerequisites.",
     guarantee:
-      "Verified exhaustive results require the planned active generation and report their processed population and completeness.",
+      "Canonical identity, not mention or alias cardinality, is analytic authority; withheld governed properties and unavailable generation projections fail closed.",
     kind: "retrieval",
+    variant: "query",
+  },
+  {
+    id: "v2-query-list-count",
+    label: "Governed Filter / CountNode",
+    boundary: "backend/app/engines/structured/engine.py · backend/app/query/planning/planner.py",
+    documentation: "docs/architecture/query-v2/structured-graph-engines.md",
+    context: "backend/app/engines/structured/AGENTS.md · backend/app/query/planning/AGENTS.md",
+    description:
+      "Applies validated governed filters, then returns a canonical LIST or authoritative CountNode result from the exhaustive population.",
+    guarantee:
+      "Retrieval top-k, evidence, citation, and answer-rendering cardinality never determine exhaustive COUNT.",
+    kind: "processor",
     variant: "query",
   },
   {
@@ -337,21 +416,21 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
     context:
       "backend/app/engines/graph/AGENTS.md · backend/app/knowledge/graph/AGENTS.md",
     description:
-      "Queries workspace- and generation-scoped canonical Neo4j entities, relations, events, temporals, claims, facts, conflicts, and provenance.",
+      "Executes workspace- and generation-scoped canonical Neo4j queries, including exact event_date membership through graph.event_filter.",
     guarantee:
-      "CanonicalKnowledge is distinct from GraphRAG extracted artifacts and preserves evidence and curation precedence.",
+      "Exact-day event membership is graph-authoritative rather than retrieval top-k; document_date never substitutes for event_date.",
     kind: "retrieval",
     variant: "query",
   },
   {
     id: "v2-query-retrieval",
-    label: "Retrieval",
+    label: "Dense + Sparse / RRF",
     boundary: "backend/app/engines/hybrid/ · backend/app/retrieval/",
     documentation: "docs/architecture/retrieval-boundaries.md",
     context:
       "backend/app/engines/hybrid/AGENTS.md · backend/app/retrieval/AGENTS.md",
     description:
-      "Dormant V2 adapters execute planned Qdrant and candidate-owned BM25 reads with one immutable scope; fusion remains pending.",
+      "Executes generation-filtered Qdrant and generation-owned BM25 reads, then fuses both branches with deterministic RRF.",
     guarantee:
       "V2 dense reads require workspace + knowledge generation + embedding hash; sparse reads validate candidate artifact identity and never retry legacy workspace BM25.",
     kind: "retrieval",
@@ -364,28 +443,28 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
     documentation: "docs/architecture/graphrag-boundary.md",
     context: "backend/app/graphrag/AGENTS.md · CLAUDE.md",
     description:
-      "Runs Microsoft GraphRAG Local, Global, or DRIFT as planned capabilities over extracted GraphRAG projections.",
+      "GraphRAG Local, Global, and DRIFT normalized artifacts run through the V2 registry and exact trusted-source bridge before EngineResult reconciliation.",
     guarantee:
-      "GraphRAG output is a typed non-final finding; it is not canonical truth and does not author the final answer.",
+      "GraphRAG is not canonical truth; unresolvable, cross-generation, cross-workspace, or hash-mismatched source references fail closed, and AnswerEngine remains the sole final renderer.",
     kind: "retrieval",
     variant: "graphrag",
   },
   {
     id: "v2-query-result-evidence",
-    label: "Result & Evidence",
+    label: "Final-root Reconciliation",
     boundary: "backend/app/query/orchestration/",
     documentation: "docs/architecture/query-v2/result-evidence-layer.md",
     context: "backend/app/query/orchestration/AGENTS.md · CLAUDE.md",
     description:
-      "Reconciles typed EngineResult values and exact evidence from every planned engine into one ReasoningPackage.",
+      "Validates only EngineResults that correspond to final logical IR roots against immutable trusted manifest sources, then reconciles them into one ReasoningPackage.",
     guarantee:
-      "All engines converge here; disagreement, ambiguity, partial failure, provenance, and completeness remain visible.",
+      "Intermediate DAG scans never become user-facing semantic results; disagreement, ambiguity, partial failure, provenance, and completeness remain visible.",
     kind: "safety",
     variant: "delivery",
   },
   {
     id: "v2-query-reasoning",
-    label: "Reasoning & Composition",
+    label: "ReasoningPackage",
     boundary: "backend/app/reasoning/",
     documentation: "docs/architecture/query-v2/reasoning-composition.md",
     context:
@@ -399,14 +478,27 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-answer",
-    label: "Answer",
-    boundary: "backend/app/chat/execution.py",
+    label: "AnswerEngine",
+    boundary: "backend/app/query/answer.py",
     documentation: "docs/architecture/query-answer-pipeline.md",
     context: "backend/AGENTS.md",
     description:
       "Renders the grounded, partial, or unsupported user-facing answer from the validated evidence or composition artifact.",
     guarantee:
-      "V1 chat remains active until Phase 13; the V2 answer path cannot activate before the sharp-cutover gate.",
+      "Only a validated ReasoningPackage can produce grounded citations; unsupported answers contain zero citations.",
+    kind: "delivery",
+    variant: "delivery",
+  },
+  {
+    id: "v2-query-response",
+    label: "Citations / Response",
+    boundary: "backend/app/query/production_chat.py · backend/app/api/chat.py",
+    documentation: "docs/api/contract.md",
+    context: "backend/AGENTS.md",
+    description:
+      "Persists the assistant result, trace, generation identity, and validated citations, then maps them to the stable API response.",
+    guarantee:
+      "Citation identity is manifest-validated and all generation-bearing response fields agree with the immutable request scope.",
     kind: "delivery",
     variant: "delivery",
   },
@@ -524,9 +616,9 @@ const INDEXING_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
     documentation: "docs/architecture/query-v2/knowledge-construction.md",
     context: "backend/app/knowledge/graph/AGENTS.md · CLAUDE.md",
     description:
-      "Projects canonical entities, relations, events, temporals, claims, facts, conflicts, and exact evidence into Neo4j.",
+      "Projects canonical entities, generation-scoped governed properties, relations, events, temporals, claims, facts, conflicts, and exact evidence into Neo4j.",
     guarantee:
-      "Canonical graph writes are workspace- and generation-bound and cannot be overwritten by lower-precedence extraction.",
+      "Canonical graph writes are workspace- and generation-bound; governed properties retain exact evidence and cannot be inferred from display names at query time.",
     kind: "storage",
     variant: "graphrag",
   },
@@ -660,13 +752,24 @@ function connectManifest(source: string, target: string, label?: string): Edge {
 
 staticMaps.query = manifestMap(QUERY_V2_SUBSYSTEMS);
 staticMaps.query.edges = [
+  connectManifest("v2-query-chat-api", "v2-query-service"),
+  connectManifest("v2-query-service", "v2-query-conversation-context"),
   connectManifest("v2-query-conversation-context", "v2-query-understanding"),
-  connectManifest("v2-query-understanding", "v2-query-ir"),
+  connectManifest("v2-query-understanding", "v2-query-canonical-resolution"),
+  connectManifest("v2-query-canonical-resolution", "v2-query-ir"),
+  connectManifest("v2-query-understanding", "v2-query-governed-vocabulary"),
+  connectManifest("v2-query-understanding", "v2-query-deferred-semantics", "unsupported"),
+  connectManifest("v2-query-governed-vocabulary", "v2-query-ir"),
   connectManifest("v2-query-ir", "v2-query-execution-planning"),
   connectManifest(
     "v2-query-execution-planning",
     "v2-query-structured",
     "planned step",
+  ),
+  connectManifest(
+    "v2-query-structured",
+    "v2-query-list-count",
+    "canonical population",
   ),
   connectManifest(
     "v2-query-execution-planning",
@@ -684,9 +787,9 @@ staticMaps.query.edges = [
     "planned capability",
   ),
   connectManifest(
-    "v2-query-structured",
+    "v2-query-list-count",
     "v2-query-result-evidence",
-    "EngineResult",
+    "final logical root",
   ),
   connectManifest(
     "v2-query-knowledge-graph",
@@ -709,6 +812,7 @@ staticMaps.query.edges = [
     "ReasoningPackage",
   ),
   connectManifest("v2-query-reasoning", "v2-query-answer", "grounded artifact"),
+  connectManifest("v2-query-answer", "v2-query-response", "citations"),
 ];
 
 staticMaps.ingestion = manifestMap(INDEXING_V2_SUBSYSTEMS);
@@ -1253,7 +1357,7 @@ export function ASystemMap() {
       </div>
       <AInfoPanel title="Runtime architecture manifest">
         {activeTab === "query"
-          ? "Query V2 groups are implemented subsystem boundaries. Execution Planning owns engine work; Structured Query, Knowledge Graph, Retrieval, and GraphRAG converge only through Result & Evidence. Phase 13 still owns runtime activation."
+          ? "Production chat is V2-only: POST /chat binds one immutable GenerationScope, executes the semantic planner and physical plan, validates fused EngineResult evidence against trusted sources, and persists AnswerEngine citations and response metadata."
           : activeTab === "ingestion"
             ? "Indexing V2 follows one candidate generation from source processing through canonical KG construction and the separate BM25, Dense/Qdrant, and GraphRAG projections. Generation / Readiness is the fail-closed activation gate."
             : "Every node describes a real runtime boundary. Select a node to inspect its interface, guarantee, canonical documentation, and scoped AI-development context."}
