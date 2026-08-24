@@ -49,6 +49,33 @@ class GraphRAGExecutionError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class GraphRAGSourceReference:
+    """Immutable source identity attached to a normalized GraphRAG artifact.
+
+    V2 deliberately does not accept the Microsoft CLI's generated answer string:
+    GraphRAG artifacts must identify one Cortex source chunk before they can cross
+    the Result & Evidence boundary.
+    """
+
+    workspace_id: str
+    generation_id: str
+    document_id: str
+    document_version_id: str
+    logical_document_id: str
+    chunk_id: str
+    content_hash: str
+
+
+@dataclass(frozen=True)
+class GraphRAGFindingCandidate:
+    mode: GraphRoute
+    artifact_id: str
+    text: str
+    source: GraphRAGSourceReference
+    score: float
+
+
 class MicrosoftGraphRAGRunner:
     """Run the supported GraphRAG CLI from a worker-owned Python environment."""
 
@@ -401,6 +428,62 @@ class GraphRAGAdapter:
             if score
         ]
         return result_for(evidence, "graph_stale" if not evidence else None)
+
+    def query_findings(
+        self, route: GraphRoute, query: str, generation_id: str, limit: int = 10
+    ) -> tuple[GraphRAGFindingCandidate, ...]:
+        """Return only artifact findings with complete Cortex source identities.
+
+        This intentionally bypasses ``runner.query``.  Its output is a native
+        answer with no exact chunk references and is therefore untrusted in V2.
+        Older GraphRAG artifacts without the required identity fields simply
+        produce no V2 findings; callers remain fail-closed.
+        """
+        resource_type = "entities" if route is GraphRoute.LOCAL else "reports"
+        words = set(query.casefold().split())
+        scored = sorted(
+            (
+                (len(words & set(item.text.casefold().split())), item)
+                for item in self.load_artifacts(resource_type)
+            ),
+            reverse=True,
+            key=lambda pair: pair[0],
+        )
+        findings: list[GraphRAGFindingCandidate] = []
+        required = (
+            "workspace_id",
+            "knowledge_generation_id",
+            "document_id",
+            "document_version_id",
+            "logical_document_id",
+            "chunk_id",
+            "content_hash",
+        )
+        for score, item in scored:
+            if (
+                not score
+                or len(findings) >= limit
+                or not all(item.attributes.get(key) for key in required)
+            ):
+                continue
+            findings.append(
+                GraphRAGFindingCandidate(
+                    mode=route,
+                    artifact_id=item.artifact_id,
+                    text=item.text,
+                    source=GraphRAGSourceReference(
+                        workspace_id=item.attributes["workspace_id"],
+                        generation_id=item.attributes["knowledge_generation_id"],
+                        document_id=item.attributes["document_id"],
+                        document_version_id=item.attributes["document_version_id"],
+                        logical_document_id=item.attributes["logical_document_id"],
+                        chunk_id=item.attributes["chunk_id"],
+                        content_hash=item.attributes["content_hash"],
+                    ),
+                    score=min(1.0, float(score)),
+                )
+            )
+        return tuple(findings)
 
     def rebuild_networkx(self) -> nx.MultiDiGraph:
         graph = nx.MultiDiGraph()

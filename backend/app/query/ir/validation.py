@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import date
 
 from pydantic import ValidationError
 
@@ -13,6 +14,7 @@ from .schemas import (
     CountNode,
     CustomCapabilityNode,
     DistinctNode,
+    EventSetNode,
     ExistsNode,
     FieldReference,
     FilterNode,
@@ -53,6 +55,17 @@ class IRVocabulary:
     resources: dict[str, frozenset[str]]
     relations: dict[str, RelationDeclaration] = field(default_factory=dict)
     custom_capabilities: frozenset[str] = frozenset()
+
+    def with_governed_properties(
+        self, properties: dict[str, frozenset[str]]
+    ) -> IRVocabulary:
+        """Add only projection-confirmed fields to this scoped vocabulary snapshot."""
+        resources = dict(self.resources)
+        for resource, fields in properties.items():
+            if resource not in resources:
+                continue
+            resources[resource] = resources[resource] | fields
+        return IRVocabulary(resources, self.relations, self.custom_capabilities)
 
     @classmethod
     def core(cls) -> IRVocabulary:
@@ -97,7 +110,15 @@ class IRVocabulary:
                 }
             ),
         }
-        return cls(resources=resources)
+        return cls(
+            resources=resources,
+            relations={
+                "parent_of": RelationDeclaration(
+                    source_resources=frozenset({"person"}),
+                    target_resources=frozenset({"person"}),
+                )
+            },
+        )
 
 
 def validate_logical_ir(ir: LogicalQueryIR, vocabulary: IRVocabulary) -> LogicalQueryIR:
@@ -179,6 +200,26 @@ def _validate_graph_semantics(
                     f"custom capability is not declared by the workspace schema: {node.capability}"
                 )
         _validate_input_types(node, nodes)
+        if isinstance(node, TemporalConstraintNode) and isinstance(
+            nodes[node.inputs[0]], EventSetNode
+        ):
+            for predicate in node.predicates:
+                if (
+                    predicate.role != "event_date"
+                    or predicate.precision != "day"
+                    or predicate.uncertainty != "certain"
+                    or not predicate.normalized_start
+                    or predicate.normalized_start != predicate.normalized_end
+                ):
+                    raise IRValidationError(
+                        "canonical event population requires an exact event_date ISO day"
+                    )
+                try:
+                    date.fromisoformat(predicate.normalized_start)
+                except ValueError as error:
+                    raise IRValidationError(
+                        "canonical event population requires a valid ISO calendar date"
+                    ) from error
         if isinstance(node, ProjectNode):
             upstream = _upstream_ids(node.inputs, nodes)
             for projected in node.fields:
@@ -299,7 +340,7 @@ def _validate_output(graph: LogicalPlanGraph, nodes: dict[str, IRNode]) -> None:
     output_types = {nodes[root_id].output_type for root_id in graph.root_ids}
     allowed = {
         "entities": {"entity_set", "ranked_set"},
-        "rows": {"record_set", "grouped_set", "ranked_set", "graph_paths"},
+        "rows": {"record_set", "event_set", "grouped_set", "ranked_set", "graph_paths"},
         "scalar": {"scalar"},
         "boolean": {"boolean"},
         "comparison": {"comparison_result"},

@@ -2,6 +2,8 @@
 
 from .adapter import (
     CanonicalConflictQueryView,
+    CanonicalEntityPropertyQueryView,
+    CanonicalEventQueryView,
     CanonicalEntityQueryView,
     CanonicalEntityView,
     CanonicalEvidenceQueryView,
@@ -18,6 +20,8 @@ from .adapter import (
 
 __all__ = [
     "CanonicalEntityQueryView",
+    "CanonicalEventQueryView",
+    "CanonicalEntityPropertyQueryView",
     "CanonicalEntityView",
     "CanonicalEvidenceQueryView",
     "CanonicalConflictQueryView",

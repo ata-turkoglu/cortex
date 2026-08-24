@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from datetime import date
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -20,6 +22,7 @@ SemanticOperator = Literal[
     "order",
     "summarize",
 ]
+StructuredSemanticOperation = Literal["list", "count", "group", "rank", "compare"]
 TemporalRole = Literal[
     "event_date",
     "document_date",
@@ -39,18 +42,30 @@ class SemanticEntity(BaseModel):
     reference_id: str = Field(min_length=1, max_length=80)
     mention: ShortText
     entity_type: ShortText = "unknown"
-    reference_kind: Literal["explicit", "follow_up"] = "explicit"
+    reference_kind: Literal["explicit", "follow_up", "conversation_result"] = "explicit"
     resolution: SemanticState = "unresolved"
     canonical_entity_id: str | None = Field(default=None, min_length=1, max_length=128)
+    canonical_entity_ids: tuple[str, ...] = Field(default=(), max_length=20)
     display_name: ShortText | None = None
     candidate_entity_ids: tuple[str, ...] = Field(default=(), max_length=20)
 
     @model_validator(mode="after")
     def validate_resolution(self):
-        if self.resolution == "resolved" and not self.canonical_entity_id:
-            raise ValueError("resolved semantic entities require canonical_entity_id")
-        if self.resolution != "resolved" and self.canonical_entity_id:
-            raise ValueError("unresolved semantic entities cannot carry canonical_entity_id")
+        resolved_ids = tuple(
+            dict.fromkeys(
+                (self.canonical_entity_id,)
+                if self.canonical_entity_id
+                else self.canonical_entity_ids
+            )
+        )
+        if self.resolution == "resolved" and not resolved_ids:
+            raise ValueError("resolved semantic entities require canonical entity IDs")
+        if self.resolution != "resolved" and (
+            self.canonical_entity_id or self.canonical_entity_ids
+        ):
+            raise ValueError("unresolved semantic entities cannot carry canonical entity IDs")
+        if self.canonical_entity_id and self.canonical_entity_ids:
+            raise ValueError("semantic entities use either one canonical ID or a canonical ID set")
         if self.resolution == "ambiguous" and len(self.candidate_entity_ids) < 2:
             raise ValueError("ambiguous semantic entities require at least two candidates")
         return self
@@ -73,6 +88,9 @@ class SemanticRelation(BaseModel):
     subject_reference_id: str = Field(min_length=1, max_length=80)
     object_reference_id: str | None = Field(default=None, min_length=1, max_length=80)
     direction: Literal["outgoing", "incoming", "either"] = "outgoing"
+    target_entity_type: Literal[
+        "person", "organization", "location", "asset_property", "entity"
+    ] = "entity"
 
 
 class SemanticTemporalConstraint(BaseModel):
@@ -86,6 +104,21 @@ class SemanticTemporalConstraint(BaseModel):
     uncertainty: Literal["certain", "approximate", "unknown"] = "unknown"
     anchor_event: str | None = Field(default=None, max_length=500)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_turkish_dotted_exact_event_date(cls, value):
+        if not isinstance(value, dict):
+            return value
+        if value.get("role") != "event_date" or value.get("precision") != "day":
+            return value
+        if value.get("uncertainty", "unknown") != "certain":
+            return value
+        match = re.fullmatch(r"\s*(\d{2})\.(\d{2})\.(\d{4})\s*", value.get("original_text", ""))
+        if not match:
+            return value
+        normalized = f"{match.group(3)}-{match.group(2)}-{match.group(1)}"
+        return {**value, "normalized_start": normalized, "normalized_end": normalized}
+
     @model_validator(mode="after")
     def validate_temporal_shape(self):
         if self.role == "range" and not (self.normalized_start and self.normalized_end):
@@ -94,7 +127,36 @@ class SemanticTemporalConstraint(BaseModel):
             raise ValueError("relative event temporals require anchor_event")
         if self.role == "approximate_date" and self.uncertainty != "approximate":
             raise ValueError("approximate_date requires approximate uncertainty")
+        if self.role == "event_date" and self.precision == "day" and self.uncertainty == "certain":
+            normalized = self.normalized_start
+            if not normalized or normalized != self.normalized_end:
+                raise ValueError("exact event_date requires one normalized ISO day")
+            try:
+                if date.fromisoformat(normalized).isoformat() != normalized:
+                    raise ValueError
+            except ValueError as error:
+                raise ValueError("exact event_date requires a valid ISO day") from error
         return self
+
+
+class SemanticTypedFilter(BaseModel):
+    """A constrained semantic filter; vocabulary validation happens during IR planning."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target_type: Literal["person", "organization", "location", "asset_property"]
+    property: ShortText
+    operator: Literal["eq"]
+    value: ShortText
+
+
+class SemanticGovernedField(BaseModel):
+    """One advertised canonical property used for governed analytics."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target_type: Literal["person", "organization", "location", "asset_property"]
+    property: ShortText
 
 
 class InterpretationCandidate(BaseModel):
@@ -106,6 +168,10 @@ class InterpretationCandidate(BaseModel):
     targets: tuple[SemanticTarget, ...] = Field(default=(), max_length=20)
     relations: tuple[SemanticRelation, ...] = Field(default=(), max_length=20)
     temporal_constraints: tuple[SemanticTemporalConstraint, ...] = Field(default=(), max_length=20)
+    typed_filters: tuple[SemanticTypedFilter, ...] = Field(default=(), max_length=20)
+    structured_operation: StructuredSemanticOperation | None = None
+    group_by: SemanticGovernedField | None = None
+    rank_direction: Literal["ascending", "descending"] | None = None
     operators: tuple[SemanticOperator, ...] = Field(default=(), max_length=20)
     confidence: float = Field(ge=0, le=1)
 
@@ -121,6 +187,10 @@ class SemanticUnderstanding(BaseModel):
     targets: tuple[SemanticTarget, ...] = Field(default=(), max_length=20)
     relations: tuple[SemanticRelation, ...] = Field(default=(), max_length=20)
     temporal_constraints: tuple[SemanticTemporalConstraint, ...] = Field(default=(), max_length=20)
+    typed_filters: tuple[SemanticTypedFilter, ...] = Field(default=(), max_length=20)
+    structured_operation: StructuredSemanticOperation | None = None
+    group_by: SemanticGovernedField | None = None
+    rank_direction: Literal["ascending", "descending"] | None = None
     operators: tuple[SemanticOperator, ...] = Field(default=(), max_length=20)
     uses_temporal_focus: bool = False
     coverage: Literal["relevant_evidence", "corpus_required", "unspecified"] = "unspecified"
@@ -137,6 +207,14 @@ class SemanticUnderstanding(BaseModel):
             raise ValueError("unresolved understanding requires a clarification question")
         if self.state == "resolved" and (self.candidates or self.unresolved_questions):
             raise ValueError("resolved understanding cannot retain candidates or questions")
+        if self.structured_operation in {"list", "count"} and not self.typed_filters:
+            raise ValueError("structured list/count operations require a typed filter")
+        if self.structured_operation in {"group", "rank"} and not self.group_by:
+            raise ValueError("structured group/rank operations require a governed group field")
+        if self.structured_operation == "rank" and not self.rank_direction:
+            raise ValueError("structured rank operations require a direction")
+        if self.structured_operation == "compare" and len(self.typed_filters) != 2:
+            raise ValueError("structured compare operations require exactly two typed filters")
         entity_refs = {item.reference_id for item in self.entities}
         referenced = {
             ref

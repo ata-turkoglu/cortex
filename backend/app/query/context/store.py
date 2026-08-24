@@ -106,6 +106,7 @@ def save_conversation_context(
             state.temporal_focus,
             state.explicit_constraints,
             state.assumptions,
+            ((state.last_final_entity_result,) if state.last_final_entity_result else ()),
         )
         for item in collection
         if item.source_message_id

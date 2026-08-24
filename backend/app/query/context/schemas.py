@@ -71,6 +71,17 @@ class ContextAssumption(BaseModel):
     source_message_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
+class ContextCanonicalResultSet(BaseModel):
+    """The last final canonical entity set, never answer prose or retrieval output."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    canonical_entity_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
+    entity_type: ShortText
+    generation_id: str = Field(min_length=1, max_length=128)
+    source_message_id: str = Field(min_length=1, max_length=36)
+
+
 class ConversationContextState(BaseModel):
     """Persisted state only; message history remains in the existing message table."""
 
@@ -82,6 +93,7 @@ class ConversationContextState(BaseModel):
     temporal_focus: tuple[ContextTemporalFocus, ...] = Field(default=(), max_length=10)
     explicit_constraints: tuple[ContextConstraint, ...] = Field(default=(), max_length=20)
     assumptions: tuple[ContextAssumption, ...] = Field(default=(), max_length=20)
+    last_final_entity_result: ContextCanonicalResultSet | None = None
 
     @model_validator(mode="after")
     def validate_reference_buckets(self):

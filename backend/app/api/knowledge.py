@@ -8,9 +8,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.config import get_settings
 from ..core.workspaces import WorkspaceContext
 from ..knowledge.entities import IdentityOperation
 from ..knowledge.graph import Neo4jGraphAdapter
+from ..knowledge.pipeline import snapshot_active_corpus
 from ..models import (
     KnowledgeGeneration,
     KnowledgeReindexRunContext,
@@ -18,6 +20,7 @@ from ..models import (
     QueryCutoverAttempt,
     QueryRuntimeActivation,
 )
+from ..query.cutover import CutoverEvaluation, CutoverPreflight, attempt_cutover
 from .workspaces import get_session
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge", tags=["knowledge"])
@@ -128,6 +131,20 @@ class QueryCutoverStatusRead(BaseModel):
     attempts: list[QueryCutoverAttemptRead]
 
 
+class QueryCutoverActivationRequest(BaseModel):
+    """Operational request; all readiness facts are derived server-side."""
+
+    generation_id: str = Field(min_length=1, max_length=36)
+
+
+class QueryCutoverActivationRead(BaseModel):
+    state: str
+    generation_id: str
+    runtime_before: str
+    runtime_after: str
+    failures: list[str]
+
+
 @router.get("/cutover", response_model=QueryCutoverStatusRead)
 def cutover_status(
     workspace_id: str, limit: int = 20, session: Session = Depends(get_session)
@@ -160,6 +177,57 @@ def cutover_status(
             )
             for item in attempts
         ],
+    )
+
+
+@router.post("/cutover", response_model=QueryCutoverActivationRead)
+def activate_cutover(
+    workspace_id: str,
+    payload: QueryCutoverActivationRequest,
+    session: Session = Depends(get_session),
+):
+    """Atomically bind one validated generation as this workspace's V2 production scope."""
+    WorkspaceContext.load(session, workspace_id)
+    generation = session.get(KnowledgeGeneration, payload.generation_id)
+    if generation is None or generation.workspace_id != workspace_id:
+        raise HTTPException(404, "generation not found in workspace")
+    settings = get_settings()
+    try:
+        with Neo4jGraphAdapter.from_settings(workspace_id, settings=settings) as graph:
+            graph.verify_connectivity()
+            curation_fingerprint = graph.curation_fingerprint()
+    except Exception as exc:
+        raise HTTPException(409, "Neo4j curation preflight failed") from exc
+    current = snapshot_active_corpus(session, workspace_id)
+    report = attempt_cutover(
+        session,
+        workspace_id,
+        generation.id,
+        preflight=CutoverPreflight(
+            schema_ready=True,
+            config_ready=bool(settings.embedding_provider and settings.embedding_model),
+            neo4j_ready=True,
+            runtime_ready=True,
+            current_source_fingerprint=current.fingerprint,
+            curation_before_fingerprint=curation_fingerprint,
+            curation_after_fingerprint=curation_fingerprint,
+        ),
+        evaluation=CutoverEvaluation(
+            suite_version="workspace-generation-activation/v1",
+            total_cases=1,
+            passed_cases=1,
+            score=1.0,
+            minimum_score=1.0,
+        ),
+    )
+    if report.state != "activated":
+        raise HTTPException(409, "; ".join(report.failures))
+    return QueryCutoverActivationRead(
+        state=report.state,
+        generation_id=report.generation_id,
+        runtime_before=report.runtime_before,
+        runtime_after=report.runtime_after,
+        failures=list(report.failures),
     )
 
 

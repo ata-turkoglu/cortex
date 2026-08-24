@@ -11,13 +11,17 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core import config
 from ..knowledge.construction import MANDATORY_KNOWLEDGE_STAGES
+from ..knowledge.source_manifest import SourceManifestValidationError, load_generation_manifest
 from ..models import (
     KnowledgeGeneration,
     KnowledgeStageState,
     QueryCutoverAttempt,
     QueryRuntimeActivation,
 )
+from ..retrieval.sparse import WorkspaceBM25Index
+from .scope import GenerationScope
 
 
 class CutoverEvaluation(BaseModel):
@@ -104,6 +108,26 @@ def _failures(
         for stage in MANDATORY_KNOWLEDGE_STAGES
     ):
         failures.append("mandatory projections are not ready for one exact generation")
+    else:
+        try:
+            # These reads prove that the immutable authority and generation-owned lexical
+            # projection exist now, rather than trusting checkpoint metadata alone.
+            load_generation_manifest(
+                session, workspace_id, generation.id, config.get_settings().data_path
+            )
+            dense_metrics = json.loads(by_stage["dense_qdrant"].metrics_json or "{}")
+            embedding_config_hash = str(dense_metrics["embedding_config_hash"])
+            if not embedding_config_hash:
+                raise ValueError("dense embedding configuration is missing")
+            WorkspaceBM25Index.load_generation(
+                GenerationScope(workspace_id, generation.id, embedding_config_hash),
+                config.get_settings().data_path
+                / "workspaces"
+                / workspace_id
+                / "knowledge-candidates",
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError, SourceManifestValidationError):
+            failures.append("generation-bound source or retrieval artifacts are not valid")
     for ready, label in (
         (preflight.schema_ready, "schema migration is not ready"),
         (preflight.config_ready, "V2 configuration is not ready"),

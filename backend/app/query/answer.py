@@ -60,14 +60,21 @@ class AnswerEngine:
     @staticmethod
     def _clarification(package: ReasoningPackage) -> str:
         reasons = "; ".join(item.reason for item in package.ambiguities[:3])
-        return (
-            "I need clarification before answering because multiple interpretations remain"
-            + (f": {reasons}." if reasons else ".")
+        return "I need clarification before answering because multiple interpretations remain" + (
+            f": {reasons}." if reasons else "."
         )
 
     @staticmethod
     def _grounded(package: ReasoningPackage) -> str:
         values: list[str] = []
+        for event in package.events:
+            if len(values) == 3:
+                break
+            participants = ", ".join(event.participant_canonical_ids)
+            values.append(
+                f"{event.event_date}: {event.event_name} ({event.event_type})"
+                + (f"; participants: {participants}" if participants else "")
+            )
         for item in (*package.structured_rows, *package.entities, *package.claims):
             if len(values) == 3:
                 break
@@ -76,6 +83,10 @@ class AnswerEngine:
             )
             if rendered:
                 values.append(rendered)
+        for finding in package.graphrag_findings:
+            if len(values) == 3:
+                break
+            values.append(f"GraphRAG {finding.mode} finding: {finding.text}")
         if package.aggregates:
             remaining = max(0, 3 - len(values))
             values.extend(

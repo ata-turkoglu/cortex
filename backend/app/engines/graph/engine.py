@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from time import perf_counter
 from typing import Protocol
 
 from app.knowledge.graph import (
     CanonicalConflictQueryView,
     CanonicalEntityQueryView,
+    CanonicalEventQueryView,
     CanonicalEvidenceQueryView,
     CanonicalPathQueryView,
 )
@@ -19,6 +21,7 @@ from app.query.ir.schemas import (
     TraverseNode,
 )
 from app.query.orchestration import (
+    CanonicalEventResult,
     ClaimResult,
     CompletenessReport,
     EngineResult,
@@ -51,6 +54,10 @@ class CanonicalGraphReader(Protocol):
         limit: int = 500,
     ) -> tuple[CanonicalPathQueryView, ...]: ...
 
+    def query_canonical_events(
+        self, generation: str, *, event_date: str, limit: int = 500
+    ) -> tuple[CanonicalEventQueryView, ...]: ...
+
     def query_claim_conflicts(
         self, generation: str, subject_ids: tuple[str, ...], *, limit: int = 500,
     ) -> tuple[CanonicalConflictQueryView, ...]: ...
@@ -65,6 +72,7 @@ class GraphValue:
     entity_ids: tuple[str, ...] = ()
     paths: tuple[CanonicalPathQueryView, ...] = ()
     artifact_ids: tuple[str, ...] = ()
+    events: tuple[CanonicalEventQueryView, ...] = ()
 
 
 class GraphExecutionError(ValueError):
@@ -106,11 +114,35 @@ class KnowledgeGraphEngine:
                 self.generation_id, source_ids, node.relation.relation, node.direction,
                 node.minimum_hops, node.maximum_hops,
             )
+            target_ids = tuple(dict.fromkeys(path.node_ids[-1] for path in paths))
+            entities = self.reader.query_canonical_entities(self.generation_id, target_ids)
             value = GraphValue(
-                entity_ids=tuple(dict.fromkeys(path.node_ids[-1] for path in paths)), paths=paths,
+                entity_ids=target_ids, paths=paths,
                 artifact_ids=tuple(item for path in paths for item in path.relation_ids),
             )
         elif isinstance(node, TemporalConstraintNode):
+            if step.capability == "graph.event_filter":
+                if len(node.predicates) != 1:
+                    raise GraphExecutionError("event filter requires one exact event date")
+                predicate = node.predicates[0]
+                if (
+                    predicate.role != "event_date"
+                    or predicate.precision != "day"
+                    or predicate.uncertainty != "certain"
+                    or not predicate.normalized_start
+                    or predicate.normalized_start != predicate.normalized_end
+                    or not _is_exact_iso_day(predicate.normalized_start)
+                ):
+                    raise GraphExecutionError("event filter requires one exact event_date ISO day")
+                events = self.reader.query_canonical_events(
+                    self.generation_id, event_date=predicate.normalized_start
+                )
+                value = GraphValue(
+                    events=events, artifact_ids=tuple(item.event_id for item in events)
+                )
+                return value, self._event_result(
+                    step, value, int((perf_counter() - started) * 1_000)
+                )
             starts = [item.normalized_start for item in node.predicates if item.normalized_start]
             ends = [item.normalized_end for item in node.predicates if item.normalized_end]
             paths = self.reader.query_event_paths(
@@ -153,6 +185,45 @@ class KnowledgeGraphEngine:
             step, value, entities, paths, conflicts, ambiguity, (),
             int((perf_counter() - started) * 1_000),
         )
+
+    def _event_result(self, step, value, duration):
+        evidence = _evidence(
+            self.workspace_id,
+            tuple(evidence for item in value.events for evidence in item.evidence),
+        )
+        valid_ids = {item.evidence_id for item in evidence}
+        events = tuple(
+            CanonicalEventResult(
+                item_id=item.event_id,
+                values={"result_kind": "events"},
+                event_id=item.event_id,
+                event_type=item.event_type,
+                event_name=item.display_name,
+                event_date=item.event_date,
+                participant_canonical_ids=item.participant_entity_ids,
+                workspace_id=self.workspace_id,
+                generation_id=self.generation_id,
+                evidence_ids=tuple(
+                    e.evidence_id for e in item.evidence if e.evidence_id in valid_ids),
+            )
+            for item in value.events
+        )
+        return EngineResult(result_id=f"result-{step.step_id}", workspace_id=self.workspace_id,
+            generation_id=self.generation_id, step_id=step.step_id, engine=step.engine,
+            capability=step.capability, state="success" if events else "unsupported",
+            events=events,
+            text_evidence=evidence,
+            provenance=tuple(
+                ProvenanceLink(result_id=item.item_id, evidence_ids=item.evidence_ids)
+                for item in events
+            ),
+            completeness=CompletenessReport(
+            coverage="grounded", state="unknown", generation_id=self.generation_id,
+            confirmed_count=len(events),
+            ),
+            confidence=0.9 if events else 0.0,
+            trace=EngineTrace(step_id=step.step_id, engine=step.engine, capability=step.capability,
+            duration_ms=duration, counters={"confirmed_count": len(events)}))
 
     def _validate(self, step, node) -> None:
         if step.engine != "knowledge_graph" or step.trace.logical_node_ids != (node.node_id,):
@@ -233,6 +304,13 @@ def _evidence(workspace_id, views):
             relevance_score=item.confidence, quality_score=item.confidence,
         ))
     return tuple(unique.values())
+
+
+def _is_exact_iso_day(value: str) -> bool:
+    try:
+        return date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
 
 
 def _conflict_claims(conflict, valid_ids):

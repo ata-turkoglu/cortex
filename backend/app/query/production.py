@@ -1,0 +1,205 @@
+"""Production composition root for the detached Query V2 runtime."""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from qdrant_client import QdrantClient
+
+from ..core.config import Settings, get_settings
+from ..core.qdrant import get_qdrant_client
+from ..graphrag.adapter import GraphRAGAdapter
+from ..knowledge.graph import Neo4jConfigurationError, Neo4jGraphAdapter
+from ..providers.base import EmbeddingProvider
+from ..providers.embeddings import (
+    EmbeddingConfiguration,
+    OllamaEmbeddingAdapter,
+    OpenAIEmbeddingAdapter,
+    Qwen3EmbeddingAdapter,
+)
+from ..retrieval.qdrant import WorkspaceQdrantStore
+from ..retrieval.sparse import GenerationBM25Store
+from .answer import AnswerEngine
+from .briefing import build_workspace_briefing
+from .execution import (
+    ProductionEngineRegistry,
+    RetrievalProductionEngine,
+    V2DenseAdapter,
+    V2PlanExecutor,
+    V2SparseAdapter,
+)
+from .production_engines import (
+    GraphProductionEngine,
+    GraphRAGAdapterFactory,
+    GraphRAGProductionEngine,
+    StructuredProductionEngine,
+)
+from .runtime import QueryV2PreparationService, SemanticPlanner
+from .runtime_inputs import V2RuntimeContextLoader, V2RuntimeInputs
+from .scope import GenerationScope
+from .service import V2QueryService
+from .source_runtime import ConfiguredV2QueryEmbedder
+from .understanding.planner import SemanticPlannerAdapter, planner_models
+
+if TYPE_CHECKING:
+    from .understanding.planner import StructuredPlannerProvider
+
+
+class ProductionV2ConfigurationError(RuntimeError):
+    """Configured production dependencies cannot satisfy the V2 contract."""
+
+
+class V2QueryServiceFactory:
+    """Own shared production dependencies and bind one immutable request scope.
+
+    External model adapters are injectable for deterministic acceptance tests. With
+    no overrides, this factory uses the same settings, cached Qdrant client, semantic
+    planner, and embedding providers as the production backend.
+    """
+
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        data_root: Path | None = None,
+        qdrant_client: QdrantClient | None = None,
+        planner: SemanticPlanner | None = None,
+        planner_providers: dict[str, StructuredPlannerProvider] | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        answer_engine: AnswerEngine | None = None,
+        graphrag_adapter_factory: GraphRAGAdapterFactory | None = None,
+    ) -> None:
+        self.settings = settings or get_settings()
+        self.data_root = (data_root or self.settings.data_path).resolve()
+        self.qdrant_client = qdrant_client or get_qdrant_client()
+        self.context_loader = V2RuntimeContextLoader(
+            history_limit=self.settings.conversation_memory_window_messages
+        )
+        self.planner = planner or self._configured_planner(planner_providers)
+        self.preparation = QueryV2PreparationService(self.planner)
+        self.embedding_configuration = EmbeddingConfiguration(
+            self.settings.embedding_provider,
+            self.settings.embedding_model,
+        )
+        provider = embedding_provider or self._configured_embedding_provider()
+        self.query_embedder = ConfiguredV2QueryEmbedder(provider, self.embedding_configuration)
+        self.answer_engine = answer_engine or AnswerEngine()
+        self.graphrag_adapter_factory = graphrag_adapter_factory or self._graphrag_adapter
+
+    def build(self, inputs: V2RuntimeInputs) -> V2QueryService:
+        """Build a service whose retrieval stores are bound to ``inputs``."""
+        scope = inputs.generation_scope
+        if inputs.generation_scope_resolver.scope != scope:
+            raise ValueError("runtime inputs contain inconsistent generation scope")
+        dense_store = WorkspaceQdrantStore(
+            self.qdrant_client,
+            scope.workspace_id,
+            embedding_config_hash=scope.embedding_config_hash,
+            projection_key=scope.generation_id,
+        )
+        dense = V2DenseAdapter(dense_store)
+        sparse = V2SparseAdapter(GenerationBM25Store(self.data_root))
+
+        def graph_reader(request_scope):
+            return Neo4jGraphAdapter.from_settings(request_scope.workspace_id)
+
+        def briefing_loader(request_scope):
+            try:
+                with Neo4jGraphAdapter.from_settings(request_scope.workspace_id) as graph:
+                    return build_workspace_briefing(graph, request_scope.generation_id, limit=100)
+            except Neo4jConfigurationError:
+                # Retrieval remains safely usable when canonical graph infrastructure is absent.
+                return None
+
+        def property_vocabulary_loader(request_scope):
+            try:
+                with Neo4jGraphAdapter.from_settings(request_scope.workspace_id) as graph:
+                    return graph.queryable_property_vocabulary(request_scope.generation_id)
+            except Neo4jConfigurationError:
+                return {}
+
+        registry = ProductionEngineRegistry(
+            {
+                "retrieval": RetrievalProductionEngine(dense, sparse),
+                "structured": StructuredProductionEngine(graph_reader),
+                "knowledge_graph": GraphProductionEngine(graph_reader),
+                "graphrag": GraphRAGProductionEngine(self.graphrag_adapter_factory),
+            }
+        )
+        executor = V2PlanExecutor(inputs.generation_scope_resolver, dense, sparse, registry)
+        return V2QueryService(
+            self.preparation,
+            inputs.generation_scope_resolver,
+            self.query_embedder,
+            executor,
+            data_root=self.data_root,
+            answer_engine=self.answer_engine,
+            briefing_loader=briefing_loader,
+            property_vocabulary_loader=property_vocabulary_loader,
+        )
+
+    def _graphrag_adapter(self, scope: GenerationScope) -> GraphRAGAdapter:
+        root = (
+            self.data_root
+            / "workspaces"
+            / scope.workspace_id
+            / "knowledge-candidates"
+            / scope.generation_id
+            / "graphrag"
+        ).resolve()
+        expected_parent = (
+            self.data_root / "workspaces" / scope.workspace_id / "knowledge-candidates"
+        ).resolve()
+        if expected_parent not in root.parents:
+            raise ProductionV2ConfigurationError("GraphRAG generation root escapes workspace")
+        return GraphRAGAdapter(scope.workspace_id, root)
+
+    def _configured_planner(
+        self,
+        providers: dict[str, StructuredPlannerProvider] | None,
+    ) -> SemanticPlannerAdapter:
+        models = planner_models(self.settings)
+        if providers is None:
+            unsupported = sorted(
+                {assignment.provider for assignment in models.values()} - {"openai"}
+            )
+            if unsupported:
+                joined = ", ".join(unsupported)
+                raise ProductionV2ConfigurationError(
+                    f"configured semantic planner provider is unavailable: {joined}"
+                )
+        return SemanticPlannerAdapter(
+            models=models,
+            providers=providers,
+            repair_attempts=self.settings.semantic_planner_repair_attempts,
+            escalation_enabled=self.settings.semantic_planner_escalation_enabled,
+            confidence_threshold=self.settings.semantic_planner_confidence_threshold,
+        )
+
+    def _configured_embedding_provider(self) -> EmbeddingProvider:
+        configuration = self.embedding_configuration
+        if configuration.provider == "ollama":
+            if configuration.model.startswith("qwen3"):
+                return Qwen3EmbeddingAdapter(configuration)
+            return OllamaEmbeddingAdapter(configuration)
+        if configuration.provider == "openai":
+            return OpenAIEmbeddingAdapter(configuration.model)
+        raise ProductionV2ConfigurationError(
+            "configured embedding provider cannot satisfy V2 query embedding: "
+            f"{configuration.provider}"
+        )
+
+
+def build_v2_query_service(
+    inputs: V2RuntimeInputs, *, factory: V2QueryServiceFactory | None = None
+) -> V2QueryService:
+    """Convenience entry point reusable by the later API cutover."""
+    return (factory or V2QueryServiceFactory()).build(inputs)
+
+
+@lru_cache
+def get_v2_query_service_factory() -> V2QueryServiceFactory:
+    """Process-lifetime production factory; request scope is still built per query."""
+    return V2QueryServiceFactory()

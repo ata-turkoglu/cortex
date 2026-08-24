@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
@@ -12,6 +13,7 @@ from ...core.secrets import SecretStore
 from ..claims import ClaimConflict, KnowledgeClaim
 from ..entities import (
     CanonicalEntity,
+    CanonicalEntityProperty,
     EntityType,
     IdentityDecisionKind,
     IdentityOperation,
@@ -123,6 +125,16 @@ class CanonicalEntityQueryView:
     display_name: str
     subtype: str | None
     evidence: tuple[CanonicalEvidenceQueryView, ...]
+    properties: tuple[CanonicalEntityPropertyQueryView, ...] = ()
+
+
+@dataclass(frozen=True)
+class CanonicalEntityPropertyQueryView:
+    property_id: str
+    key: str
+    value: str
+    value_type: str
+    evidence: CanonicalEvidenceQueryView
 
 
 @dataclass(frozen=True)
@@ -131,6 +143,18 @@ class CanonicalPathQueryView:
     node_ids: tuple[str, ...]
     relation_ids: tuple[str, ...]
     relation_types: tuple[str, ...]
+    evidence: tuple[CanonicalEvidenceQueryView, ...]
+
+
+@dataclass(frozen=True)
+class CanonicalEventQueryView:
+    """Generation-scoped canonical event record for unanchored event populations."""
+
+    event_id: str
+    event_type: str
+    display_name: str
+    event_date: str
+    participant_entity_ids: tuple[str, ...]
     evidence: tuple[CanonicalEvidenceQueryView, ...]
 
 
@@ -383,6 +407,49 @@ class Neo4jGraphAdapter:
             )
 
     @staticmethod
+    def _upsert_canonical_entity_property_transaction(
+        transaction: GraphTransaction, *, workspace_id: str, property_: CanonicalEntityProperty
+    ) -> None:
+        """Persist a generation-bound property node; canonical identity remains stable."""
+        row = {**asdict(property_.provenance), "evidence_id": property_.provenance.evidence_id}
+        transaction.run(
+            "MATCH (entity:CortexNode:CanonicalKnowledge:CanonicalEntity "
+            "{workspace_id: $workspace_id, layer: 'canonical', external_id: $entity_id}) "
+            "MERGE (e:CortexEvidence:CanonicalKnowledge "
+            "{workspace_id: $workspace_id, evidence_id: $evidence_id}) "
+            "SET e += $evidence "
+            "MERGE (p:CortexEntityProperty:CanonicalKnowledge "
+            "{workspace_id: $workspace_id, property_id: $property_id}) "
+            "SET p.key = $key, p.value = $value, p.normalized_value = $normalized_value, "
+            "p.value_type = $value_type, p.authority = $authority, p.generation = $generation, "
+            "p.status = $status "
+            "MERGE (entity)-[:HAS_PROPERTY {generation: $generation}]->(p) "
+            "MERGE (p)-[:SUPPORTED_BY]->(e)",
+            workspace_id=workspace_id,
+            entity_id=property_.entity_id,
+            property_id=property_.property_id,
+            key=property_.key,
+            value=property_.value,
+            normalized_value=property_.normalized_value,
+            value_type=property_.value_type.value,
+            authority=property_.authority.name.lower(),
+            generation=property_.generation,
+            status=property_.status,
+            evidence=row,
+            evidence_id=property_.provenance.evidence_id,
+        ).consume()
+
+    def upsert_canonical_entity_property(self, property_: CanonicalEntityProperty) -> None:
+        if property_.provenance.workspace_id != self.workspace_id:
+            raise ValueError("entity property provenance crosses the adapter workspace")
+        with self.driver.session(database=self.database) as session:
+            session.execute_write(
+                self._upsert_canonical_entity_property_transaction,
+                workspace_id=self.workspace_id,
+                property_=property_,
+            )
+
+    @staticmethod
     def _record_identity_operation_transaction(
         transaction: GraphTransaction, *, workspace_id: str, operation: IdentityOperation
     ) -> None:
@@ -465,11 +532,12 @@ class Neo4jGraphAdapter:
             raise ValueError("generation and a bounded limit are required")
         records, _, _ = self.driver.execute_query(
             "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
-            "{workspace_id: $workspace_id, layer: 'canonical', generation: $generation, "
-            "status: 'active'}) "
+            "{workspace_id: $workspace_id, layer: 'canonical', status: 'active'})"
+            "<-[:RESOLVES_TO]-(m:CortexMention)-[:SUPPORTED_BY]->"
+            "(:CortexEvidence {workspace_id: $workspace_id, generation: $generation}) "
             "OPTIONAL MATCH (n)-[:HAS_ALIAS]->(a:CortexAlias "
             "{workspace_id: $workspace_id, active: true}) "
-            "WITH n, [item IN collect(a) WHERE item.active | item.value] AS aliases "
+            "WITH DISTINCT n, [item IN collect(a) WHERE item.active | item.value] AS aliases "
             "RETURN n.external_id AS entity_id, n.entity_type AS entity_type, "
             "n.display_name AS display_name, n.subtype AS subtype, n.authority AS authority, "
             "n.status AS status, aliases ORDER BY n.display_name LIMIT $limit",
@@ -601,7 +669,9 @@ class Neo4jGraphAdapter:
             "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
             "{workspace_id: $workspace_id, layer: 'canonical'}) "
             "WHERE n.external_id IN $entity_ids "
-            "AND ($generation IS NULL OR n.generation = $generation) "
+            "AND ($generation IS NULL OR EXISTS { MATCH (n)<-[:RESOLVES_TO]-(:CortexMention)"
+            "-[:SUPPORTED_BY]->(:CortexEvidence {workspace_id: $workspace_id, "
+            "generation: $generation}) }) "
             "RETURN n.external_id AS entity_id, n.entity_type AS entity_type, "
             "n.display_name AS display_name, n.subtype AS subtype",
             workspace_id=self.workspace_id,
@@ -933,13 +1003,46 @@ class Neo4jGraphAdapter:
                 for item in self.entity_evidence(row["entity_id"])
                 if item.generation == generation
             )
+            property_records, _, _ = self.driver.execute_query(
+                "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
+                "{workspace_id: $workspace_id, layer: 'canonical', external_id: $entity_id})"
+                "-[:HAS_PROPERTY {generation: $generation}]->(p:CortexEntityProperty "
+                "{workspace_id: $workspace_id, generation: $generation, status: 'resolved'})"
+                "-[:SUPPORTED_BY]->(e:CortexEvidence {workspace_id: $workspace_id, "
+                "generation: $generation}) "
+                "RETURN p.property_id AS property_id, p.key AS key, p.value AS value, "
+                "p.value_type AS value_type, e.evidence_id AS evidence_id, "
+                "e.document_id AS document_id, e.document_version_id AS document_version_id, "
+                "e.logical_document_id AS logical_document_id, e.chunk_id AS chunk_id, "
+                "e.start_offset AS start_offset, e.end_offset AS end_offset, "
+                "e.source_text AS source_text, e.confidence AS confidence, "
+                "e.generation AS generation "
+                "ORDER BY p.property_id",
+                workspace_id=self.workspace_id,
+                entity_id=row["entity_id"],
+                generation=generation,
+                database_=self.database,
+            )
+            properties = tuple(
+                CanonicalEntityPropertyQueryView(
+                    item["property_id"], item["key"], item["value"], item["value_type"],
+                    CanonicalEvidenceQueryView(
+                        item["evidence_id"], item["document_id"], item["document_version_id"],
+                        item["logical_document_id"], item["chunk_id"], item["start_offset"],
+                        item["end_offset"],
+                        item["source_text"],
+                        item["confidence"],
+                        item["generation"],
+                    ),
+                ) for item in property_records
+            )
             output.append(
                 CanonicalEntityQueryView(
                     row["entity_id"],
                     row["entity_type"],
                     row["display_name"],
                     row.get("subtype"),
-                    evidence,
+                    evidence, properties,
                 )
             )
         return tuple(output)
@@ -952,8 +1055,11 @@ class Neo4jGraphAdapter:
             raise ValueError("generation, resource, and a safe population limit are required")
         counts, _, _ = self.driver.execute_query(
             "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
-            "{workspace_id: $workspace_id, layer: 'canonical', generation: $generation, "
-            "entity_type: $resource, status: 'active'}) RETURN count(n) AS candidate_count",
+            "{workspace_id: $workspace_id, layer: 'canonical', entity_type: $resource, "
+            "status: 'active'})"
+            "<-[:RESOLVES_TO]-(:CortexMention)-[:SUPPORTED_BY]->"
+            "(:CortexEvidence {workspace_id: $workspace_id, generation: $generation}) "
+            "RETURN count(DISTINCT n) AS candidate_count",
             workspace_id=self.workspace_id,
             generation=generation,
             resource=resource,
@@ -962,9 +1068,11 @@ class Neo4jGraphAdapter:
         candidate_count = int(counts[0]["candidate_count"]) if counts else 0
         records, _, _ = self.driver.execute_query(
             "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
-            "{workspace_id: $workspace_id, layer: 'canonical', generation: $generation, "
-            "entity_type: $resource, status: 'active'}) "
-            "RETURN n.external_id AS entity_id ORDER BY entity_id LIMIT $limit",
+            "{workspace_id: $workspace_id, layer: 'canonical', entity_type: $resource, "
+            "status: 'active'})"
+            "<-[:RESOLVES_TO]-(:CortexMention)-[:SUPPORTED_BY]->"
+            "(:CortexEvidence {workspace_id: $workspace_id, generation: $generation}) "
+            "RETURN DISTINCT n.external_id AS entity_id ORDER BY entity_id LIMIT $limit",
             workspace_id=self.workspace_id,
             generation=generation,
             resource=resource,
@@ -983,6 +1091,18 @@ class Neo4jGraphAdapter:
             candidate_count,
             safely_enumerable,
         )
+
+    def queryable_property_vocabulary(self, generation: str) -> dict[str, frozenset[str]]:
+        """Return only resolved, evidenced properties in this exact generation."""
+        records, _, _ = self.driver.execute_query(
+            "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
+            "{workspace_id: $workspace_id, layer: 'canonical', status: 'active'})"
+            "-[:HAS_PROPERTY {generation: $generation}]->(p:CortexEntityProperty "
+            "{workspace_id: $workspace_id, generation: $generation, status: 'resolved'}) "
+            "RETURN n.entity_type AS entity_type, collect(DISTINCT p.key) AS keys",
+            workspace_id=self.workspace_id, generation=generation, database_=self.database,
+        )
+        return {str(row["entity_type"]): frozenset(row["keys"]) for row in records}
 
     def query_canonical_artifact_evidence(
         self, generation: str, artifact_ids: tuple[str, ...], *, limit: int = 500
@@ -1130,6 +1250,42 @@ class Neo4jGraphAdapter:
                 )
             )
         return tuple(output)
+
+    def query_canonical_events(
+        self, generation: str, *, event_date: str, limit: int = 500
+    ) -> tuple[CanonicalEventQueryView, ...]:
+        """Enumerate only exact event-date membership from canonical generation state."""
+        if not generation.strip() or not 1 <= limit <= 500:
+            raise ValueError("generation and bounded event limit are required")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", event_date):
+            raise ValueError("event_date must be an ISO exact date")
+        records, _, _ = self.driver.execute_query(
+            "MATCH (event:CortexNode:CanonicalKnowledge:CanonicalArtifact "
+            "{workspace_id: $workspace_id, layer: 'canonical', artifact_type: 'event'})"
+            "-[:OCCURRED_AT {workspace_id: $workspace_id, generation: $generation}]->"
+            "(temporal:CortexNode:CanonicalKnowledge:CanonicalArtifact "
+            "{workspace_id: $workspace_id, layer: 'canonical', artifact_type: 'temporal'}) "
+            "WHERE temporal.normalized_start = $event_date "
+            "OPTIONAL MATCH (event)-[:HAS_PARTICIPANT {workspace_id: $workspace_id, "
+            "generation: $generation}]->(participant:CortexNode:CanonicalKnowledge:CanonicalEntity "
+            "{workspace_id: $workspace_id, layer: 'canonical'}) "
+            "RETURN event.external_id AS event_id, event.event_type AS event_type, "
+            "event.display_name AS display_name, temporal.normalized_start AS event_date, "
+            "collect(DISTINCT participant.external_id) AS participants "
+            "ORDER BY event_id LIMIT $limit",
+            workspace_id=self.workspace_id, generation=generation, event_date=event_date,
+            limit=limit, database_=self.database,
+        )
+        return tuple(
+            CanonicalEventQueryView(
+                record["event_id"], record["event_type"], record["display_name"],
+                record["event_date"], tuple(item for item in record["participants"] if item),
+                self.query_canonical_artifact_evidence(
+                    generation, (record["event_id"],)
+                ),
+            )
+            for record in records
+        )
 
     def query_claim_conflicts(
         self, generation: str, subject_ids: tuple[str, ...], *, limit: int = 500

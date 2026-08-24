@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal, Protocol
 
 from pydantic import ValidationError
@@ -16,6 +18,22 @@ from .schemas import SemanticUnderstanding
 
 PlannerTier = Literal["simple", "standard", "complex"]
 _TIERS: tuple[PlannerTier, ...] = ("simple", "standard", "complex")
+_ANALYTIC_TERMS = (
+    "en fazla",
+    "en az",
+    "sırala",
+    "siral",
+    "sıral",
+    "ranking",
+    "rank",
+    "highest",
+    "lowest",
+    "sort",
+    "order by",
+    "group by",
+)
+_COUNT_TERMS = ("sayısı", "sayisi", "adet", "kaç", "kac", "count", "number of")
+_ENUMERATION_TERMS = ("listele", "list", "her biri", "each", "tüm", "tum", "all")
 
 
 class StructuredPlannerProvider(Protocol):
@@ -80,7 +98,12 @@ def select_planner_tier(query: str, context: ConversationContext) -> PlannerTier
     """Choose prompt depth from shape only; semantic interpretation remains model-owned."""
     if context.state.candidate_references or len(query) > 500:
         return "complex"
-    if len(query) > 160 or len(context.history) > 6:
+    normalized = query.casefold()
+    is_analytic = any(term in normalized for term in _ANALYTIC_TERMS) or (
+        any(term in normalized for term in _COUNT_TERMS)
+        and any(term in normalized for term in _ENUMERATION_TERMS)
+    )
+    if len(query) > 160 or len(context.history) > 6 or is_analytic:
         return "standard"
     return "simple"
 
@@ -158,6 +181,7 @@ class SemanticPlannerAdapter:
                 )
                 try:
                     understanding = SemanticUnderstanding.model_validate_json(generated.text)
+                    understanding = _normalize_exact_temporals(understanding)
                 except ValidationError as error:
                     last_error = error
                     attempts.append(
@@ -248,3 +272,24 @@ def _strict_json_schema(value: object) -> object:
         result["required"] = list(properties)
         result["additionalProperties"] = False
     return result
+
+
+def _normalize_exact_temporals(understanding: SemanticUnderstanding) -> SemanticUnderstanding:
+    """Normalize deterministic Turkish dotted dates after semantic role selection."""
+    constraints = tuple(_normalize_temporal(item) for item in understanding.temporal_constraints)
+    return understanding.model_copy(update={"temporal_constraints": constraints})
+
+
+def _normalize_temporal(item):
+    if item.role != "event_date" or item.precision != "day" or item.uncertainty != "certain":
+        return item
+    match = re.fullmatch(r"\s*(\d{2})\.(\d{2})\.(\d{4})\s*", item.original_text)
+    if not match:
+        return item
+    normalized = f"{match.group(3)}-{match.group(2)}-{match.group(1)}"
+    try:
+        if date.fromisoformat(normalized).isoformat() != normalized:
+            raise ValueError
+    except ValueError as error:
+        raise ValueError("exact event_date requires a valid calendar day") from error
+    return item.model_copy(update={"normalized_start": normalized, "normalized_end": normalized})

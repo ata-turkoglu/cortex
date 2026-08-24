@@ -22,6 +22,69 @@ class EntityType(StrEnum):
     DYNAMIC = "dynamic"
 
 
+class EntityPropertyValueType(StrEnum):
+    """The closed value types permitted in canonical entity properties."""
+
+    STRING = "string"
+
+
+@dataclass(frozen=True)
+class EntityPropertyDefinition:
+    """A governed, queryable property -- never an arbitrary graph field."""
+
+    key: str
+    entity_types: frozenset[EntityType]
+    value_type: EntityPropertyValueType
+    operators: frozenset[str]
+    queryable: bool = True
+
+
+ENTITY_PROPERTY_VOCABULARY: dict[str, EntityPropertyDefinition] = {
+    "surname": EntityPropertyDefinition(
+        key="surname",
+        entity_types=frozenset({EntityType.PERSON}),
+        value_type=EntityPropertyValueType.STRING,
+        operators=frozenset({"eq"}),
+    )
+}
+
+
+@dataclass(frozen=True)
+class CanonicalEntityProperty:
+    """One resolved, generation-bound property assertion with exact evidence."""
+
+    property_id: str
+    entity_id: str
+    key: str
+    value: str
+    value_type: EntityPropertyValueType
+    authority: KnowledgeAuthority
+    generation: str
+    provenance: ExactSourceProvenance
+    status: str = "resolved"
+
+    def __post_init__(self) -> None:
+        require_canonical_id(self.property_id)
+        require_canonical_id(self.entity_id)
+        definition = ENTITY_PROPERTY_VOCABULARY.get(self.key)
+        if definition is None or not definition.queryable:
+            raise ValueError("entity property key is not governed and queryable")
+        if self.value_type != definition.value_type or not self.value.strip():
+            raise ValueError("entity property value does not match its governed definition")
+        if not self.generation.strip() or self.provenance.generation != self.generation:
+            raise ValueError("entity property provenance must match its generation")
+        if self.status not in {"candidate", "conflicted", "resolved"}:
+            raise ValueError("entity property status is unsupported")
+
+    @property
+    def queryable(self) -> bool:
+        return self.status == "resolved"
+
+    @property
+    def normalized_value(self) -> str:
+        return normalize_mention(self.value)
+
+
 class IdentityDecisionKind(StrEnum):
     UNRESOLVED = "unresolved"
     AUTO_LINK = "auto_link"

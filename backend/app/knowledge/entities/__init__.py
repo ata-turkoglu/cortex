@@ -2,9 +2,13 @@
 
 from .identity import merge_entities, resolve_conservatively, split_entity
 from .model import (
+    ENTITY_PROPERTY_VOCABULARY,
     CanonicalEntity,
+    CanonicalEntityProperty,
     EntityAlias,
     EntityMention,
+    EntityPropertyDefinition,
+    EntityPropertyValueType,
     EntityType,
     IdentityDecisionKind,
     IdentityOperation,
@@ -15,8 +19,12 @@ from .model import (
 
 __all__ = [
     "CanonicalEntity",
+    "CanonicalEntityProperty",
+    "ENTITY_PROPERTY_VOCABULARY",
     "EntityAlias",
     "EntityMention",
+    "EntityPropertyDefinition",
+    "EntityPropertyValueType",
     "EntityType",
     "IdentityDecisionKind",
     "IdentityOperation",

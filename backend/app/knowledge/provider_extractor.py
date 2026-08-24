@@ -19,7 +19,8 @@ from .pipeline import CorpusSnapshot
 
 _INSTRUCTIONS = """Extract only facts explicitly present in the supplied chunk.
 Return JSON only with
-mentions, relations, events, temporals, and claims arrays. Every item must provide chunk_id,
+mentions, entity_properties, relations, events, temporals, and claims arrays. Every item must
+provide chunk_id,
 start_offset, end_offset, source_text, and confidence. Never infer facts or spans. Mention IDs are
 local to this response; relation/event/claim references must use those IDs. Keep temporal
 original_text exactly equal to its source_text. source_text must be copied as one literal,
@@ -55,6 +56,11 @@ _EXTRACTION_SCHEMA: dict[str, object] = {
                 "enum": ["person", "organization", "location", "asset_property", "dynamic"],
             }},
             ["id", "entity_type"],
+        )},
+        "entity_properties": {"type": "array", "items": _row(
+            {"mention_id": {"type": "string"}, "key": {"type": "string", "enum": ["surname"]},
+             "value": {"type": "string"}},
+            ["mention_id", "key", "value"],
         )},
         "relations": {"type": "array", "items": _row(
             {
@@ -100,7 +106,7 @@ _EXTRACTION_SCHEMA: dict[str, object] = {
             ["subject_mention_id", "predicate", "value"],
         )},
     },
-    "required": ["mentions", "relations", "events", "temporals", "claims"],
+    "required": ["mentions", "entity_properties", "relations", "events", "temporals", "claims"],
 }
 
 

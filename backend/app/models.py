@@ -100,6 +100,9 @@ class KnowledgeGeneration(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     source_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_manifest_uri: Mapped[str | None] = mapped_column(Text)
+    source_manifest_hash: Mapped[str | None] = mapped_column(String(64))
+    source_chunk_count: Mapped[int | None] = mapped_column(Integer)
     state: Mapped[str] = mapped_column(String(32), nullable=False)
     failure_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -145,13 +148,9 @@ class QueryRuntimeActivation(Base):
     """The single workspace-scoped live query architecture pointer."""
 
     __tablename__ = "query_runtime_activations"
-    workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("workspaces.id"), primary_key=True
-    )
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
     runtime_version: Mapped[str] = mapped_column(String(16), nullable=False)
-    generation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("knowledge_generations.id")
-    )
+    generation_id: Mapped[str | None] = mapped_column(ForeignKey("knowledge_generations.id"))
     source_fingerprint: Mapped[str | None] = mapped_column(String(128))
     evaluation_fingerprint: Mapped[str | None] = mapped_column(String(128))
     curation_fingerprint: Mapped[str | None] = mapped_column(String(128))
@@ -163,13 +162,9 @@ class QueryCutoverAttempt(Base):
     """Immutable audit record for a passed or rejected V2 cutover attempt."""
 
     __tablename__ = "query_cutover_attempts"
-    __table_args__ = (
-        Index("ix_query_cutover_workspace_created", "workspace_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_query_cutover_workspace_created", "workspace_id", "created_at"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("workspaces.id"), nullable=False
-    )
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     generation_id: Mapped[str] = mapped_column(
         ForeignKey("knowledge_generations.id"), nullable=False
     )
@@ -476,9 +471,7 @@ class ResearchRunRecord(Base):
     """Durable Query V2 research state; provider calls use detached snapshots."""
 
     __tablename__ = "research_runs"
-    __table_args__ = (
-        Index("ix_research_runs_workspace_updated", "workspace_id", "updated_at"),
-    )
+    __table_args__ = (Index("ix_research_runs_workspace_updated", "workspace_id", "updated_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
@@ -499,9 +492,7 @@ class CompositionRunRecord(Base):
     """Durable long-form outline, section, provenance, and validation state."""
 
     __tablename__ = "composition_runs"
-    __table_args__ = (
-        Index("ix_composition_runs_workspace_updated", "workspace_id", "updated_at"),
-    )
+    __table_args__ = (Index("ix_composition_runs_workspace_updated", "workspace_id", "updated_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)

@@ -42,9 +42,7 @@ def generation_filter(workspace_id: str, generation_id: str, embedding_config_ha
     return Filter(
         must=[
             FieldCondition(key="workspace_id", match=MatchValue(value=workspace_id)),
-            FieldCondition(
-                key="knowledge_generation_id", match=MatchValue(value=generation_id)
-            ),
+            FieldCondition(key="knowledge_generation_id", match=MatchValue(value=generation_id)),
             FieldCondition(
                 key="embedding_config_hash", match=MatchValue(value=embedding_config_hash)
             ),
@@ -117,9 +115,11 @@ class WorkspaceQdrantStore:
                     id=deterministic_point_id(
                         resource_type,
                         self.workspace_id,
-                        f"{self.projection_key}:{record.record_id}"
-                        if self.projection_key
-                        else record.record_id,
+                        (
+                            f"{self.projection_key}:{record.record_id}"
+                            if self.projection_key
+                            else record.record_id
+                        ),
                     ),
                     vector=record.vector,
                     payload=payload,
@@ -163,11 +163,28 @@ class WorkspaceQdrantStore:
         ).points
         evidence = [self._to_evidence("chunks", point) for point in points]
         if any(
-            item.metadata.get("knowledge_generation_id") != scope.generation_id
-            for item in evidence
+            item.metadata.get("knowledge_generation_id") != scope.generation_id for item in evidence
         ):
             raise RuntimeError("GENERATION_MISMATCH")
         return evidence
+
+    def generation_payloads(self) -> tuple[dict[str, object], ...]:
+        """Return every payload in this immutable candidate projection."""
+        self._require_embedding_configuration("chunks")
+        if not self.projection_key:
+            raise ValueError("GENERATION_SCOPE_REQUIRED")
+        points, _ = self.client.scroll(
+            collection_name=COLLECTIONS["chunks"],
+            scroll_filter=generation_filter(
+                self.workspace_id,
+                self.projection_key,
+                self.embedding_config_hash or "",
+            ),
+            limit=100_000,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return tuple(dict(point.payload or {}) for point in points)
 
     def _to_evidence(self, resource_type: str, point) -> Evidence:
         payload = point.payload

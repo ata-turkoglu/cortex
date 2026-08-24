@@ -3,6 +3,7 @@
 from .reconciliation import EvidenceReconciliationError, reconcile_engine_results
 from .schemas import (
     AggregateResult,
+    CanonicalEventResult,
     ClaimResult,
     CompletenessReport,
     EngineFailure,
@@ -25,6 +26,7 @@ from .schemas import (
 
 __all__ = [
     "AggregateResult",
+    "CanonicalEventResult",
     "ClaimResult",
     "CompletenessReport",
     "EngineFailure",

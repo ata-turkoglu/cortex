@@ -4,16 +4,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..understanding import SemanticEntity, SemanticUnderstanding
+from ..understanding import (
+    SemanticEntity,
+    SemanticGovernedField,
+    SemanticTypedFilter,
+    SemanticUnderstanding,
+)
 from .schemas import (
     CandidateLogicalPlan,
     CompareNode,
+    CountNode,
     CoverageContract,
     DistinctNode,
+    EventSetNode,
     EvidenceRequirement,
+    FilterNode,
+    GroupNode,
     IRNode,
     LogicalQueryIR,
     OutputProjection,
+    RankNode,
     ResolveNode,
     RetrieveEvidenceNode,
     ScanNode,
@@ -56,6 +66,10 @@ def lower_semantic_understanding(
                     candidate.targets,
                     candidate.relations,
                     candidate.temporal_constraints,
+                    candidate.typed_filters,
+                    candidate.structured_operation,
+                    candidate.group_by,
+                    candidate.rank_direction,
                     candidate.operators,
                     workspace_id,
                     coverage,
@@ -96,6 +110,10 @@ def lower_semantic_understanding(
             understanding.targets,
             understanding.relations,
             understanding.temporal_constraints,
+            understanding.typed_filters,
+            understanding.structured_operation,
+            understanding.group_by,
+            understanding.rank_direction,
             understanding.operators,
             workspace_id,
             coverage,
@@ -124,6 +142,10 @@ def _lower_graph(
     targets,
     relations,
     temporals,
+    typed_filters: tuple[SemanticTypedFilter, ...],
+    structured_operation: str | None,
+    group_by: SemanticGovernedField | None,
+    rank_direction: str | None,
     operators,
     workspace_id: str,
     coverage: CoverageContract,
@@ -142,6 +164,11 @@ def _lower_graph(
     for ordinal, target in enumerate(targets, start=1):
         if target.reference_id and target.reference_id in reference_nodes:
             continue
+        if target.target_type == "event":
+            node = EventSetNode(node_id=f"event_set_{ordinal}")
+            nodes.append(node)
+            roots.append(node.node_id)
+            continue
         resource, output_type = _target_resource(target.target_type)
         if resource is None:
             raise ValueError(
@@ -157,12 +184,19 @@ def _lower_graph(
         nodes.append(node)
         roots.append(node.node_id)
 
+    if not roots and any(item.role == "event_date" for item in temporals):
+        node = EventSetNode(node_id="event_set_1")
+        nodes.append(node)
+        roots.append(node.node_id)
+
     for ordinal, relation in enumerate(relations, start=1):
         subject_node = reference_nodes.get(relation.subject_reference_id)
         if subject_node is None:
             raise ValueError(f"relation subject is unresolved: {relation.subject_reference_id}")
         source_resource = reference_resources[relation.subject_reference_id]
-        target_resource = reference_resources.get(relation.object_reference_id or "", "entity")
+        target_resource = reference_resources.get(
+            relation.object_reference_id or "", relation.target_entity_type
+        )
         node = TraverseNode(
             node_id=f"traverse_{ordinal}",
             inputs=(subject_node,),
@@ -177,9 +211,6 @@ def _lower_graph(
         nodes.append(node)
         roots = [item for item in roots if item != subject_node]
         roots.append(node.node_id)
-
-    if not roots:
-        raise ValueError("semantic understanding contains no lowerable target")
 
     if temporals:
         predicates = tuple(
@@ -205,6 +236,88 @@ def _lower_graph(
             ),
         )
 
+    for ordinal, typed_filter in enumerate(typed_filters, start=1):
+        matching_roots = []
+        for root in roots:
+            reference = next(
+                (ref for ref, node_id in reference_nodes.items() if node_id == root), ""
+            )
+            if reference_resources.get(reference) == typed_filter.target_type:
+                matching_roots.append(root)
+        if not matching_roots:
+            # A filter may introduce its own governed canonical population.
+            node = ScanNode(
+                node_id=f"filter_scan_{ordinal}",
+                output_type="entity_set",
+                workspace_id=workspace_id,
+                resource=typed_filter.target_type,
+                population_mode=("exhaustive" if coverage.mode == "exhaustive" else "discovery"),
+            )
+            nodes.append(node)
+            roots.append(node.node_id)
+            matching_roots = [node.node_id]
+        for root in matching_roots:
+            node = FilterNode(
+                node_id=f"filter_{ordinal}_{root}",
+                inputs=(root,),
+                output_type="entity_set",
+                field={"resource": typed_filter.target_type, "field": typed_filter.property},
+                comparator=typed_filter.operator,
+                value=typed_filter.value,
+            )
+            nodes.append(node)
+            roots[roots.index(root)] = node.node_id
+
+    if structured_operation in {"group", "rank"} and group_by and not roots:
+        node = ScanNode(
+            node_id="analytics_scan_1",
+            output_type="entity_set",
+            workspace_id=workspace_id,
+            resource=group_by.target_type,
+            population_mode="exhaustive",
+        )
+        nodes.append(node)
+        roots.append(node.node_id)
+
+    if not roots:
+        raise ValueError("semantic understanding contains no lowerable target")
+
+    if structured_operation:
+        if coverage.mode != "exhaustive":
+            raise ValueError("structured analytics require corpus_required coverage")
+        if structured_operation == "compare":
+            if len(roots) != 2:
+                raise ValueError("structured compare requires two canonical populations")
+            node = CompareNode(
+                node_id="compare_1", inputs=(roots[0], roots[1]), comparison="populations"
+            )
+            nodes.append(node)
+            roots = [node.node_id]
+        elif len(roots) != 1:
+            raise ValueError("structured analytics require one canonical population")
+        if structured_operation == "count":
+            node = CountNode(node_id="count_1", inputs=(roots[0],), output_type="scalar")
+            nodes.append(node)
+            roots = [node.node_id]
+        elif structured_operation in {"group", "rank"}:
+            assert group_by is not None
+            node = GroupNode(
+                node_id="group_1",
+                inputs=(roots[0],),
+                keys=({"resource": group_by.target_type, "field": group_by.property},),
+            )
+            nodes.append(node)
+            roots = [node.node_id]
+            if structured_operation == "rank":
+                node = RankNode(
+                    node_id="rank_1",
+                    inputs=(roots[0],),
+                    by={"resource": group_by.target_type, "field": group_by.property},
+                    direction=rank_direction or "descending",
+                )
+                nodes.append(node)
+                roots = [node.node_id]
+
     operator_set = set(operators)
     unsupported = operator_set & {"filter", "aggregate", "order"}
     if unsupported:
@@ -212,7 +325,7 @@ def _lower_graph(
             "semantic operators require typed arguments before lowering: "
             + ", ".join(sorted(unsupported))
         )
-    if "enumerate" in operator_set:
+    if "enumerate" in operator_set and not structured_operation:
         roots = _map_set_roots(
             nodes,
             roots,
@@ -220,7 +333,7 @@ def _lower_graph(
                 node_id=f"distinct_{ordinal}", inputs=(root,), output_type=output
             ),
         )
-    if "compare" in operator_set:
+    if "compare" in operator_set and structured_operation != "compare":
         if len(roots) != 2:
             raise ValueError("compare requires exactly two lowerable semantic targets")
         node = CompareNode(
@@ -248,8 +361,10 @@ def _lower_graph(
 
 
 def _resolve_node(entity: SemanticEntity, ordinal: int, workspace_id: str) -> ResolveNode:
-    if entity.resolution == "resolved" and entity.canonical_entity_id:
-        canonical_ids = (entity.canonical_entity_id,)
+    if entity.resolution == "resolved" and (
+        entity.canonical_entity_id or entity.canonical_entity_ids
+    ):
+        canonical_ids = entity.canonical_entity_ids or (entity.canonical_entity_id,)
         candidates: tuple[str, ...] = ()
     elif entity.resolution == "ambiguous" and entity.candidate_entity_ids:
         canonical_ids = ()

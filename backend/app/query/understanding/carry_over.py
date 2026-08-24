@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..context import (
+    ContextCanonicalResultSet,
     ContextEntityReference,
     ContextTemporalFocus,
     ConversationContext,
@@ -17,7 +18,10 @@ from .schemas import (
 
 
 def apply_conversation_context(
-    understanding: SemanticUnderstanding, context: ConversationContext
+    understanding: SemanticUnderstanding,
+    context: ConversationContext,
+    *,
+    generation_id: str | None = None,
 ) -> SemanticUnderstanding:
     """Resolve marked follow-ups without turning conversation assumptions into KG facts."""
     if understanding.state == "ambiguous" and understanding.candidates:
@@ -28,6 +32,28 @@ def apply_conversation_context(
     resolved_follow_ups = 0
     unresolved_follow_ups = 0
     for index, entity in enumerate(entities):
+        if entity.reference_kind == "conversation_result" and entity.resolution != "resolved":
+            result_set = context.state.last_final_entity_result
+            if (
+                result_set
+                and (
+                    entity.entity_type == "unknown" or entity.entity_type == result_set.entity_type
+                )
+                and (generation_id is None or result_set.generation_id == generation_id)
+            ):
+                entities[index] = SemanticEntity.model_validate(
+                    {
+                        **entity.model_dump(mode="json"),
+                        "resolution": "resolved",
+                        "canonical_entity_ids": list(result_set.canonical_entity_ids),
+                        "display_name": None,
+                        "candidate_entity_ids": [],
+                    }
+                )
+                resolved_follow_ups += 1
+            else:
+                unresolved_follow_ups += 1
+            continue
         if entity.reference_kind != "follow_up" or entity.resolution == "resolved":
             continue
         context_candidates = _candidate_ids(context, entity.entity_type)
@@ -114,6 +140,7 @@ def evolve_context_state(
     understanding: SemanticUnderstanding,
     *,
     source_message_id: str,
+    final_entity_result: ContextCanonicalResultSet | None = None,
 ) -> ConversationContextState:
     """Build the next local state; persistence remains an explicit short transaction."""
     resolved = list(context.state.resolved_entities)
@@ -157,6 +184,7 @@ def evolve_context_state(
         temporal_focus=tuple(temporal_focus[-10:]),
         explicit_constraints=context.state.explicit_constraints,
         assumptions=context.state.assumptions,
+        last_final_entity_result=final_entity_result,
     )
 
 
@@ -189,16 +217,18 @@ def _candidate(
     ordinal: int,
 ) -> dict[str, object]:
     candidate_entities = [
-        SemanticEntity.model_validate(
-            {
-                **item.model_dump(mode="json"),
-                "resolution": "resolved",
-                "canonical_entity_id": canonical_entity_id,
-                "candidate_entity_ids": [],
-            }
+        (
+            SemanticEntity.model_validate(
+                {
+                    **item.model_dump(mode="json"),
+                    "resolution": "resolved",
+                    "canonical_entity_id": canonical_entity_id,
+                    "candidate_entity_ids": [],
+                }
+            )
+            if item.reference_kind == "follow_up" and item.resolution == "ambiguous"
+            else item
         )
-        if item.reference_kind == "follow_up" and item.resolution == "ambiguous"
-        else item
         for item in entities
     ]
     return InterpretationCandidate(

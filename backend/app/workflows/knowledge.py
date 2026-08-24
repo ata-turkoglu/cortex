@@ -39,9 +39,7 @@ def begin(session: Session, run_id: str):
     )
     if held:
         owner = session.get(WorkflowRun, held.workflow_run_id)
-        if owner is None or owner.state in {
-            "completed", "failed", "cancelled", "interrupted"
-        }:
+        if owner is None or owner.state in {"completed", "failed", "cancelled", "interrupted"}:
             session.delete(held)
             session.flush()
             held = None
@@ -50,36 +48,24 @@ def begin(session: Session, run_id: str):
         return None
     session.add(
         WorkspaceLock(
-            id=str(uuid4()), workspace_id=run.workspace_id, lock_type="index",
-            workflow_run_id=run.id, acquired_at=now(),
+            id=str(uuid4()),
+            workspace_id=run.workspace_id,
+            lock_type="index",
+            workflow_run_id=run.id,
+            acquired_at=now(),
         )
     )
     snapshot = snapshot_active_corpus(session, run.workspace_id)
     generation = create_generation(session, run.workspace_id, snapshot.fingerprint)
     create_context(
-        session, workspace_id=run.workspace_id, workflow_run_id=run.id,
-        generation_id=generation.id, source_fingerprint=snapshot.fingerprint,
-    )
-    step = session.scalar(
-        select(WorkflowStepRun).where(
-            WorkflowStepRun.workflow_run_id == run.id,
-            WorkflowStepRun.step_name == "source_relational",
-        )
-    )
-    if step is None:
-        raise RuntimeError("knowledge_reindex source_relational step is missing")
-    mark_stage_ready(
-        session, generation, "source_relational", input_fingerprint=snapshot.fingerprint,
-        output_fingerprint=snapshot.fingerprint, metrics={"chunk_count": len(snapshot.chunks)},
-    )
-    step.state, step.checkpoint_json, step.updated_at = (
-        "completed",
-        json.dumps({"generation_id": generation.id}),
-        now(),
+        session,
+        workspace_id=run.workspace_id,
+        workflow_run_id=run.id,
+        generation_id=generation.id,
+        source_fingerprint=snapshot.fingerprint,
     )
     run.state, run.updated_at = "running", now()
     event(session, run, "started", generation_id=generation.id)
-    event(session, run, "step_completed", step="source_relational")
     return generation.id
 
 
@@ -123,8 +109,11 @@ def resume_or_begin(session: Session, run_id: str) -> str | None:
         if lock is None:
             session.add(
                 WorkspaceLock(
-                    id=str(uuid4()), workspace_id=run.workspace_id, lock_type="index",
-                    workflow_run_id=run.id, acquired_at=now(),
+                    id=str(uuid4()),
+                    workspace_id=run.workspace_id,
+                    lock_type="index",
+                    workflow_run_id=run.id,
+                    acquired_at=now(),
                 )
             )
         if run.state == "queued":
@@ -198,13 +187,24 @@ def complete_stage(session: Session, run_id: str, stage: str, result: StageResul
         raise ValueError("stage result does not match candidate generation")
     generation = session.get(KnowledgeGeneration, context.generation_id)
     mark_stage_ready(
-        session, generation, stage, input_fingerprint=context.source_fingerprint,
-        output_fingerprint=result.output_fingerprint, metrics=result.metrics,
+        session,
+        generation,
+        stage,
+        input_fingerprint=context.source_fingerprint,
+        output_fingerprint=result.output_fingerprint,
+        metrics=result.metrics,
     )
+    if stage == "source_relational" and "source_manifest_uri" in result.metrics:
+        generation.source_manifest_uri = str(result.metrics["source_manifest_uri"])
+        generation.source_manifest_hash = str(result.metrics["source_manifest_hash"])
+        generation.source_chunk_count = int(result.metrics["source_chunk_count"])
+    checkpoint_metrics = {
+        key: value for key, value in result.metrics.items() if "content" not in key.casefold()
+    }
     checkpoint(
         context,
         stage,
-        {"output_fingerprint": result.output_fingerprint, "metrics": result.metrics},
+        {"output_fingerprint": result.output_fingerprint, "metrics": checkpoint_metrics},
     )
     step = session.scalar(
         select(WorkflowStepRun).where(
@@ -234,10 +234,16 @@ def complete(session: Session, run_id: str) -> None:
     run = session.get(WorkflowRun, run_id)
     if not run or run.state != "running":
         return
-    context = (
-        session.query(KnowledgeReindexRunContext).filter_by(workflow_run_id=run_id).one()
-    )
+    context = session.query(KnowledgeReindexRunContext).filter_by(workflow_run_id=run_id).one()
     generation = session.get(KnowledgeGeneration, context.generation_id)
+    if generation is not None and generation.source_manifest_uri:
+        from ..core.config import get_settings
+        from ..knowledge.construction import validate_manifest_projection_agreement
+
+        if not validate_manifest_projection_agreement(
+            session, generation, get_settings().data_path
+        ):
+            raise RuntimeError("knowledge generation manifest/projection agreement failed")
     if generation is None or not activate_if_ready(session, generation):
         raise RuntimeError("knowledge candidate is not ready for activation")
     run.state, run.finished_at, run.updated_at = "completed", now(), now()
@@ -261,7 +267,7 @@ def execute(run_id: str, session_factory, executor) -> None:
         session.close()
     if not generation_id:
         return
-    for stage in MANDATORY_KNOWLEDGE_STAGES[1:]:
+    for stage in MANDATORY_KNOWLEDGE_STAGES:
         session = session_factory()
         try:
             if stage_is_complete(session, run_id, stage):

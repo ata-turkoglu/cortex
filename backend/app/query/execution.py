@@ -1,18 +1,16 @@
-"""Dormant V2 physical-plan execution boundary.
-
-This intentionally executes only generation-bound retrieval reads. It is internal
-and testable; production chat routing, fusion, reconciliation, and answer rendering
-stay outside this batch.
-"""
+"""Physical, generation-bound Query V2 plan execution."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from time import perf_counter
+from typing import Any, Protocol
 
 from app.retrieval.schemas import Evidence
 
-from .planning import PhysicalExecutionPlan
+from .ir.schemas import IRNode
+from .orchestration import CompletenessReport, EngineFailure, EngineResult, EngineTrace
+from .planning import ExecutionStep, PhysicalExecutionPlan
 from .scope import GenerationScope
 
 
@@ -34,16 +32,19 @@ class GenerationSparseStore(Protocol):
 
 @dataclass(frozen=True)
 class V2DenseAdapter:
-    """The sole dense retrieval adapter used by the dormant V2 executor."""
-
     store: GenerationDenseStore
 
     def search(
         self, scope: GenerationScope, query_vector: list[float], limit: int
     ) -> tuple[Evidence, ...]:
-        evidence = tuple(self.store.search_generation(query_vector, limit, scope))
+        evidence = tuple(
+            item
+            for item in self.store.search_generation(query_vector, limit, scope)
+            if item.score > 0
+        )
         if any(
-            item.metadata.get("knowledge_generation_id") != scope.generation_id
+            item.workspace_id != scope.workspace_id
+            or item.metadata.get("knowledge_generation_id") != scope.generation_id
             for item in evidence
         ):
             raise RuntimeError("GENERATION_MISMATCH")
@@ -52,14 +53,12 @@ class V2DenseAdapter:
 
 @dataclass(frozen=True)
 class V2SparseAdapter:
-    """The sole sparse retrieval adapter used by the dormant V2 executor."""
-
     store: GenerationSparseStore
 
-    def search(
-        self, scope: GenerationScope, query: str, limit: int
-    ) -> tuple[Evidence, ...]:
-        evidence = tuple(self.store.search_generation(scope, query, limit))
+    def search(self, scope: GenerationScope, query: str, limit: int) -> tuple[Evidence, ...]:
+        evidence = tuple(
+            item for item in self.store.search_generation(scope, query, limit) if item.score > 0
+        )
         if any(
             item.workspace_id != scope.workspace_id
             or item.metadata.get("knowledge_generation_id") != scope.generation_id
@@ -83,25 +82,220 @@ class V2ExecutionTrace:
 
 @dataclass(frozen=True)
 class V2ExecutionResult:
-    """Non-user-facing internal result; it is not an EngineResult or an answer."""
-
     trace: V2ExecutionTrace
     dense_evidence: tuple[Evidence, ...] = ()
     sparse_evidence: tuple[Evidence, ...] = ()
 
 
+@dataclass(frozen=True)
+class EngineExecutionContext:
+    step: ExecutionStep
+    node: IRNode
+    scope: GenerationScope
+    dependency_values: tuple[Any, ...]
+    query_vector: list[float] | None
+    query_text: str | None
+    trusted_sources: tuple[Any, ...]
+    dense_limit: int
+    sparse_limit: int
+
+
+@dataclass(frozen=True)
+class EngineExecutionOutput:
+    value: Any
+    result: EngineResult
+
+
+class ProductionQueryEngine(Protocol):
+    def execute(self, context: EngineExecutionContext) -> EngineExecutionOutput: ...
+
+
+class ProductionEngineRegistry:
+    """Explicit, request-scoped dispatch boundary for V2 physical engines."""
+
+    def __init__(self, engines: dict[str, ProductionQueryEngine]) -> None:
+        self._engines = dict(engines)
+
+    def engine_for(self, name: str) -> ProductionQueryEngine:
+        try:
+            return self._engines[name]
+        except KeyError as error:
+            raise ValueError(f"V2_ENGINE_NOT_REGISTERED:{name}") from error
+
+
+class RetrievalProductionEngine:
+    def __init__(self, dense: V2DenseAdapter, sparse: V2SparseAdapter | None) -> None:
+        self.dense = dense
+        self.sparse = sparse
+
+    def execute(self, context: EngineExecutionContext) -> EngineExecutionOutput:
+        if context.query_vector is None:
+            raise ValueError("V2_RETRIEVAL_VECTOR_REQUIRED")
+        started = perf_counter()
+        dense = self.dense.search(context.scope, context.query_vector, context.dense_limit)
+        sparse: tuple[Evidence, ...] = ()
+        if context.step.capability == "retrieval.hybrid_search":
+            if self.sparse is None or context.query_text is None:
+                raise ValueError("GENERATION_BM25_NOT_READY")
+            sparse = self.sparse.search(context.scope, context.query_text, context.sparse_limit)
+        raw = V2ExecutionResult(
+            V2ExecutionTrace(
+                context.scope.workspace_id,
+                context.scope.generation_id,
+                context.scope.embedding_config_hash,
+                context.step.capability,
+                len(dense),
+                "sparse/bm25" if sparse else None,
+                len(sparse),
+                f"{context.scope.workspace_id}:{context.scope.generation_id}:bm25"
+                if sparse
+                else None,
+            ),
+            dense,
+            sparse,
+        )
+        # ``bridge_retrieval`` only needs the one declared retrieval step.
+        plan = type(
+            "RetrievalPlan", (), {"graph": type("Graph", (), {"steps": (context.step,)})()}
+        )()
+        from .orchestration.retrieval_bridge import bridge_retrieval
+
+        bridge = bridge_retrieval(
+            plan,
+            raw,
+            context.scope,
+            context.trusted_sources,
+            limit=max(1, len(context.trusted_sources)),
+        )
+        result = bridge.engine_result.model_copy(
+            update={
+                "trace": bridge.engine_result.trace.model_copy(
+                    update={"duration_ms": int((perf_counter() - started) * 1_000)}
+                )
+            }
+        )
+        return EngineExecutionOutput(None, result)
+
+
+class UnavailableProductionEngine:
+    """Registered but fail-closed until an engine can satisfy exact provenance."""
+
+    def __init__(self, name: str, reason: str) -> None:
+        self.name = name
+        self.reason = reason
+
+    def execute(self, context: EngineExecutionContext) -> EngineExecutionOutput:
+        result = EngineResult(
+            result_id=f"failed-{context.step.step_id}",
+            workspace_id=context.scope.workspace_id,
+            generation_id=context.scope.generation_id,
+            step_id=context.step.step_id,
+            engine=context.step.engine,
+            capability=context.step.capability,
+            state="failed",
+            completeness=CompletenessReport(
+                coverage=context.step.coverage_expectation,
+                state="unknown",
+                generation_id=context.scope.generation_id,
+            ),
+            confidence=0.0,
+            failures=(
+                EngineFailure(
+                    step_id=context.step.step_id,
+                    engine=self.name,
+                    capability=context.step.capability,
+                    reason=self.reason,
+                ),
+            ),
+            trace=EngineTrace(
+                step_id=context.step.step_id,
+                engine=context.step.engine,
+                capability=context.step.capability,
+                duration_ms=0,
+            ),
+        )
+        return EngineExecutionOutput(None, result)
+
+
+@dataclass(frozen=True)
+class V2PlanExecution:
+    scope: GenerationScope
+    results: tuple[EngineResult, ...]
+    values: dict[str, Any]
+    skipped_step_ids: tuple[str, ...]
+
+
 class V2PlanExecutor:
-    """Execute the retrieval step declared by an existing PhysicalExecutionPlan."""
+    """Execute every material step of a validated DAG in dependency order."""
 
     def __init__(
         self,
         scope_resolver: GenerationScopeResolver,
         dense: V2DenseAdapter,
         sparse: V2SparseAdapter | None = None,
+        registry: ProductionEngineRegistry | None = None,
     ) -> None:
         self.scope_resolver = scope_resolver
         self.dense = dense
         self.sparse = sparse
+        self.registry = registry or ProductionEngineRegistry(
+            {"retrieval": RetrievalProductionEngine(dense, sparse)}
+        )
+
+    def execute_plan(
+        self,
+        plan: PhysicalExecutionPlan,
+        nodes: tuple[IRNode, ...],
+        *,
+        query_vector: list[float] | None,
+        query_text: str | None,
+        trusted_sources: tuple[Any, ...],
+        dense_limit: int = 30,
+        sparse_limit: int = 30,
+    ) -> V2PlanExecution:
+        if plan.state != "ready" or plan.graph is None:
+            raise ValueError("V2 executor requires a ready physical execution plan")
+        scope = self.scope_resolver.resolve(plan.workspace_id)
+        if scope.workspace_id != plan.workspace_id:
+            raise ValueError("GENERATION_SCOPE_WORKSPACE_MISMATCH")
+        node_by_id = {node.node_id: node for node in nodes}
+        values: dict[str, Any] = {}
+        results: list[EngineResult] = []
+        skipped: list[str] = []
+        pending = {step.step_id: step for step in plan.graph.steps}
+        while pending:
+            ready = [
+                step
+                for step in pending.values()
+                if all(dep in values or dep in skipped for dep in step.dependencies)
+            ]
+            if not ready:
+                raise ValueError("V2_EXECUTION_PLAN_DEPENDENCY_INVALID")
+            for step in ready:
+                pending.pop(step.step_id)
+                if step.engine in {"result_evidence", "reasoning"}:
+                    skipped.append(step.step_id)
+                    continue
+                node_ids = step.trace.logical_node_ids
+                if len(node_ids) != 1 or node_ids[0] not in node_by_id:
+                    raise ValueError(f"V2_EXECUTION_NODE_BINDING_INVALID:{step.step_id}")
+                context = EngineExecutionContext(
+                    step,
+                    node_by_id[node_ids[0]],
+                    scope,
+                    tuple(values[item] for item in step.dependencies if item in values),
+                    query_vector,
+                    query_text,
+                    trusted_sources,
+                    dense_limit,
+                    sparse_limit,
+                )
+                output = self.registry.engine_for(step.engine).execute(context)
+                values[step.step_id] = output.value
+                results.append(output.result)
+                if output.result.state == "failed" and step.failure_policy.action == "fail_closed":
+                    raise RuntimeError(f"V2_REQUIRED_ENGINE_FAILED:{step.step_id}")
+        return V2PlanExecution(scope, tuple(results), values, tuple(skipped))
 
     def execute(
         self,
@@ -112,56 +306,30 @@ class V2PlanExecutor:
         query_text: str | None = None,
         sparse_limit: int | None = None,
     ) -> V2ExecutionResult:
+        """Compatibility retrieval-only API; production uses ``execute_plan``."""
         if plan.state != "ready" or plan.graph is None:
             raise ValueError("V2 executor requires a ready physical execution plan")
-        if dense_limit < 1:
-            raise ValueError("dense_limit must be positive")
-        # Resolve exactly once; every engine receives this immutable snapshot.
         scope = self.scope_resolver.resolve(plan.workspace_id)
-        if scope.workspace_id != plan.workspace_id:
-            raise ValueError("GENERATION_SCOPE_WORKSPACE_MISMATCH")
-        retrieval_steps = tuple(
-            step
-            for step in plan.graph.steps
-            if step.engine == "retrieval"
-            and step.capability in {"retrieval.hybrid_search", "retrieval.semantic_search"}
-        )
-        if not retrieval_steps:
-            return V2ExecutionResult(
-                trace=V2ExecutionTrace(
-                    workspace_id=scope.workspace_id,
-                    generation_id=scope.generation_id,
-                    embedding_config_hash=scope.embedding_config_hash,
-                    engine=None,
-                    result_count=0,
-                )
-            )
-        if len(retrieval_steps) != 1:
-            raise ValueError("minimal V2 executor supports exactly one retrieval step")
-        evidence = self.dense.search(scope, query_vector, dense_limit)
-        step = retrieval_steps[0]
-        sparse_evidence: tuple[Evidence, ...] = ()
-        sparse_engine = None
-        sparse_artifact_identity = None
-        if step.capability == "retrieval.hybrid_search":
+        steps = [step for step in plan.graph.steps if step.engine == "retrieval"]
+        if len(steps) != 1:
+            raise ValueError("minimal compatibility executor supports exactly one retrieval step")
+        dense = self.dense.search(scope, query_vector, dense_limit)
+        sparse: tuple[Evidence, ...] = ()
+        if steps[0].capability == "retrieval.hybrid_search":
             if self.sparse is None or query_text is None:
                 raise ValueError("GENERATION_BM25_NOT_READY")
-            sparse_evidence = self.sparse.search(
-                scope, query_text, sparse_limit if sparse_limit is not None else dense_limit
-            )
-            sparse_engine = "sparse/bm25"
-            sparse_artifact_identity = f"{scope.workspace_id}:{scope.generation_id}:bm25"
+            sparse = self.sparse.search(scope, query_text, sparse_limit or dense_limit)
         return V2ExecutionResult(
-            trace=V2ExecutionTrace(
-                workspace_id=scope.workspace_id,
-                generation_id=scope.generation_id,
-                embedding_config_hash=scope.embedding_config_hash,
-                engine=step.capability,
-                result_count=len(evidence),
-                sparse_engine=sparse_engine,
-                sparse_result_count=len(sparse_evidence),
-                sparse_artifact_identity=sparse_artifact_identity,
+            V2ExecutionTrace(
+                scope.workspace_id,
+                scope.generation_id,
+                scope.embedding_config_hash,
+                steps[0].capability,
+                len(dense),
+                "sparse/bm25" if sparse else None,
+                len(sparse),
+                f"{scope.workspace_id}:{scope.generation_id}:bm25" if sparse else None,
             ),
-            dense_evidence=evidence,
-            sparse_evidence=sparse_evidence,
+            dense,
+            sparse,
         )

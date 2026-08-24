@@ -1,17 +1,16 @@
 """Read-only trace of source files through logical documents, chunks, and GraphRAG."""
 
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..chat.service import _hybrid_evidence
 from ..core.workspaces import WorkspaceContext, WorkspaceNotFoundError
 from ..graphrag.adapter import GraphRAGAdapter
 from ..models import Chunk, Document, DocumentVersion, LogicalDocument
-from ..retrieval.document_lookup import group_evidence_by_document
 from .workspaces import get_session
 
 router = APIRouter(tags=["ingestion-diagnostics"])
@@ -50,6 +49,32 @@ class IngestionDiagnostic(BaseModel):
     document_version_id: str
     logical_documents: list[DiagnosticLogicalDocument]
     retrieved_documents: list[RetrievedLogicalDocument]
+
+
+def _diagnostic_matches(
+    logical_rows: list[LogicalDocument], chunk_rows: list[Chunk], query: str
+) -> list[RetrievedLogicalDocument]:
+    """Rank persisted chunks for source diagnostics without invoking a query runtime."""
+    terms = set(re.findall(r"\w+", query.casefold(), re.UNICODE))
+    by_id = {item.id: item for item in logical_rows}
+    scores: dict[str, float] = {}
+    for chunk in chunk_rows:
+        if not chunk.logical_document_id or chunk.logical_document_id not in by_id:
+            continue
+        overlap = terms & set(re.findall(r"\w+", chunk.content.casefold(), re.UNICODE))
+        if overlap:
+            scores[chunk.logical_document_id] = max(
+                scores.get(chunk.logical_document_id, 0.0), len(overlap) / max(1, len(terms))
+            )
+    return [
+        RetrievedLogicalDocument(
+            document_id=document_id,
+            document_code=by_id[document_id].document_code,
+            title=by_id[document_id].title,
+            score=score,
+        )
+        for document_id, score in sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+    ]
 
 
 def _matching_artifact_ids(
@@ -145,18 +170,7 @@ def ingestion_diagnostic(  # noqa: B008
         )
     retrieved = []
     if query:
-        retrieval = _hybrid_evidence(session, workspace_id, query, needs_list=True)
-        matches = group_evidence_by_document(list(retrieval.evidence), exact_text=query)
-        retrieved = [
-            RetrievedLogicalDocument(
-                document_id=item.document_id,
-                document_code=item.document_code,
-                title=item.title,
-                score=item.score,
-            )
-            for item in matches
-            if any(logical.id == item.document_id for logical in logical_rows)
-        ]
+        retrieved = _diagnostic_matches(list(logical_rows), list(chunk_rows), query)
     return IngestionDiagnostic(
         source_document_id=source.id,
         source_original=version.source_filename,

@@ -18,6 +18,7 @@ from .construction import (
     fail_stage,
     mark_stage_ready,
     mark_stage_running,
+    validate_manifest_projection_agreement,
 )
 
 
@@ -50,9 +51,7 @@ class StageResult:
 class KnowledgeStageExecutor(Protocol):
     """External/model/store work. Implementations must preserve stronger graph authority."""
 
-    def execute(
-        self, stage: str, snapshot: CorpusSnapshot, generation_id: str
-    ) -> StageResult: ...
+    def execute(self, stage: str, snapshot: CorpusSnapshot, generation_id: str) -> StageResult: ...
 
 
 def snapshot_active_corpus(session: Session, workspace_id: str) -> CorpusSnapshot:
@@ -108,19 +107,12 @@ def run_knowledge_construction(
         snapshot = snapshot_active_corpus(session, workspace_id)
         generation = create_generation(session, workspace_id, snapshot.fingerprint)
         generation_id = generation.id
-        mark_stage_ready(
-            session,
-            generation,
-            "source_relational",
-            input_fingerprint=snapshot.fingerprint,
-            output_fingerprint=snapshot.fingerprint,
-            metrics={"chunk_count": len(snapshot.chunks)},
-        )
         session.commit()
+
     finally:
         session.close()
 
-    for stage in MANDATORY_KNOWLEDGE_STAGES[1:]:
+    for stage in MANDATORY_KNOWLEDGE_STAGES:
         session = session_factory()
         try:
             generation = session.get(KnowledgeGeneration, generation_id)
@@ -166,6 +158,10 @@ def run_knowledge_construction(
                 output_fingerprint=result.output_fingerprint,
                 metrics=result.metrics,
             )
+            if stage == "source_relational" and "source_manifest_uri" in result.metrics:
+                generation.source_manifest_uri = str(result.metrics["source_manifest_uri"])
+                generation.source_manifest_hash = str(result.metrics["source_manifest_hash"])
+                generation.source_chunk_count = int(result.metrics["source_chunk_count"])
             session.commit()
         finally:
             session.close()
@@ -173,6 +169,20 @@ def run_knowledge_construction(
     session = session_factory()
     try:
         generation = session.get(KnowledgeGeneration, generation_id)
+        if generation is not None and generation.source_manifest_uri:
+            from ..core.config import get_settings
+
+            if not validate_manifest_projection_agreement(
+                session, generation, get_settings().data_path
+            ):
+                fail_stage(
+                    session,
+                    generation,
+                    "dense_qdrant",
+                    summary="manifest/projection agreement failed",
+                )
+                session.commit()
+                raise RuntimeError("knowledge generation manifest/projection agreement failed")
         if generation is None or not activate_if_ready(session, generation):
             raise RuntimeError("knowledge generation did not pass the readiness gate")
         session.commit()

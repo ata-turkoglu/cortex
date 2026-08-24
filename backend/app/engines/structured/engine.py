@@ -6,6 +6,7 @@ import json
 from hashlib import sha256
 from time import perf_counter
 
+from app.knowledge.entities import normalize_mention
 from app.query.ir.schemas import (
     AggregateNode,
     CompareNode,
@@ -97,7 +98,10 @@ class StructuredQueryEngine:
             ready_projections=population.ready_projections,
         )
         return StructuredValue(
-            kind="records", records=population.records, completeness=completeness
+            kind="records",
+            records=population.records,
+            evidence=_record_evidence(population.records),
+            completeness=completeness,
         )
 
     def _apply(self, node: IRNode, inputs: tuple[StructuredValue, ...]) -> StructuredValue:
@@ -105,21 +109,27 @@ class StructuredQueryEngine:
         if isinstance(node, FilterNode):
             records = tuple(
                 item for item in source.records
-                if _compare(item.values.get(node.field.field), node.comparator, node.value)
+                if _compare(
+                    item.values.get(node.field.field), node.comparator, node.value,
+                    normalized_string=node.field.field == "surname",
+                )
             )
-            return _records(records, source.completeness)
+            return _records(records, source.completeness, source.evidence)
         if isinstance(node, DistinctNode):
             fields = tuple(field.field for field in node.fields)
             unique: dict[str, CanonicalRecord] = {}
             for item in source.records:
                 key = _stable(tuple(item.values.get(field) for field in fields) or item.values)
                 unique.setdefault(key, item)
-            return _records(tuple(unique.values()), source.completeness)
+            return _records(tuple(unique.values()), source.completeness, source.evidence)
         if isinstance(node, GroupNode):
             grouped: dict[str, list[CanonicalRecord]] = {}
             keys: dict[str, dict] = {}
             for item in source.records:
                 values = {field.field: item.values.get(field.field) for field in node.keys}
+                if any(value is None for value in values.values()):
+                    # Withheld/conflicted governed properties do not form synthetic groups.
+                    continue
                 group_id = _stable(values)
                 grouped.setdefault(group_id, []).append(item)
                 keys[group_id] = values
@@ -166,6 +176,7 @@ class StructuredQueryEngine:
             return StructuredValue(
                 kind="scalar", records=source.records, groups=source.groups, scalar=scalar,
                 aggregate_function="distinct_count" if node.distinct_fields else "count",
+                evidence=source.evidence,
                 completeness=source.completeness,
             )
         if isinstance(node, AggregateNode):
@@ -177,8 +188,22 @@ class StructuredQueryEngine:
                 kind="scalar", records=source.records, groups=source.groups,
                 scalar=values if source.groups else values[node.alias],
                 aggregate_function=node.function, completeness=source.completeness,
+                evidence=source.evidence,
             )
         if isinstance(node, RankNode):
+            if source.groups:
+                groups = sorted(
+                    source.groups,
+                    key=lambda group: (
+                        -len(group.records)
+                        if node.direction == "descending"
+                        else len(group.records),
+                        _stable(group.keys),
+                    ),
+                )
+                return StructuredValue(
+                    kind="groups", groups=tuple(groups), completeness=source.completeness
+                )
             records = sorted(
                 source.records,
                 key=lambda item: _sortable(item.values.get(node.by.field)),
@@ -226,7 +251,9 @@ class StructuredQueryEngine:
         raise StructuredExecutionError(f"unsupported structured operator: {node.kind}")
 
     def _result(self, step: ExecutionStep, value: StructuredValue, duration: int) -> EngineResult:
-        evidence = _evidence(value)
+        # Row results cite only their returned rows. Aggregates retain the scanned
+        # population evidence so a valid zero can remain grounded.
+        evidence = _evidence(value, include_carried=value.aggregate_function is not None)
         evidence_ids = tuple(item.evidence_id for item in evidence)
         rows: tuple[GroundedItem, ...] = ()
         aggregates: tuple[AggregateResult, ...] = ()
@@ -277,11 +304,15 @@ class StructuredQueryEngine:
         )
 
 
-def _records(records, completeness):
-    return StructuredValue(kind="records", records=records, completeness=completeness)
+def _records(records, completeness, evidence=()):
+    return StructuredValue(
+        kind="records", records=records, evidence=evidence, completeness=completeness
+    )
 
 
-def _compare(actual, comparator, expected):
+def _compare(actual, comparator, expected, *, normalized_string=False):
+    if normalized_string and isinstance(actual, str) and isinstance(expected, str):
+        actual, expected = normalize_mention(actual), normalize_mention(expected)
     if comparator == "exists":
         return actual is not None
     if comparator == "eq":
@@ -342,6 +373,14 @@ def _record_evidence_ids(records):
     return tuple(dict.fromkeys(e.evidence_id for item in records for e in item.evidence))
 
 
+def _record_evidence(records):
+    unique = {}
+    for record in records:
+        for evidence in record.evidence:
+            unique.setdefault(evidence.evidence_id, evidence)
+    return tuple(unique.values())
+
+
 def _joined_record(left, right):
     return CanonicalRecord(
         record_id=f"join-{left.record_id}-{right.record_id}",
@@ -361,9 +400,9 @@ def _temporal_match(record, predicate):
     return True
 
 
-def _evidence(value):
+def _evidence(value, *, include_carried=False):
     records = value.records or tuple(item for group in value.groups for item in group.records)
-    unique = {}
+    unique = {item.evidence_id: item for item in value.evidence} if include_carried else {}
     for record in records:
         for evidence in record.evidence:
             unique.setdefault(evidence.evidence_id, evidence)

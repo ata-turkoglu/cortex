@@ -5,6 +5,7 @@ from typing import Any
 
 from .extraction import (
     ExtractedClaim,
+    ExtractedEntityProperty,
     ExtractedEvent,
     ExtractedMention,
     ExtractedRelation,
@@ -72,6 +73,12 @@ def decode_extraction_json(text: str, metadata: ExtractionMetadata) -> Knowledge
         ExtractedMention(_string(row, "id"), _string(row, "entity_type"), _span(row))
         for row in _rows(payload, "mentions")
     )
+    entity_properties = tuple(
+        ExtractedEntityProperty(
+            _string(row, "mention_id"), _string(row, "key"), _string(row, "value"), _span(row)
+        )
+        for row in _rows(payload, "entity_properties")
+    )
     relations = tuple(
         ExtractedRelation(
             _string(row, "relation_type"),
@@ -115,4 +122,6 @@ def decode_extraction_json(text: str, metadata: ExtractionMetadata) -> Knowledge
         )
         for row in _rows(payload, "claims")
     )
-    return KnowledgeExtractionBundle(metadata, mentions, relations, events, temporals, claims)
+    return KnowledgeExtractionBundle(
+        metadata, mentions, entity_properties, relations, events, temporals, claims
+    )

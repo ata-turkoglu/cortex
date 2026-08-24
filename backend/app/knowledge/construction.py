@@ -1,7 +1,9 @@
 """Durable, generation-consistent readiness gate for knowledge construction."""
 
+import hashlib
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -146,6 +148,48 @@ def fail_stage(
     generation.failure_json = state.error_json
     generation.updated_at = state.updated_at
     return state
+
+
+def validate_manifest_projection_agreement(
+    session: Session, generation: KnowledgeGeneration, data_root: Path
+) -> bool:
+    """Fail closed unless the persisted candidate projections match its manifest."""
+    from .source_manifest import SourceManifestValidationError, load_generation_manifest
+
+    try:
+        sources = load_generation_manifest(
+            session, generation.workspace_id, generation.id, data_root
+        )
+    except SourceManifestValidationError:
+        return False
+    expected_ids = sorted(source.chunk_id for source in sources)
+    expected_hashes = {
+        source.chunk_id: hashlib.sha256(source.content.encode("utf-8")).hexdigest()
+        for source in sources
+    }
+    states = {
+        state.stage: state
+        for state in session.scalars(
+            select(KnowledgeStageState).where(
+                KnowledgeStageState.generation_id == generation.id,
+                KnowledgeStageState.workspace_id == generation.workspace_id,
+            )
+        )
+    }
+    for stage in ("bm25", "dense_qdrant"):
+        state = states.get(stage)
+        try:
+            metrics = json.loads(state.metrics_json or "{}") if state else {}
+        except json.JSONDecodeError:
+            return False
+        if (
+            metrics.get("chunk_count") != generation.source_chunk_count
+            or metrics.get("source_manifest_hash") != generation.source_manifest_hash
+            or metrics.get("chunk_ids") != expected_ids
+            or metrics.get("content_hashes") != expected_hashes
+        ):
+            return False
+    return True
 
 
 def activate_if_ready(session: Session, generation: KnowledgeGeneration) -> bool:

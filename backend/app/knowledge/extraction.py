@@ -45,6 +45,16 @@ class ExtractedMention:
 
 
 @dataclass(frozen=True)
+class ExtractedEntityProperty:
+    """An extraction-stage candidate explicitly grounded in its own source span."""
+
+    mention_id: str
+    key: str
+    value: str
+    span: ExtractedSpan
+
+
+@dataclass(frozen=True)
 class ExtractedRelation:
     relation_type: str
     source_mention_id: str
@@ -84,6 +94,7 @@ class ExtractedClaim:
 class KnowledgeExtractionBundle:
     metadata: ExtractionMetadata
     mentions: tuple[ExtractedMention, ...] = ()
+    entity_properties: tuple[ExtractedEntityProperty, ...] = ()
     relations: tuple[ExtractedRelation, ...] = ()
     events: tuple[ExtractedEvent, ...] = ()
     temporals: tuple[ExtractedTemporal, ...] = ()
@@ -119,6 +130,9 @@ def align_unique_exact_spans(
     return replace(
         bundle,
         mentions=tuple(replace(item, span=aligned(item.span)) for item in bundle.mentions),
+        entity_properties=tuple(
+            replace(item, span=aligned(item.span)) for item in bundle.entity_properties
+        ),
         relations=tuple(replace(item, span=aligned(item.span)) for item in bundle.relations),
         events=tuple(replace(item, span=aligned(item.span)) for item in bundle.events),
         temporals=tuple(replace(item, span=aligned(item.span)) for item in bundle.temporals),
@@ -148,6 +162,15 @@ def retain_exact_assertions(
         and item.source_mention_id in mention_ids
         and item.target_mention_id in mention_ids
     )
+    entity_properties = tuple(
+        item
+        for item in bundle.entity_properties
+        if (
+            exact(item.span)
+            and item.mention_id in mention_ids
+            and item.value == item.span.source_text
+        )
+    )
     events = tuple(
         item for item in bundle.events
         if exact(item.span) and set(item.participant_mention_ids) <= mention_ids
@@ -167,16 +190,17 @@ def retain_exact_assertions(
     retained = replace(
         bundle,
         mentions=mentions,
+        entity_properties=entity_properties,
         relations=relations,
         events=events,
         temporals=temporals,
         claims=claims,
     )
     original_count = sum(len(getattr(bundle, name)) for name in (
-        "mentions", "relations", "events", "temporals", "claims"
+        "mentions", "entity_properties", "relations", "events", "temporals", "claims"
     ))
     retained_count = sum(len(getattr(retained, name)) for name in (
-        "mentions", "relations", "events", "temporals", "claims"
+        "mentions", "entity_properties", "relations", "events", "temporals", "claims"
     ))
     return retained, original_count - retained_count
 
@@ -198,6 +222,10 @@ def validate_extraction(
         if {relation.source_mention_id, relation.target_mention_id} - mention_ids:
             raise ValueError("relation references an unknown mention")
         spans.append(relation.span)
+    for property_ in bundle.entity_properties:
+        if property_.mention_id not in mention_ids or property_.value != property_.span.source_text:
+            raise ValueError("entity property must reference a mention and preserve its exact span")
+        spans.append(property_.span)
     for event in bundle.events:
         if set(event.participant_mention_ids) - mention_ids:
             raise ValueError("event references an unknown participant mention")

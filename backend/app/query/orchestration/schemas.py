@@ -60,6 +60,24 @@ class GraphPathResult(GroundedItem):
         return self
 
 
+class CanonicalEventResult(GroundedItem):
+    """A provenance-bearing canonical event in one immutable knowledge generation."""
+
+    event_id: str = Field(min_length=1, max_length=128)
+    event_type: Identifier
+    event_name: str = Field(min_length=1, max_length=1_000)
+    event_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    participant_canonical_ids: tuple[str, ...] = Field(default=(), max_length=10_000)
+    workspace_id: str = Field(min_length=1, max_length=128)
+    generation_id: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def canonical_identity_matches_item(self):
+        if self.item_id != self.event_id:
+            raise ValueError("canonical event item and event identifiers must match")
+        return self
+
+
 class AggregateResult(GroundedItem):
     function: Literal["count", "distinct_count", "minimum", "maximum", "sum", "average"]
     value: JsonValue
@@ -172,6 +190,7 @@ class EngineResult(BaseModel):
     structured_rows: tuple[GroundedItem, ...] = Field(default=(), max_length=10_000)
     entities: tuple[EntityResult, ...] = Field(default=(), max_length=10_000)
     graph_paths: tuple[GraphPathResult, ...] = Field(default=(), max_length=10_000)
+    events: tuple[CanonicalEventResult, ...] = Field(default=(), max_length=10_000)
     aggregates: tuple[AggregateResult, ...] = Field(default=(), max_length=10_000)
     text_evidence: tuple[ExactEvidenceSpan, ...] = Field(default=(), max_length=10_000)
     graphrag_findings: tuple[GraphRAGFinding, ...] = Field(default=(), max_length=10_000)
@@ -196,12 +215,19 @@ class EngineResult(BaseModel):
             item.generation_id != self.generation_id for item in self.text_evidence
         ):
             raise ValueError("engine evidence cannot mix result generations")
+        if any(item.workspace_id != self.workspace_id for item in self.events):
+            raise ValueError("canonical events cannot cross the result workspace boundary")
+        if self.generation_id and any(
+            item.generation_id != self.generation_id for item in self.events
+        ):
+            raise ValueError("canonical events cannot mix result generations")
         payload_count = sum(
             len(items)
             for items in (
                 self.structured_rows,
                 self.entities,
                 self.graph_paths,
+                self.events,
                 self.aggregates,
                 self.text_evidence,
                 self.graphrag_findings,
@@ -218,6 +244,7 @@ class EngineResult(BaseModel):
             self.structured_rows
             + self.entities
             + self.graph_paths
+            + self.events
             + self.aggregates
             + self.graphrag_findings
             + self.claims
@@ -310,6 +337,7 @@ class ReasoningPackage(BaseModel):
     structured_rows: tuple[GroundedItem, ...] = ()
     entities: tuple[EntityResult, ...] = ()
     graph_paths: tuple[GraphPathResult, ...] = ()
+    events: tuple[CanonicalEventResult, ...] = ()
     aggregates: tuple[AggregateResult, ...] = ()
     graphrag_findings: tuple[GraphRAGFinding, ...] = ()
     claims: tuple[ClaimResult, ...] = ()

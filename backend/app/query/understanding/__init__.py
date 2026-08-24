@@ -12,10 +12,13 @@ from .planner import (
 from .schemas import (
     InterpretationCandidate,
     SemanticEntity,
+    SemanticGovernedField,
     SemanticRelation,
     SemanticTarget,
     SemanticTemporalConstraint,
+    SemanticTypedFilter,
     SemanticUnderstanding,
+    StructuredSemanticOperation,
 )
 
 __all__ = [
@@ -23,12 +26,15 @@ __all__ = [
     "PlannerAttempt",
     "PlannerModel",
     "SemanticEntity",
+    "SemanticGovernedField",
     "SemanticPlannerAdapter",
     "SemanticPlannerOutputError",
     "SemanticPlannerResult",
     "SemanticRelation",
     "SemanticTarget",
     "SemanticTemporalConstraint",
+    "SemanticTypedFilter",
+    "StructuredSemanticOperation",
     "SemanticUnderstanding",
     "apply_conversation_context",
     "evolve_context_state",

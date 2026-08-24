@@ -77,6 +77,12 @@ def reconcile_engine_results(
         valid_ids,
         "graph_path",
     )
+    events, event_conflicts = _reconcile_items(
+        tuple(item for result in results for item in result.events),
+        evidence_aliases,
+        valid_ids,
+        "canonical_event",
+    )
     aggregates, aggregate_conflicts = _reconcile_items(
         tuple(item for result in results for item in result.aggregates),
         evidence_aliases,
@@ -99,6 +105,7 @@ def reconcile_engine_results(
         row_conflicts
         + entity_conflicts
         + path_conflicts
+        + event_conflicts
         + aggregate_conflicts
         + finding_conflicts
         + claim_conflicts
@@ -120,7 +127,7 @@ def reconcile_engine_results(
 
     completeness = _reconcile_completeness(contract, results, failures, issues)
     useful_count = sum(
-        len(items) for items in (rows, entities, paths, aggregates, findings, claims)
+        len(items) for items in (rows, entities, paths, events, aggregates, findings, claims)
     )
     state = _answer_state(
         contract,
@@ -145,6 +152,7 @@ def reconcile_engine_results(
         structured_rows=rows,
         entities=entities,
         graph_paths=paths,
+        events=events,
         aggregates=aggregates,
         graphrag_findings=findings,
         claims=claims,

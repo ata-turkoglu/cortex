@@ -39,6 +39,7 @@ def load_canonical_population(
                 "entity_type": entity.entity_type,
                 "display_name": entity.display_name,
                 "subtype": entity.subtype,
+                **{property_.key: property_.value for property_ in entity.properties},
             },
             evidence=tuple(
                 ExactEvidenceSpan(
@@ -56,6 +57,22 @@ def load_canonical_population(
                     quality_score=item.confidence,
                 )
                 for item in entity.evidence
+            ) + tuple(
+                ExactEvidenceSpan(
+                    evidence_id=property_.evidence.evidence_id,
+                    workspace_id=view.workspace_id,
+                    document_id=property_.evidence.document_id,
+                    document_version_id=property_.evidence.document_version_id,
+                    logical_document_id=property_.evidence.logical_document_id,
+                    chunk_id=property_.evidence.chunk_id,
+                    start_offset=property_.evidence.start_offset,
+                    end_offset=property_.evidence.end_offset,
+                    source_text=property_.evidence.source_text,
+                    generation_id=property_.evidence.generation,
+                    relevance_score=property_.evidence.confidence,
+                    quality_score=property_.evidence.confidence,
+                )
+                for property_ in entity.properties
             ),
         )
         for entity in view.entities

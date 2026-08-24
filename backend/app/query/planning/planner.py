@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from app.query.ir import IRVocabulary, LogicalPlanGraph, LogicalQueryIR, validate_logical_ir
 from app.query.ir.schemas import (
     CustomCapabilityNode,
+    EventSetNode,
     IRNode,
     SummarizeNode,
     TemporalConstraintNode,
@@ -130,7 +131,11 @@ def _capability_candidates(node: IRNode, nodes: dict[str, IRNode]) -> tuple[str,
     }
     if isinstance(node, TraverseNode):
         return ("graph.multi_hop" if node.maximum_hops > 1 else "graph.traverse",)
+    if isinstance(node, EventSetNode):
+        return ("graph.event_population",)
     if isinstance(node, TemporalConstraintNode):
+        if isinstance(nodes[node.inputs[0]], EventSetNode):
+            return ("graph.event_filter",)
         relative = any(item.role in {"before_event", "after_event"} for item in node.predicates)
         graph_input = any(isinstance(nodes[item], TraverseNode) for item in node.inputs)
         return (

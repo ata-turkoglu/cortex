@@ -78,6 +78,8 @@ DEFAULT_CAPABILITIES: tuple[CapabilityDeclaration, ...] = (
         inputs=("entity_set",),
     ),
     _cap("knowledge_graph", "graph.temporal_reasoning", SET_TYPES, inputs=SET_TYPES),
+    _cap("knowledge_graph", "graph.event_population", ("event_set",)),
+    _cap("knowledge_graph", "graph.event_filter", ("event_set",), inputs=("event_set",)),
     _cap("knowledge_graph", "graph.event_participation", ("extension",), inputs=SET_TYPES),
     _cap("knowledge_graph", "graph.provenance_traversal", ("extension",), inputs=SET_TYPES),
     _cap("knowledge_graph", "graph.contradiction_analysis", ("extension",), inputs=SET_TYPES),

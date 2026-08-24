@@ -2,6 +2,7 @@
 
 from .schemas import (
     ContextAssumption,
+    ContextCanonicalResultSet,
     ContextConstraint,
     ContextEntityReference,
     ContextTemporalFocus,
@@ -13,6 +14,7 @@ from .store import ContextRevisionConflict, load_conversation_context, save_conv
 
 __all__ = [
     "ContextAssumption",
+    "ContextCanonicalResultSet",
     "ContextConstraint",
     "ContextEntityReference",
     "ContextRevisionConflict",

@@ -58,3 +58,6 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+# Faker's pytest entry-point blocks during pytest initialization on this Windows
+# environment. Cortex tests do not request its fixture; keep all other plugins enabled.
+addopts = "-p no:faker"

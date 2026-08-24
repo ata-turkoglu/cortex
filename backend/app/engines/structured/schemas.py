@@ -65,4 +65,8 @@ class StructuredValue(BaseModel):
     aggregate_function: Literal[
         "count", "distinct_count", "minimum", "maximum", "sum", "average"
     ] | None = None
+    # Population evidence remains available after a filter produces no records.  This
+    # lets an exhaustive aggregate distinguish a grounded zero from an unavailable
+    # or unsafe population without manufacturing answer-layer authority.
+    evidence: tuple[ExactEvidenceSpan, ...] = ()
     completeness: CompletenessReport

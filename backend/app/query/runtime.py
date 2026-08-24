@@ -14,7 +14,7 @@ from .briefing import WorkspaceBriefing, resolve_workspace_entities
 from .context import ConversationContext
 from .ir import IRVocabulary, LogicalQueryIR, lower_semantic_understanding
 from .planning import PhysicalExecutionPlan, PlanningReadinessSnapshot, plan_execution
-from .understanding import SemanticPlannerResult
+from .understanding import SemanticPlannerResult, apply_conversation_context
 
 
 class SemanticPlanner(Protocol):
@@ -57,10 +57,24 @@ class QueryV2PreparationService:
             or briefing.generation_id != readiness.active_generation_id
         ):
             raise ValueError("workspace briefing does not match the active planning generation")
+        planner_context = briefing.planner_context() if briefing else {}
+        planner_context["queryable_vocabulary"] = {
+            resource: sorted(fields) for resource, fields in vocabulary.resources.items()
+        }
         semantic = await self.planner.plan(
             query,
             context,
-            workspace_briefing=briefing.planner_context() if briefing else None,
+            workspace_briefing=planner_context,
+        )
+        semantic = semantic.__class__(
+            understanding=apply_conversation_context(
+                semantic.understanding,
+                context,
+                generation_id=readiness.active_generation_id,
+            ),
+            selected_tier=semantic.selected_tier,
+            attempts=semantic.attempts,
+            generated=semantic.generated,
         )
         if briefing:
             semantic = semantic.__class__(

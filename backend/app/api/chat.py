@@ -1,5 +1,4 @@
 import json
-import time
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -8,15 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..accounting import totals as usage_totals
-from ..chat.service import (
-    ask,
-    backfill_default_conversation_titles,
-    create_conversation,
-    delete_conversation,
-    edit_message,
-    require_conversation,
-)
-from ..core.config import get_settings
 from ..core.database import SessionLocal
 from ..models import (
     Chunk,
@@ -27,6 +17,14 @@ from ..models import (
     Message,
     QueryRun,
 )
+from ..query.conversation_service import (
+    backfill_default_conversation_titles,
+    create_conversation,
+    delete_conversation,
+    edit_message,
+    require_conversation,
+)
+from ..query.production_chat import execute_v2_chat
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["chat"])
 
@@ -174,91 +172,22 @@ def messages(  # noqa: B008
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageRead)
-def query(  # noqa: B008
+async def query(  # noqa: B008
     workspace_id: str,
     conversation_id: str,
     payload: AskRequest,
     session: Session = Depends(get_session),  # noqa: B008
 ):
     try:
-        _, answer, run = ask(session, workspace_id, conversation_id, payload.content, payload.mode)
+        _, answer, _ = await execute_v2_chat(
+            session, workspace_id, conversation_id, payload.content, payload.mode
+        )
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    graph_job = bool(json.loads(answer.metadata_json or "{}").get("graphrag_query_job"))
-    if graph_job:
-        # Commit the durable request before the worker reads it, then wait only for the bounded
-        # synchronous chat window. The API never imports or executes GraphRAG itself.
-        session.commit()
-        try:
-            from ..workers.broker import execute_graphrag_query
-
-            execute_graphrag_query.send(run.id)
-        except Exception:
-            answer.status = "failed"
-            answer.content = "GraphRAG worker is unavailable."
-            metadata = json.loads(answer.metadata_json or "{}")
-            metadata.update(
-                {
-                    "fallback_reason": "worker_unavailable",
-                    "termination_reason": "worker_unavailable",
-                }
-            )
-            answer.metadata_json = json.dumps(metadata)
-            run.state = "failed"
-            session.commit()
-            return message_read(answer)
-        deadline = time.monotonic() + get_settings().graphrag_query_wait_seconds
-        while time.monotonic() < deadline:
-            session.expire_all()
-            completed = session.get(QueryRun, run.id)
-            if completed and completed.state in {"completed", "failed", "cancelled"}:
-                final = session.scalar(
-                    select(Message).where(
-                        Message.query_run_id == run.id, Message.role == "assistant"
-                    )
-                )
-                if final:
-                    return message_read(final)
-            time.sleep(0.1)
-        session.expire_all()
-        timed_out = session.get(QueryRun, run.id)
-        if timed_out and timed_out.state in {"queued", "running"}:
-            timed_out.state = "timed_out"
-            answer.status = "failed"
-            answer.content = "GraphRAG query timed out."
-            metadata = json.loads(answer.metadata_json or "{}")
-            metadata.update({"fallback_reason": "timeout", "termination_reason": "timeout"})
-            answer.metadata_json = json.dumps(metadata)
-            session.commit()
-        return message_read(answer)
-    # Commit the evidence snapshot before synchronous provider synthesis. This preserves the
-    # no-network-inside-transaction boundary while returning the final answer immediately.
-    if get_settings().answer_provider == "openai":
-        session.commit()
-        try:
-            from ..chat.execution import synthesize_with_openai
-
-            synthesize_with_openai(run.id, SessionLocal)
-            session.expire_all()
-            final = session.scalar(
-                select(Message).where(Message.query_run_id == run.id, Message.role == "assistant")
-            )
-            if final:
-                answer = final
-        except Exception as exc:
-            from ..chat.execution import record_synthesis_failure
-
-            session.rollback()
-            record_synthesis_failure(
-                session,
-                run.id,
-                get_settings().answer_provider,
-                get_settings().answer_model,
-                exc,
-            )
-            session.commit()
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
     try:
         from ..workers.broker import summarize_conversation
 

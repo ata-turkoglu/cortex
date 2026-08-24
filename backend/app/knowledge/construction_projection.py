@@ -74,7 +74,8 @@ def construct_from_bundle(
 ) -> ConstructedKnowledge:
     """Convert one validated bundle without inferring unresolved identity links."""
     evidence = validate_extraction(bundle, snapshot, generation_id)
-    offset = len(bundle.mentions)
+    # Property assertions have their own exact spans and precede relation evidence.
+    offset = len(bundle.mentions) + len(bundle.entity_properties)
     relation_evidence = evidence[offset : offset + len(bundle.relations)]
     offset += len(bundle.relations)
     event_evidence = evidence[offset : offset + len(bundle.events)]

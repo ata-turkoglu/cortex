@@ -117,6 +117,17 @@ class ScanNode(BaseModel):
     population_mode: Literal["discovery", "exhaustive"] = "discovery"
 
 
+class EventSetNode(BaseModel):
+    """All canonical events in the fixed runtime workspace and generation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["event_set"] = "event_set"
+    node_id: Identifier
+    inputs: tuple[()] = ()
+    output_type: Literal["event_set"] = "event_set"
+
+
 class ResolveNode(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -235,6 +246,7 @@ class RankNode(BaseModel):
     inputs: tuple[Identifier]
     output_type: Literal["ranked_set"] = "ranked_set"
     by: FieldReference
+    measure: Literal["canonical_count"] = "canonical_count"
     direction: Literal["ascending", "descending"]
     top_n: int | None = Field(default=None, ge=1, le=10_000)
 
@@ -333,6 +345,7 @@ class CustomCapabilityNode(BaseModel):
 
 IRNode = Annotated[
     ScanNode
+    | EventSetNode
     | ResolveNode
     | FilterNode
     | TraverseNode
