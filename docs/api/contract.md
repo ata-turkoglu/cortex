@@ -1,5 +1,13 @@
 # API Contract
 
+## Production V2 chat
+
+Production chat retains the existing external response schema while executing V2 only. A chat
+request requires a validated workspace runtime activation, snapshots its exact workspace,
+generation, and embedding configuration once, and returns grounded citations only after immutable
+manifest validation. Unsupported responses contain no citations; production never falls back to
+V1 orchestration.
+
 FastAPI OpenAPI is canonical. All REST and SSE request/response models use Pydantic; the
 frontend consumes generated TypeScript client types rather than manually duplicated DTOs.
 Errors use `code`, `message`, `correlation_id`, `details_available`, and optional sanitized
@@ -45,9 +53,9 @@ query run, and returns an evidence-backed assistant message. Citations carry doc
 document-version, and chunk IDs; unsupported answers contain no citations. `GET /query-runs/{id}`
 returns routes, reason, confidence, answer state, latency, persisted token/cost counters, and
 safe debug fields for the validated query plan and expanded retrieval queries. It never returns
-provider secrets or hidden reasoning. Normal Hybrid Search responds with the direct evidence
-fallback and, when OpenAI is configured, synchronously replaces it with grounded synthesis after
-the evidence snapshot is committed.
+provider secrets or hidden reasoning. Production V2 retrieval performs generation-bound dense and sparse reads, RRF fusion, trusted-source
+reconciliation, and AnswerEngine rendering. Material structured, canonical-graph, and GraphRAG plans
+are rejected fail-closed until their live execution bridges are available.
 `PATCH /conversations/{conversation_id}/messages/{message_id}` only permits editing a user
 message in its owning workspace/conversation. `GET /sources/{chunk_id}` returns source content
 and document-version metadata only when the chunk belongs to the requested workspace.
@@ -89,12 +97,13 @@ Updates are Pydantic validated and model assignments are checked against provide
 capabilities. Changing chunking or embedding settings marks every workspace index as
 `reindex_required` and its GraphRAG projection as `stale`.
 Query V2 adds global simple, standard, and complex semantic-planner provider/model assignments,
-a bounded repair count, an escalation switch, and a confidence threshold. These settings are
-exposed for configuration but do not change V1 chat routing before the explicit V2 cutover.
+a bounded repair count, an escalation switch, and a confidence threshold. These settings configure the active V2 semantic planner; they do not introduce a V1 fallback.
 GET /api/v1/workspaces/{workspace_id}/knowledge/cutover returns the workspace's sole live runtime
 version/generation pointer, source/evaluation/curation fingerprints, activation time, and bounded
-immutable attempt history. It is read-only; activation is an operational acceptance action and is
-not accepted from a client-authored readiness payload.
+immutable attempt history. POST /api/v1/workspaces/{workspace_id}/knowledge/cutover accepts only a
+candidate generation ID; it derives corpus, Neo4j-curation, configuration, manifest, dense-scope,
+and generation-owned BM25 checks on the server. It never accepts a client-authored readiness payload
+and atomically records a rejected or activated attempt.
 GraphRAG exposes separate local Ollama or OpenAI API provider/model assignments for extraction,
 claims, community reports, and Local, Global, and DRIFT query methods. Entity and relationship
 extraction share Microsoft GraphRAG's single upstream `extract_graph` stage. Changing any of

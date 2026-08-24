@@ -1,7 +1,7 @@
 # Query V2 reasoning, research, and composition
 
-Phase 11 implements the inactive V2 reasoning boundary without changing V1 chat. A normal query
-may pass one reconciled `ReasoningPackage` directly toward the later Answer Engine; a larger goal
+Phase 11 implements durable V2 reasoning and composition boundaries. Production retrieval passes one
+reconciled `ReasoningPackage` to the active AnswerEngine; a larger goal
 uses durable research and composition runs instead of being forced into one Logical Query IR.
 
 `ResearchCheckpoint` owns the research goal, generation, dependency-ordered subqueries, optional
@@ -20,5 +20,5 @@ grounding through long-form output rather than attaching citations only after pr
 `research_runs` and `composition_runs` persist versioned JSON checkpoints with optimistic
 revisions and workspace ownership. External planners/composers operate on detached primitives
 between short transactions. A stopped run resumes from completed decomposition, evidence, or
-section checkpoints. Phase 11 does not persist an assistant answer and remains disconnected from
-V1 chat; the later Answer Engine and Phase 13 cutover own user-facing activation.
+section checkpoints. Research and composition remain durable workflow boundaries; only the active
+AnswerEngine path persists a normal assistant response.

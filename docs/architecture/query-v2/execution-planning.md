@@ -1,6 +1,6 @@
 # Query V2 execution planning
 
-Status: **Phase 08 planning plus dormant Phase 13 dense and sparse execution reads; V1 remains active**.
+Status: **Phase 13 complete; V2 physical execution is the only production chat runtime**.
 
 Execution Planning consumes a semantically validated `LogicalQueryIR` and a detached,
 workspace-scoped readiness snapshot. It performs no database access and invokes no model, storage,
@@ -46,12 +46,19 @@ declared weaker capability and retain partial-result semantics. Exhaustive work 
 grounded retrieval, use stale readiness, cross workspaces, or mix generations. Missing readiness,
 active generation, or required projections makes the plan unsupported.
 
+For the production governed LIST/COUNT subset, the plan fixes workspace and knowledge generation,
+uses the generation-bound canonical population, and sends only final logical IR roots to
+reconciliation. `CountNode` is authoritative only over that canonical population; retrieval top-k
+and evidence cardinality are never exhaustive COUNT substitutes. Relation traversal, conversation
+referents, exact temporal/event semantics, `GROUP`, `RANK`, `COMPARE`, and the GraphRAG trusted
+exact-provenance bridge remain unavailable rather than being silently lowered.
+
 ## Activation boundary
 
 The implementation lives in `backend/app/query/planning/` and is not connected to `app/chat/`.
 V1 query parsing, route selection, execution, and final-answer behavior remain unchanged. This
 phase does not claim a V2 indexing cutover, successful production engine execution, readiness UI,
-or corpus completeness. The current-state `/system-map` records the dormant executor boundary but
+or corpus completeness. The current `/system-map` records the active production executor boundary and
 does not represent it as a live answer path.
 
 Phase 13 adds the internal-only app/query/execution.py skeleton beneath an existing physical plan.

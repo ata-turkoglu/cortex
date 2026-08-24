@@ -11,7 +11,7 @@ See `backend-foundation.md`, `deployment.md`, `retrieval-boundaries.md`,
 Query Architecture V2 is a binding **target** contract under [`query-v2/`](query-v2/README.md).
 It is intentionally separate from the active V1 chat runtime documented in
 [`query-answer-pipeline.md`](query-answer-pipeline.md). Phase 12 makes `/system-map` the manifest
-of implemented V2 subsystem boundaries and contracts, while Phase 13 still owns full-generation
+of implemented V2 subsystem boundaries and contracts, with Phase 13 production activation complete and full-generation
 acceptance and sharp runtime cutover.
 
 Phase 06 conversation-context persistence and schema-constrained semantic understanding are

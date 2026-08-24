@@ -110,6 +110,31 @@ replace extracted proposals for that generation, but it cannot erase higher-prec
 validated decisions. Quality takes priority over cost; selected provider/model and extraction
 versions are recorded.
 
+## Immutable generation source manifest
+
+Every candidate generation has one immutable authority record at
+`knowledge-candidates/<generation_id>/source/manifest.jsonl`.  It is a
+canonical JSONL serialization of the single `CorpusSnapshot`, ordered by
+`document_id`, `document_version_id`, `logical_document_id`, chunk index, and
+`chunk_id`.  `KnowledgeGeneration` persists only its relative URI, SHA-256 of
+the exact bytes, and authoritative source chunk count.
+
+```text
+CorpusSnapshot -> source/manifest.jsonl
+                    |- BM25 projection
+                    `- Dense/Qdrant projection
+```
+
+BM25 evidence and every candidate Qdrant point carry the manifest chunk,
+document/version/logical-document, generation, and content-hash identity.
+Before readiness, candidate construction reads both projections back and
+requires exact membership and identity equality with the snapshot.  Before the
+final gate, the manifest loader recomputes its byte hash, validates all JSONL
+records, and compares manifest membership/content hashes with both projection
+checkpoints.  Missing, modified, cross-workspace, cross-generation, duplicate,
+or malformed manifests fail closed.  Candidate generations without this
+metadata are not eligible for V2 trusted-source use; no query-time backfill or
+live relational fallback is permitted.
 ## Generation readiness and cutover
 
 A generation is corpus-complete only when source/relational, entity/mention, identity resolution,

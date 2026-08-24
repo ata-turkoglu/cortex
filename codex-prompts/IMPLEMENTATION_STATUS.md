@@ -29,28 +29,52 @@ Codex must keep this file updated.
 - [x] Phase 10 — Structured and graph query engines
 - [x] Phase 11 — Reasoning, research, and composition
 - [x] Phase 12 — System map V2
-- [ ] Phase 13 — Full reindex and sharp cutover
-- [ ] Phase 14 — Evaluation and acceptance
-- [ ] Phase 15 — Final integration audit
+- [x] Phase 13 — Full reindex and sharp cutover
+- [x] Phase 14 — Evaluation and acceptance
+- [x] Phase 15 — Final integration audit
 
 ## Current phase
 
-- Phase: Query Architecture V2 Phase 13 — Full Reindex and Sharp Cutover
-- Status: In progress. Durable fail-closed cutover gates are implemented and the local schema is
-  migrated; full two-workspace rebuild, V2 runtime evaluation, and activation have not passed.
-- Next target: Complete the real all-workspace rebuild and activate only after every gate passes.
+- Phase: Query V2 production cutover complete
+- Status: The defined production scope is V2-only, generation-bound, provenance-safe, and validated.
+  `POST /chat` has no reachable V1 final-answer fallback; AnswerEngine is the sole final renderer.
+  Dense/sparse retrieval, structured analytics, canonical graph/event traversal, conversation
+  referents, and trusted GraphRAG Local/Global/DRIFT all converge through final-root reconciliation.
+- Next target: none within the defined Query V2 production scope.
 - Started: 2026-08-21
-- Last updated: 2026-08-21
+- Last updated: 2026-08-23
 
 ## Completed work
+
+- Completed Query Architecture V2 Phase 13: a real uploaded text file now passes parsing,
+  normalization, logical-document/chunk creation, immutable manifest construction, generation-owned
+  BM25, generation-filtered Qdrant, readiness agreement, cutover activation, detached V2 execution,
+  semantic planning, query embedding, dense+sparse RRF, EngineResult trusted-source validation,
+  ReasoningPackage reconciliation, AnswerEngine citations, and normal `POST /chat` grounded and
+  unsupported persistence. Production chat has no V1 branch or fallback; reachability spies prove
+  zero calls to V1 ask, HybridRetrievalRuntime, and workspace-only dense search. The production
+  evaluation CLI now runs this V2 uploaded-file acceptance; the old synthetic V1 benchmark is
+  explicitly historical. The System Map and owning architecture/API/context documentation show
+  V2-only production reality.
+
+- Completed Query Architecture V2 Phase 14: `python -m app.evaluation` executes the isolated versioned V2 production acceptance and emits a typed `CutoverEvaluation`-compatible result. Its mandatory atomic contract is pass/fail closed (score 1.0 or 0.0) and covers upload through immutable generation artifacts, V2-only `POST /chat`, trusted citations, unsupported-answer behavior, post-activation manifest-tampering failure, generation/workspace isolation, and legacy-runtime reachability guards. The retained golden V1 runner is explicitly historical; user-supplied private verified packs may extend coverage without replacing the production contract.
+- Completed GraphRAG trusted provenance bridge: V2 uses normalized generation-owned artifacts, never
+  Microsoft GraphRAG CLI prose. Local, Global, and DRIFT flow through the production engine registry
+  and exact-source bridge; `community_context` remains explicitly unavailable. Deterministic tests
+  cover each supported mode, missing identity fields, cross-scope/unknown/tampered references,
+  multi-engine reconciliation, and AnswerEngine final-prose ownership.
+- Completed Query Architecture V2 Phase 15: the final production/cutover audit revalidated the
+  active `POST /chat` chain, V1-fallback isolation, generation-bound reads, trusted evidence,
+  final-root selection, canonical analytics, graph/event/referent execution, GraphRAG bridge,
+  persistence, Git-tracked acceptance tests, current docs/System Map, and live Neo4j behavior.
 
 - Started Query Architecture V2 Phase 13: added workspace-scoped live runtime pointers and
   immutable cutover-attempt audit records; exact-generation, fresh-corpus, schema/config/Neo4j/
   runtime, curation-preservation, and versioned evaluation gates; a deterministic Neo4j fingerprint
   over user-curated entities, aliases/tombstones, and identity operations; a read-only cutover
   status API; migration 0020; focused failure-safety, isolation, curation, API, and migration tests;
-  and the corresponding System Map/architecture contracts. Rejected attempts leave V1 unchanged.
-  No V2 runtime activation or full-corpus completeness is claimed yet.
+  and the corresponding System Map/architecture contracts. Rejected attempts leave the runtime
+  pointer unchanged. This historical foundation preceded the completed V2-only cutover.
 
 - Completed Query Architecture V2 Phase 12: replaced the displayed V1 intent/route-led query and
   document-flow diagrams with an exported runtime architecture manifest containing all eleven
@@ -246,18 +270,20 @@ Codex must keep this file updated.
   applies a deterministic copied-span guard with one regeneration attempt. Metadata records the
   guard and regeneration outcomes.
 
-## In progress
+## Prior milestones and ongoing backlog
+- Completed the Phase 13 immutable generation source-manifest prerequisite: candidate snapshots now write deterministic generation-owned JSONL source manifests, persist their URI/SHA-256/count, and prove BM25/Qdrant membership and content identity against that manifest before readiness. Trusted-source loading fails closed on missing, tampered, malformed, foreign, duplicate, or content-inconsistent manifests. This was the prerequisite checkpoint; no pointer changed at that time.
+
 - Phase 13 full rebuild delivery completed for both active local workspaces: each candidate has one
   active exact-generation checkpoint set after real BM25, Qdrant, and GraphRAG execution. The V2
   Answer Engine rendering boundary now accepts only reconciled ReasoningPackage input; the live
   orchestration/evaluation gate and sharp runtime activation remain incomplete.
-- Phase 13 now has dormant internal dense and sparse execution reads: an existing physical plan
-  resolves one immutable GenerationScope, uses generation-bound Qdrant plus only the matching
-  candidate-owned BM25 artifact, and emits separate in-memory result counts with logical sparse
-  artifact identity. Workspace, generation, embedding, mismatch, no-fallback, and pointer-snapshot
-  tests pass. V1 remains live; fusion, canonical EngineResult/provenance, exact span validation,
-  reconciliation, AnswerEngine delivery, uploaded-file acceptance, and atomic activation remain
-  pending.
+- Phase 13 now has a reusable production composition root. Persisted workspace/conversation state
+  is detached by `V2RuntimeContextLoader`; one fixed generation then feeds the configured semantic
+  planner/query embedder, generation-filtered Qdrant, candidate-owned BM25, `V2PlanExecutor`, RRF
+  bridge, trusted manifest, reconciliation, `ReasoningPackage`, and `AnswerEngine`. Internal
+  grounded, lexical, semantic, dense+sparse fusion, no-evidence, workspace/generation isolation,
+  and pointer-snapshot acceptance passes with deterministic external-provider adapters. V1 remains
+  live; uploaded-file production acceptance, API cutover, evaluation, and activation are pending.
 - Added a deterministic golden-question evaluation subsystem with versioned synthetic suites,
   production chat orchestration, layer-specific diagnostics, retrieval metrics, and CLI output.
 - Completed structured query planning, workspace-evidence entity resolution, bounded resolved-name
@@ -268,16 +294,16 @@ Codex must keep this file updated.
 
 ## Blocking issues
 
-- Phase 13 live acceptance is still open: both active local workspaces now have rebuilt active
-  generations, but V2 runtime orchestration, evaluation, and the atomic pointer change must pass
-  before Phase 13 can be marked complete. V1 chat remains the active runtime.
-- Phase 13 selected-model planner smoke against a rebuilt workspace returned a valid unresolved
-  understanding for an ordinary archive-summary request because the detached planner has no
-  workspace corpus/schema awareness or retrieval execution bridge. This is an activation blocker:
-  routing live chat to V2 would currently turn ordinary questions into clarification failures.
+- None for Phase 15.
 
 ## Validation history
 
+| 2026-08-23 | Query V2 final production/cutover audit | 133 focused Query V2 tests; 12 live Neo4j tests with zero skips; 25 focused GraphRAG tests; 3 uploaded-file/production-evaluation tests; full 9-test frontend/System Map suite; Query V2 Ruff; frontend lint/build; context validation; staged and unstaged `git diff --check` | Passed (known local-Qdrant payload-index, Pydantic field-attribute, and Vite bundle-size warnings only) |
+| 2026-08-23 | GraphRAG trusted provenance bridge | 31 focused GraphRAG adapter/V2 bridge/plan-executor tests; touched-file Ruff; 9 frontend tests including System Map; context validation; staged and unstaged `git diff --check` | Passed (one existing Pydantic field-attribute warning) |
+| 2026-08-22 | Query Architecture V2 Phase 15 final integration audit | 57 focused V2 runtime/planning/bridge/reconciliation/answer/cutover/acceptance tests; full backend pytest (341 passed, 2 skipped); complete backend Ruff; 9 frontend tests; frontend lint/build; generated 26 AI-context adapters; context validation; `git diff --check` | Passed (local-Qdrant payload-index, Pydantic, LlamaIndex deprecation, and Vite bundle-size warnings only) |
+| 2026-08-22 | Query Architecture V2 Phase 14 evaluation and acceptance | `python -m app.evaluation`; full backend pytest with deterministic keyring/Ollama environment (340 passed, 2 skipped); complete backend Ruff; fresh in-memory SQLite Alembic upgrade; context validation; `git diff --check` | Passed (local-Qdrant payload-index, Pydantic, and LlamaIndex deprecation warnings only; one mandatory versioned production contract) |
+| 2026-08-22 | Query Architecture V2 Phase 13 final V2-only cutover | Real uploaded-file production evaluation; 144 focused Phase 13/ingestion/chat/migration tests; 337 broader backend tests with 2 skips and the isolated historical V1 orchestration case deselected; Ruff app/touched tests; compileall; 9 frontend tests; System Map test; frontend lint/build; generated 26 AI-context adapters; context validation; git diff --check | Passed (local Qdrant payload-index, Pydantic, LlamaIndex deprecation, and Vite bundle-size warnings only) |
+| 2026-08-22 | Query Architecture V2 Phase 13 production composition | 105 focused factory/runtime/retrieval/manifest/reconciliation/AnswerEngine/planner/IR/generation tests; deterministic persisted-state acceptance; Black; Ruff; py_compile; V1 reachability audit; generated 26 AI-context adapters; context validation/freshness; git diff --check | Passed (local in-memory Qdrant payload-index warning only; V1 routing and production pointers unchanged) |
 | 2026-08-21 | Query Architecture V2 Phase 13 cutover foundation | Ruff; 21 focused cutover/API/Neo4j/generation tests; 2 fresh/upgrade migration tests; local schema revision 0020; live Neo4j curation-fingerprint smoke; 9 frontend/System Map tests; generated OpenAPI types; frontend production build/lint; generated 26 AI-context adapters; context validation/freshness; git diff --check | Passed (existing Vite bundle-size advisory; full rebuild/runtime activation still open) |
 | 2026-08-21 | Query Architecture V2 Phase 13 planner live smoke | One selected-model, detached semantic-planner request against a rebuilt workspace | Valid strict-schema output, but unresolved; blocked because no workspace corpus/schema awareness or retrieval execution bridge |
 | 2026-08-21 | Query Architecture V2 Phase 13 generation-bound dense skeleton | Immutable GenerationScope; dormant physical-plan executor; generation-bound Qdrant read and adversarial execution isolation tests | Passed (internal only; V1 live; BM25/reconciliation/activation pending) |

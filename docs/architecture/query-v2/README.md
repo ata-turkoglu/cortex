@@ -56,7 +56,7 @@ force unless this V2 contract explicitly supersedes them at cutover.
 
 ## Activation and documentation policy
 
-Until sharp cutover, V2 documents describe the target and V1 chat remains the active query
+After sharp cutover, these documents describe the active V2-only production query
 entrypoint. `/system-map` now manifests the implemented V2 subsystem topology and its inactive
 activation boundary; it does not claim that requests execute through that topology. Each
 implementation phase must update its owning code, tests, architecture document, scoped AI

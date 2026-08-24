@@ -8,6 +8,13 @@ package markers but do not alter the active V1 runtime. Existing implementations
 paths until the owning V2 phase migrates them; see `query-v2/repository-boundaries.md` for the
 no-duplication map.
 
+Phase 13 adds a detached internal production composition behind the stable chat API route.
+`V2RuntimeContextLoader` snapshots persisted workspace/conversation state and one production
+`GenerationScope`; `V2QueryServiceFactory` owns reusable configured planner, embedding, and Qdrant
+clients and binds generation-scoped dense/BM25 adapters, reconciliation, and `AnswerEngine` for
+that request. The stable `POST /chat` route uses this factory through `production_chat.py`. Production query execution is V2-only
+until uploaded-file acceptance and the sharp-cutover gates pass.
+
 FastAPI OpenAPI is the API contract. SQLite uses WAL, foreign keys, a busy timeout,
 bounded lock retry, and short transactions. LLM, embedding, network, and parsing calls do
 not execute inside open transactions. Secrets never live as plaintext in SQLite or API

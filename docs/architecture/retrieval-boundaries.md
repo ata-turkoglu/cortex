@@ -11,6 +11,14 @@ Hybrid search combines workspace-filtered Qdrant dense retrieval, bm25s sparse r
 fusion, and a local BGE reranker. Embedding configuration changes require dense reindexing;
 vectors with incompatible dimensions/configurations may never share an active vector field.
 
+Phase 13's production V2 composition uses the same retrieval implementations through stricter
+adapters. `V2DenseAdapter` can call only `WorkspaceQdrantStore.search_generation()`, whose filter
+requires workspace, knowledge generation, and embedding fingerprint. `V2SparseAdapter` can load
+only `GenerationBM25Store` from `knowledge-candidates/<generation>/bm25`. Both projections retain
+chunk/document/version/logical-document/content-hash identity and are validated against the
+immutable generation source manifest before reconciliation. Neither adapter can reach
+`HybridRetrievalRuntime`, workspace-only dense search, or the legacy workspace BM25 artifact.
+
 ## Structured query execution
 
 Chat creates a validated compositional query plan before Hybrid Search. The plan records the

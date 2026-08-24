@@ -16,7 +16,12 @@ secondary visualization projection.
 
 GraphRAG reindex workflow v2 adds a durable `neo4j_sync` checkpoint after native indexing and
 before Qdrant mirroring. `Neo4jBackedGraphRAGAdapter` converts entities, reports, text units,
-documents, and resolvable relations into provenance-bearing nodes/edges. The Cortex-owned
+documents, and resolvable relations into provenance-bearing nodes/edges. Query V2 reads only the
+fixed `knowledge-candidates/<generation>/graphrag` artifact root. Its
+`GraphRAGProductionEngine` invokes `GraphRAGAdapter.query_findings`, then the fail-closed
+`bridge_graphrag` validates workspace, generation, document, version, logical document, chunk,
+and content hash against `TrustedSource` before emitting an `EngineResult`. The Microsoft CLI
+native answer has no such exact source identity and is never admitted to Query V2. The Cortex-owned
 `Neo4jGraphAdapter` atomically replaces only the current workspace's `ExtractedKnowledge` layer and
 never deletes `CanonicalKnowledge`. Every node and relation carries workspace, layer, generation,
 external ID, original GraphRAG attributes, and available logical-document provenance.

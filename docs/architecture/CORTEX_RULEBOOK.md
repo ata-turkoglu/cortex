@@ -1,5 +1,14 @@
 # Cortex Architecture Rulebook
 
+## Production runtime invariant
+
+Production query execution is V2-only. `POST /chat` must bind one immutable `GenerationScope`
+(`workspace_id`, `generation_id`, `embedding_config_hash`) and preserve it through planning,
+retrieval, trusted-source validation, reasoning, answering, and persistence. Production code must
+not call V1 chat orchestration or fall back to workspace-only retrieval. Grounded citations must
+resolve to exact evidence in the bound generation manifest; unsupported answers have zero
+citations.
+
 Read this rulebook before changing query planning, routing, retrieval, evidence selection,
 aggregation, normalization, citations, or answer generation. Binding V1 decisions remain in
 `codex-prompts/docs/DECISIONS.md`.

@@ -1,8 +1,17 @@
 # Cortex query, data, and indexing context
 
-Chat persists a query run, creates a deterministic `QueryPlan`, resolves entities from requested-workspace chunks, and selects a route. Normal QA uses `HybridRetrievalRuntime`: workspace-filtered Qdrant dense retrieval plus workspace BM25 sparse retrieval → RRF → optional local BGE reranker → operation-aware evidence selection → concise synthesis/fallback → citation validation/pruning → final source payload. The copied-span guard can request one stricter OpenAI regeneration.
+Production `POST /chat` is V2-only: it persists the turn and `QueryRun`, snapshots one immutable
+`GenerationScope`, loads detached conversation/readiness inputs, plans typed semantic understanding
+and Logical IR, executes the physical V2 DAG, validates trusted evidence, reconciles final logical
+roots, renders through `AnswerEngine`, and persists the assistant result and citations. There is no
+V1 or workspace-only retrieval fallback.
 
-`identify`, `describe`, `timeline`, `generic_qa`, and `lookup_documents` are normal evidence routes. Document lookup groups hits by logical document. `list`/`count` reach aggregation only when explicit exhaustive property semantics are parsed; describe is never an inventory. GraphRAG Local/Global/DRIFT runs as a separate durable worker query; its native result is final and hybrid fallback is explicitly configured.
+Dense Qdrant reads bind workspace, generation, and embedding configuration; sparse BM25 reads only
+the matching generation artifact. Governed LIST/COUNT/GROUP/RANK/COMPARE use exhaustive
+generation-bound canonical populations, relation and exact-date event queries use the canonical
+graph, and conversation referents use persisted canonical IDs. GraphRAG Local/Global/DRIFT enters
+V2 only as provenance-bearing artifact findings through the trusted bridge; native CLI prose is
+never a final V2 answer. `community_context` is explicitly unavailable.
 
 `workspaces` is root scope. Documents/versions model lifecycle; logical documents/chunks are retrieval units; conversations/messages/query runs preserve chat; workflow runs/steps/events preserve durable jobs; index and GraphRAG states record readiness. `WorkspaceContext` resolves database resource mappings, workspace files/cache, graph root, and active state.
 
@@ -17,15 +26,15 @@ expressions, evidence-gated claims/facts, and explicit conflicts. Neo4j canonica
 merge/split/alias curation and evidence inspection. Phase 05, not Phase 04, wires automatic
 corpus-wide construction and extracted-to-canonical promotion into indexing.
 
-Query V2 Phase 06 implements a separate, inactive conversation-intelligence boundary. Durable
+Query V2 conversation intelligence is active in production. Durable
 `conversation_contexts` are isolated by workspace and conversation and combine with bounded message
 history only in detached planner snapshots. The schema-constrained semantic planner has configurable
 simple/standard/complex tiers, no V2 `intent`, explicit ambiguity/unresolved states, typed temporal
-roles, and deterministic follow-up entity/temporal carry-over. It is not wired into V1 chat before
-sharp cutover and it never writes conversation assumptions into canonical knowledge.
+roles, and deterministic follow-up entity/temporal carry-over. It never writes conversation
+assumptions into canonical knowledge.
 
-Query V2 Phase 07 implements `LogicalQueryIR` version `1.0` as a typed composable DAG, still inactive
-for V1 chat. It supports all target operator families, ambiguity candidate plans, temporal meaning,
+Query V2 uses `LogicalQueryIR` version `1.0` as a typed composable DAG. It supports all target
+operator families, ambiguity candidate plans, temporal meaning,
 coverage, output projection, evidence requirements, and schema-governed custom capabilities. The
 validator enforces workspace scope, declared resources/fields/relations, DAG and type integrity,
 upstream projection lineage, and exhaustive same-generation/exact-provenance requirements. Semantic

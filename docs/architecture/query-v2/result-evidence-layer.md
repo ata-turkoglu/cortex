@@ -1,6 +1,6 @@
 # Query V2 Result & Evidence Layer
 
-Status: **Phase 09 implemented behind the inactive V2 boundary**.
+Status: **Active for the generation-bound retrieval path; reusable by later engine bridges.**
 
 The Result & Evidence Layer is the mandatory convergence point between execution engines and
 reasoning. Engines emit `EngineResult` schema version `1.0`; reconciliation emits
@@ -10,7 +10,7 @@ persistence operation.
 ## EngineResult
 
 Every result is bound to one physical-plan step by workspace, step ID, engine, and capability. It
-can carry structured rows, entities, graph paths, aggregates, exact text evidence, GraphRAG
+can carry structured rows, entities, graph paths, canonical events, aggregates, exact text evidence, GraphRAG
 findings, claims or facts, provenance links, completeness, confidence, ambiguity, conflicts,
 partial failures, and sanitized trace data.
 
@@ -30,6 +30,11 @@ the Answer Engine.
 It performs no database, model, storage-adapter, or network call. It rejects crossed workspaces,
 duplicate result/step identities, unsolicited steps, and engine/capability identities that differ
 from the physical plan.
+
+For semantic structured operations, the reconciliation contract admits only results corresponding
+to final logical IR roots. An intermediate canonical scan or filter prerequisite is not
+automatically a user-facing semantic result. This final-root rule prevents an exhaustive scan from
+leaking into filtered LIST output while preserving its trace as an execution dependency.
 
 For every evidence span, the layer verifies the complete document/version/logical-document/chunk
 chain, generation, ordered offsets, and exact substring against the trusted chunk snapshot. Reuse
@@ -51,9 +56,12 @@ failure or validation issue. Confidence cannot promote incomplete coverage. Grou
 return `partial` when allowed; a degraded contract that forbids partial results returns
 `unsupported`. Ambiguity has priority over otherwise useful evidence.
 
-## Activation boundary
+## Live-runtime boundary
 
-Phase 09 defines normalization and reconciliation only. Phase 10 engines will produce this
-contract, and later phases own execution, reasoning, and the Answer Engine. V1 chat and its current
-citations remain unchanged. No V2 indexing cutover, production engine run, readiness UI, or corpus
-completeness is claimed, so the current-state `/system-map` remains unchanged.
+Production V2 invokes this layer after registry-dispatched retrieval, structured, canonical-graph,
+and GraphRAG steps. Exact `graph.event_filter` results remain typed canonical events through
+`EngineResult.events` and `ReasoningPackage.events`; their membership is never inferred from
+retrieval. GraphRAG Local, Global, and DRIFT findings enter as `GraphRAGFinding` only after the
+bridge resolves their complete source identity and content hash to a generation-bound trusted
+chunk and exact full-chunk span. Unresolvable, cross-workspace, cross-generation, unknown, or
+tampered references are rejected rather than silently omitted.
