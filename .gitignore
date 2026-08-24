@@ -27,8 +27,8 @@ backend/.coverage
 backend/.mypy_cache/
 backend/.test-tmp-*/
 tmp-pytest-*/
-/.pytest-*/
-backend/.pytest-*/
+/.pytest-*
+backend/.pytest-*
 *.sqlite
 *.sqlite3
 *.db
