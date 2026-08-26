@@ -8,16 +8,16 @@ const queryGroups = [
   "V2 Query Service",
   "Conversation Context",
   "Semantic Planner",
-  "Canonical Entity Resolution",
-  "Governed Vocabulary Validation",
+  "Canonical Briefing (blocked capability)",
+  "Governed Vocabulary (canonical blocked)",
   "Deferred V2 Semantics",
   "Logical IR",
   "Physical Plan / GenerationScope",
-  "StructuredQueryEngine / Canonical Population",
-  "Governed Filter / CountNode",
-  "Knowledge Graph",
-  "Dense + Sparse / RRF",
-  "GraphRAG",
+  "canonical.exhaustive (not accepted)",
+  "Canonical structured operations (blocked)",
+  "canonical.graph (not accepted)",
+  "retrieval.grounded (READY)",
+  "graphrag.grounded (PARTIAL)",
   "Final-root Reconciliation",
   "ReasoningPackage",
   "AnswerEngine",
@@ -61,10 +61,10 @@ describe("ASystemMap", () => {
     }
 
     const graph = SYSTEM_MAP_V2_MANIFEST.query.find(
-      (item) => item.label === "Knowledge Graph",
+      (item) => item.label === "canonical.graph (not accepted)",
     );
     const graphrag = SYSTEM_MAP_V2_MANIFEST.query.find(
-      (item) => item.label === "GraphRAG",
+      (item) => item.label === "graphrag.grounded (PARTIAL)",
     );
     expect(graph?.boundary).toContain("knowledge/graph");
     expect(graphrag?.boundary).toBe("backend/app/graphrag/");
@@ -73,10 +73,11 @@ describe("ASystemMap", () => {
       (item) => item.label === "Physical Plan / GenerationScope",
     );
     const retrieval = SYSTEM_MAP_V2_MANIFEST.query.find(
-      (item) => item.label === "Dense + Sparse / RRF",
+      (item) => item.label === "retrieval.grounded (READY)",
     );
     expect(planning?.boundary).toContain("execution.py");
     expect(retrieval?.guarantee).toContain("knowledge generation");
+    expect(graph?.guarantee).toContain("not documented as fully proven");
   });
 
   it("renders live health and the V2 query and indexing manifests", async () => {
