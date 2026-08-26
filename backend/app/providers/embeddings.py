@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import math
@@ -70,6 +71,12 @@ class EmbeddingConfiguration:
     normalized: bool = True
     text_template_version: int = 1
 
+    def __post_init__(self) -> None:
+        if self.provider not in {"ollama", "openai"} or not self.model.strip():
+            raise ValueError(
+                "embedding configuration requires an explicit supported provider and model"
+            )
+
     @property
     def fingerprint(self) -> str:
         payload = {
@@ -101,56 +108,101 @@ class OllamaEmbeddingAdapter:
 
     def __init__(
         self,
-        configuration: EmbeddingConfiguration | None = None,
+        configuration: EmbeddingConfiguration,
         *,
         base_url: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         settings = get_settings()
-        self.configuration = configuration or EmbeddingConfiguration(
-            settings.embedding_provider, settings.embedding_model
-        )
+        if configuration.provider != "ollama" or not configuration.model:
+            raise ValueError("Ollama embedding adapter requires an explicit Ollama configuration")
+        self.configuration = configuration
         self.base_url = base_url or settings.ollama_base_url
         self.transport = transport
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        if self.transport is None and "localhost" in self.base_url:
+            vectors = await asyncio.to_thread(
+                _native_ollama_embeddings,
+                self.base_url,
+                self.configuration.model,
+                texts,
+                get_settings().embedding_timeout_seconds,
+            )
+            EmbeddingHealth.validate(vectors)
+            return vectors
         # A local cold load may take longer than a normal HTTP call, but an
         # unbounded wait leaves the durable workflow permanently `running`.
         # The global operational timeout keeps failure visible and retryable.
         async with httpx.AsyncClient(
-            timeout=get_settings().embedding_timeout_seconds, transport=self.transport
+            timeout=get_settings().embedding_timeout_seconds,
+            transport=self.transport,
+            # A local Ollama endpoint must not be sent through a process-level
+            # HTTP proxy, which can return a misleading 404 for local routes.
+            trust_env=False,
         ) as client:
             response = await client.post(
                 self.base_url + "/api/embed",
                 json={"model": self.configuration.model, "input": texts},
             )
-            response.raise_for_status()
-        vectors = response.json().get("embeddings", [])
+            if response.status_code == 404:
+                # The Windows host relay can reject async connections while its
+                # synchronous HTTP path serves the same native batch endpoint.
+                vectors = await asyncio.to_thread(
+                    _native_ollama_embeddings,
+                    self.base_url,
+                    self.configuration.model,
+                    texts,
+                    get_settings().embedding_timeout_seconds,
+                )
+            else:
+                response.raise_for_status()
+                vectors = response.json().get("embeddings", [])
         EmbeddingHealth.validate(vectors)
         return vectors
 
     async def health_check(self) -> EmbeddingHealthResult:
-        dimension = EmbeddingHealth.validate(
-            await self.embed(["Cortex embedding health check: İstanbul"])
+        return await embedding_health_check(self)
+
+
+def _native_ollama_embeddings(
+    base_url: str, model: str, texts: list[str], timeout: int
+) -> list[list[float]]:
+    """Use the native batch endpoint through the Windows host relay."""
+    # The host's IPv6 localhost relay can point at a stale endpoint while its
+    # IPv4 relay serves the configured Ollama instance.
+    endpoint = base_url.replace("localhost", "127.0.0.1")
+    with httpx.Client(timeout=timeout, trust_env=False) as client:
+        response = client.post(
+            endpoint + "/api/embed", json={"model": model, "input": texts}
         )
-        return EmbeddingHealthResult(
-            provider=self.configuration.provider,
-            model=self.configuration.model,
-            dimension=dimension,
-        )
+        response.raise_for_status()
+    return response.json().get("embeddings", [])
+
+
+async def embedding_health_check(adapter: OllamaEmbeddingAdapter) -> EmbeddingHealthResult:
+    dimension = EmbeddingHealth.validate(
+        await adapter.embed(["Cortex embedding health check: İstanbul"])
+    )
+    return EmbeddingHealthResult(
+        adapter.configuration.provider, adapter.configuration.model, dimension
+    )
 
 
 class OpenAIEmbeddingAdapter:
     """OpenAI embeddings boundary; network calls remain worker-owned."""
 
     def __init__(
-        self, model: str = "text-embedding-3-small", *, api_key: str | None = None
+        self, configuration: EmbeddingConfiguration, *, api_key: str | None = None
     ) -> None:
         from ..core.secrets import SecretStore
 
-        self.model = model
+        if configuration.provider != "openai":
+            raise ValueError("OpenAI embedding adapter requires an explicit OpenAI configuration")
+        self.configuration = configuration
+        self.model = configuration.model
         self.api_key = (
             api_key or get_settings().openai_api_key or SecretStore().get("openai_api_key")
         )

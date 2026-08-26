@@ -39,7 +39,7 @@ class AnswerEngine:
         if package.state == "ambiguous":
             content = self._clarification(package)
         elif package.state == "unsupported":
-            content = "I could not find enough validated evidence to answer that safely."
+            content = self._unsupported(package)
         else:
             content = self._grounded(package)
         return AnswerDraft(
@@ -65,8 +65,48 @@ class AnswerEngine:
         )
 
     @staticmethod
+    def _unsupported(package: ReasoningPackage) -> str:
+        if any(issue.startswith("capability_unavailable:") for issue in package.issues):
+            return (
+                "This request requires a knowledge capability that is not ready for this "
+                "workspace. I can still help with grounded document-retrieval questions."
+            )
+        return "I could not find enough validated evidence to answer that safely."
+
+    @staticmethod
     def _grounded(package: ReasoningPackage) -> str:
         values: list[str] = []
+        # An exhaustive structured result is already a bounded, deterministic answer
+        # set selected by the physical plan.  Truncating it here would silently turn
+        # "list every person" requests into a partial answer after reconciliation.
+        if package.state == "corpus_complete" and package.structured_rows:
+            ranked_people = [
+                item for item in package.structured_rows
+                if item.values.get("entity_type") == "person"
+                and item.values.get("display_name")
+                and "property_count" in item.values
+            ]
+            if ranked_people:
+                lines = [
+                    f"{index}. {item.values['display_name']} — "
+                    f"{int(item.values['property_count'])} property record"
+                    f"{'s' if int(item.values['property_count']) != 1 else ''}"
+                    for index, item in enumerate(ranked_people, start=1)
+                ]
+                return (
+                    "People found in the active documents, ranked by distinct property records:\n"
+                    + "\n".join(lines)
+                )
+            values.extend(
+                ", ".join(
+                    f"{key}: {value}"
+                    for key, value in item.values.items()
+                    if value is not None
+                    and key not in {"entity_id", "entity_type", "workspace_id", "generation_id"}
+                )
+                for item in package.structured_rows
+            )
+            return "The complete workspace result is: " + "; ".join(values) + "."
         for event in package.events:
             if len(values) == 3:
                 break
@@ -79,7 +119,10 @@ class AnswerEngine:
             if len(values) == 3:
                 break
             rendered = ", ".join(
-                f"{key}: {value}" for key, value in item.values.items() if value is not None
+                f"{key}: {value}"
+                for key, value in item.values.items()
+                if value is not None
+                and key not in {"entity_id", "entity_type", "workspace_id", "generation_id"}
             )
             if rendered:
                 values.append(rendered)

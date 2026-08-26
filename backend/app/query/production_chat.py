@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -11,6 +12,8 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.config import get_settings
+from ..core.embedding_runtime import build_production_embedder
 from ..models import (
     Conversation,
     Message,
@@ -25,16 +28,13 @@ from .conversation_service import (
     conversation_title_from_query,
     require_conversation,
 )
-from .production import V2QueryServiceFactory, get_v2_query_service_factory
+from .production import V2QueryServiceFactory
 from .service import V2QueryServiceResult
 from .understanding import evolve_context_state
 from .understanding.planner import SemanticPlannerOutputError
 
 MODES = {"automatic", "document_search", "deep_analysis"}
-
-
-class UnsupportedQueryCapabilityError(ValueError):
-    """A recognized request whose exhaustive capability is not yet available."""
+logger = logging.getLogger(__name__)
 
 
 async def execute_v2_chat(
@@ -47,7 +47,18 @@ async def execute_v2_chat(
     factory: V2QueryServiceFactory | None = None,
 ) -> tuple[Message, Message, QueryRun]:
     """Persist a request, execute detached V2, then persist its final result."""
-    selected_factory = factory or get_v2_query_service_factory()
+    if factory is None:
+        # Host API processes must use the same persisted global runtime settings
+        # as workers before creating their cached provider adapters.
+        configuration, provider = build_production_embedder(session)
+        selected_factory = V2QueryServiceFactory(
+            settings=get_settings(),
+            embedding_configuration=configuration,
+            embedding_provider=provider,
+            canonical_session=session,
+        )
+    else:
+        selected_factory = factory
     started = time.perf_counter()
     user, run, inputs = _begin(
         session,
@@ -60,11 +71,16 @@ async def execute_v2_chat(
     user_id, run_id = user.id, run.id
     session.commit()
     try:
-        _raise_if_unsupported_capability(content)
         result = await selected_factory.build(inputs).execute_inputs(
             session, content.strip(), inputs
         )
     except Exception as error:
+        logger.exception(
+            "Query V2 execution failed for run_id=%s workspace_id=%s error=%s",
+            run_id,
+            workspace_id,
+            error,
+        )
         session.rollback()
         assistant = _persist_failure(
             session,
@@ -226,10 +242,8 @@ def _persist_failure(
     if run is None or conversation is None:
         raise RuntimeError("V2 query failure state disappeared") from error
     timestamp = datetime.now(UTC)
-    is_safe_unsupported = isinstance(
-        error, SemanticPlannerOutputError | UnsupportedQueryCapabilityError
-    )
-    run.state = "completed" if is_safe_unsupported else "failed"
+    planner_output_invalid = isinstance(error, SemanticPlannerOutputError)
+    run.state = "completed" if planner_output_invalid else "failed"
     run.answer_state = "unsupported"
     run.latency_ms = int((time.perf_counter() - started) * 1000)
     run.updated_at = timestamp
@@ -242,7 +256,7 @@ def _persist_failure(
         query_run_id=run.id,
         role="assistant",
         content=_failure_content(error),
-        status="completed" if is_safe_unsupported else "failed",
+        status="completed" if planner_output_invalid else "failed",
         citations_json="[]",
         metadata_json=json.dumps(
             {
@@ -251,14 +265,10 @@ def _persist_failure(
                 "generation_id": generation_id,
                 "answer_state": "unsupported",
                 "failure_type": type(error).__name__,
-                "failure_reason": (
-                    "semantic_planner_output_invalid"
+                **(
+                    {"failure_reason": "semantic_planner_output_invalid"}
                     if isinstance(error, SemanticPlannerOutputError)
-                    else (
-                        "relation_aggregation_unsupported"
-                        if isinstance(error, UnsupportedQueryCapabilityError)
-                        else "query_execution_failed"
-                    )
+                    else {}
                 ),
                 "fallback_used": False,
             }
@@ -279,33 +289,7 @@ def _failure_content(error: Exception) -> str:
             "I couldn't safely interpret this request. Please rephrase it with the "
             "people, relationship, and ordering rule stated explicitly."
         )
-    if isinstance(error, UnsupportedQueryCapabilityError):
-        return str(error)
     return "The V2 query could not be completed safely."
-
-
-def _raise_if_unsupported_capability(query: str) -> None:
-    """Reject a known unsupported exhaustive relation aggregate before a provider call.
-
-    This is a capability guard, not semantic planning: it does not choose an
-    interpretation or execute an approximate retrieval fallback.
-    """
-    normalized = query.casefold().translate(str.maketrans("çğıöşü", "cgiosu"))
-    property_requested = any(
-        term in normalized for term in ("taşınmaz", "tasinmaz", "gayrimenkul", "property")
-    )
-    count_requested = any(
-        term in normalized for term in ("sayisi", "adet", "count", "number of")
-    )
-    rank_requested = any(
-        term in normalized
-        for term in ("en fazla", "en az", "sirala", "rank", "highest", "lowest", "sort")
-    )
-    if property_requested and count_requested and rank_requested:
-        raise UnsupportedQueryCapabilityError(
-            "This request is understood, but Cortex does not yet support counting property "
-            "records per person and ranking the result."
-        )
 
 
 def _set_step(session: Session, run_id: str, name: str, state: str) -> None:

@@ -159,6 +159,19 @@ class SemanticGovernedField(BaseModel):
     property: ShortText
 
 
+class SemanticRelationAggregate(BaseModel):
+    """One governed, exhaustive source-to-target distinct-count request."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_type: Literal["person"]
+    relation: ShortText
+    target_type: Literal["asset_property"]
+    distinct_target_identity: Literal["entity_id"] = "entity_id"
+    count_alias: Literal["property_count"] = "property_count"
+    direction: Literal["ascending", "descending"]
+
+
 class InterpretationCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -172,6 +185,7 @@ class InterpretationCandidate(BaseModel):
     structured_operation: StructuredSemanticOperation | None = None
     group_by: SemanticGovernedField | None = None
     rank_direction: Literal["ascending", "descending"] | None = None
+    relation_aggregate: SemanticRelationAggregate | None = None
     operators: tuple[SemanticOperator, ...] = Field(default=(), max_length=20)
     confidence: float = Field(ge=0, le=1)
 
@@ -191,6 +205,7 @@ class SemanticUnderstanding(BaseModel):
     structured_operation: StructuredSemanticOperation | None = None
     group_by: SemanticGovernedField | None = None
     rank_direction: Literal["ascending", "descending"] | None = None
+    relation_aggregate: SemanticRelationAggregate | None = None
     operators: tuple[SemanticOperator, ...] = Field(default=(), max_length=20)
     uses_temporal_focus: bool = False
     coverage: Literal["relevant_evidence", "corpus_required", "unspecified"] = "unspecified"
@@ -209,12 +224,18 @@ class SemanticUnderstanding(BaseModel):
             raise ValueError("resolved understanding cannot retain candidates or questions")
         if self.structured_operation in {"list", "count"} and not self.typed_filters:
             raise ValueError("structured list/count operations require a typed filter")
-        if self.structured_operation in {"group", "rank"} and not self.group_by:
+        if self.structured_operation in {"group", "rank"} and not (
+            self.group_by or self.relation_aggregate
+        ):
             raise ValueError("structured group/rank operations require a governed group field")
-        if self.structured_operation == "rank" and not self.rank_direction:
+        if self.structured_operation == "rank" and not (
+            self.rank_direction or self.relation_aggregate
+        ):
             raise ValueError("structured rank operations require a direction")
         if self.structured_operation == "compare" and len(self.typed_filters) != 2:
             raise ValueError("structured compare operations require exactly two typed filters")
+        if self.relation_aggregate and self.coverage != "corpus_required":
+            raise ValueError("relation aggregate requires corpus_required coverage")
         entity_refs = {item.reference_id for item in self.entities}
         referenced = {
             ref

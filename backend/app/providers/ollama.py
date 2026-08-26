@@ -19,7 +19,7 @@ class OllamaProvider:
             for model in payload.get("models", [])
         ]
 
-    async def missing_embedding_command(self, model: str = "qwen3-embedding:0.6b") -> str:
+    async def missing_embedding_command(self, model: str) -> str:
         return f"ollama pull {model}"
 
     async def generate(self, model: str, instructions: str, input_text: str) -> GeneratedText:

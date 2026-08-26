@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
+from ..core.embedding_runtime import build_production_embedder
 from ..core.qdrant import get_qdrant_client
 from ..core.workspaces import WorkspaceContext
 from ..graphrag.adapter import GraphRAGAdapter
@@ -21,7 +22,6 @@ from ..graphrag.updates import (
     prepare_deferred_update,
 )
 from ..models import WorkflowRun, WorkflowStepRun, WorkspaceLock
-from ..providers.embeddings import OllamaEmbeddingAdapter, OpenAIEmbeddingAdapter
 from .service import event, now, redact_exception
 
 
@@ -214,12 +214,10 @@ def execute(run_id: str, run_with_lock_retry) -> bool:
         )
 
         run_with_lock_retry(lambda session: start_external_step(session, run_id, "mirror"))
-        settings = get_settings()
-        provider = (
-            OllamaEmbeddingAdapter()
-            if settings.embedding_provider == "ollama"
-            else OpenAIEmbeddingAdapter(settings.embedding_model)
-        )
+        def configured_embedder(session):
+            return build_production_embedder(session)[1]
+
+        provider = run_with_lock_retry(configured_embedder)
         mirrored = asyncio.run(
             mirror_graph_outputs(
                 adapter,

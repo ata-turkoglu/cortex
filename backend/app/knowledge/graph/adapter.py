@@ -1,4 +1,5 @@
 """Workspace-scoped Neo4j boundary for extracted and canonical Cortex knowledge."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
@@ -83,6 +84,24 @@ class IdentityHistoryView:
 
 
 @dataclass(frozen=True)
+class CanonicalIdentityAuditView:
+    """Historical canonical identity inspection; deliberately not an active read."""
+
+    entity_id: str
+    display_name: str
+    normalized_identity: str
+    status: str
+    aliases: tuple[str, ...]
+    mention_ids: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+    property_ids: tuple[str, ...]
+    relation_ids: tuple[str, ...]
+    operation_ids: tuple[str, ...]
+    successor_entity_ids: tuple[str, ...]
+    generations: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class EntityEvidenceView:
     evidence_id: str
     mention_id: str
@@ -143,6 +162,14 @@ class CanonicalPathQueryView:
     node_ids: tuple[str, ...]
     relation_ids: tuple[str, ...]
     relation_types: tuple[str, ...]
+    evidence: tuple[CanonicalEvidenceQueryView, ...]
+
+
+@dataclass(frozen=True)
+class CanonicalRelationTargetQueryView:
+    source_entity_id: str
+    target_entity_id: str
+    relation_id: str
     evidence: tuple[CanonicalEvidenceQueryView, ...]
 
 
@@ -282,6 +309,74 @@ class Neo4jGraphAdapter:
         return int(records[0]["node_count"]) if records else 0
 
     @staticmethod
+    def _clear_generation_materialization_transaction(
+        transaction: GraphTransaction, *, workspace_id: str, generation: str
+    ) -> None:
+        """Remove only rebuildable extracted artifacts for one generation.
+
+        Generation-local projections are rebuildable; canonical identity history is
+        not.  An identity may become ineligible for active candidate resolution,
+        but its opaque ID, evidence chain, aliases, and any identity-operation
+        history must remain auditable after a later generation is rebuilt.
+        """
+        # Canonical relations are historical authority.  Retire the rebuilt
+        # generation projection while retaining relation provenance for audit.
+        transaction.run(
+            "MATCH ()-[r:CORTEX_CANONICAL_RELATION "
+            "{workspace_id: $workspace_id, generation: $generation}]->() "
+            "SET r.active = false, r.lifecycle_status = 'retired'",
+            workspace_id=workspace_id,
+            generation=generation,
+        ).consume()
+        # Canonical artifacts are disposable generation-derived projections.
+        transaction.run(
+            "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalArtifact "
+            "{workspace_id: $workspace_id, generation: $generation}) DETACH DELETE n",
+            workspace_id=workspace_id,
+            generation=generation,
+        ).consume()
+        # Property assertions are historical authority, not cleanup debris.
+        transaction.run(
+            "MATCH (entity:CortexNode:CanonicalKnowledge:CanonicalEntity "
+            "{workspace_id: $workspace_id})-[r:HAS_PROPERTY {generation: $generation}]->"
+            "(p:CortexEntityProperty {workspace_id: $workspace_id, generation: $generation}) "
+            "SET r.active = false, p.status = 'retired', p.lifecycle_status = 'retired'",
+            workspace_id=workspace_id,
+            generation=generation,
+        ).consume()
+        # Mentions and their evidence chain remain auditable after rebuild.
+        transaction.run(
+            "MATCH (m:CortexMention {workspace_id: $workspace_id})-[:SUPPORTED_BY]->"
+            "(e:CortexEvidence {workspace_id: $workspace_id, generation: $generation}) "
+            "OPTIONAL MATCH (m)-[resolution:RESOLVES_TO]->() "
+            "SET m.lifecycle_status = 'retired', e.lifecycle_status = 'retired', "
+            "resolution.active = false",
+            workspace_id=workspace_id,
+            generation=generation,
+        ).consume()
+        transaction.run(
+            "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
+            "{workspace_id: $workspace_id, layer: 'canonical', authority: 'extracted', "
+            "status: 'active'}) "
+            "WHERE NOT EXISTS { "
+            "MATCH (n)<-[:RESOLVES_TO]-(m:CortexMention) "
+            "WHERE m.decision IN ['auto_link', 'new_canonical', 'manual_link'] "
+            "} "
+            "SET n.status = 'retired'",
+            workspace_id=workspace_id,
+        ).consume()
+
+    def clear_generation_materialization(self, generation: str) -> None:
+        if not generation.strip():
+            raise ValueError("generation is required")
+        with self.driver.session(database=self.database) as session:
+            session.execute_write(
+                self._clear_generation_materialization_transaction,
+                workspace_id=self.workspace_id,
+                generation=generation,
+            )
+
+    @staticmethod
     def _upsert_canonical_entity_transaction(
         transaction: GraphTransaction,
         *,
@@ -371,7 +466,9 @@ class Neo4jGraphAdapter:
                 "MERGE (l)-[:HAS_CHUNK]->(c) "
                 "MERGE (c)-[:HAS_EVIDENCE]->(e) "
                 "MERGE (m)-[:SUPPORTED_BY]->(e) "
-                "MERGE (m)-[:RESOLVES_TO]->(entity)",
+                "MERGE (m)-[resolution:RESOLVES_TO]->(entity) "
+                "SET resolution.active = true, m.lifecycle_status = 'active', "
+                "e.lifecycle_status = 'active'",
                 workspace_id=workspace_id,
                 entity_id=entity.entity_id,
                 mentions=[
@@ -565,14 +662,18 @@ class Neo4jGraphAdapter:
         """Return exact-name candidates with independent evidence/version support."""
         records, _, _ = self.driver.execute_query(
             "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
-            "{workspace_id: $workspace_id, layer: 'canonical', entity_type: $entity_type}) "
+            "{workspace_id: $workspace_id, layer: 'canonical', entity_type: $entity_type, "
+            "status: 'active'}) "
             "OPTIONAL MATCH (n)-[:HAS_ALIAS]->(a:CortexAlias "
             "{workspace_id: $workspace_id, active: true}) "
             "WITH n, collect(DISTINCT a.normalized_value) + "
             "[toLower(trim(n.display_name))] AS aliases "
             "WHERE $normalized_name IN aliases "
-            "OPTIONAL MATCH (m:CortexMention)-[:RESOLVES_TO]->(n) "
-            "OPTIONAL MATCH (m)-[:SUPPORTED_BY]->(e:CortexEvidence "
+            "MATCH (m:CortexMention)-[resolution:RESOLVES_TO]->(n) "
+            "WHERE m.decision IN ['auto_link', 'new_canonical', 'manual_link'] "
+            "AND coalesce(m.lifecycle_status, 'active') = 'active' "
+            "AND coalesce(resolution.active, true) "
+            "MATCH (m)-[:SUPPORTED_BY]->(e:CortexEvidence "
             "{workspace_id: $workspace_id}) "
             "RETURN n.external_id AS entity_id, aliases, "
             "collect(DISTINCT e.evidence_id) AS evidence_ids, "
@@ -621,6 +722,62 @@ class Neo4jGraphAdapter:
             )
             for record in records
         )
+
+    def audit_canonical_identity(self, entity_id: str) -> CanonicalIdentityAuditView | None:
+        """Resolve an opaque canonical ID regardless of lifecycle status."""
+        require_canonical_id(entity_id)
+        query = """
+            MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity
+              {workspace_id: $workspace_id, layer: 'canonical', external_id: $entity_id})
+            OPTIONAL MATCH (n)-[:HAS_ALIAS]->(alias:CortexAlias {workspace_id: $workspace_id})
+            OPTIONAL MATCH (mention:CortexMention {workspace_id: $workspace_id})-[:RESOLVES_TO]->(n)
+            OPTIONAL MATCH (mention)-[:SUPPORTED_BY]->(e:CortexEvidence {workspace_id: $workspace_id})
+            OPTIONAL MATCH (n)-[:HAS_PROPERTY]->(property:CortexEntityProperty {workspace_id: $workspace_id})
+            OPTIONAL MATCH (n)-[relation:CORTEX_CANONICAL_RELATION {workspace_id: $workspace_id}]-()
+            OPTIONAL MATCH (n)-[:IDENTITY_OPERATION_SOURCE]->(operation:CortexIdentityOperation {workspace_id: $workspace_id})
+            OPTIONAL MATCH (operation)-[:IDENTITY_OPERATION_RESULT]->(successor:CortexNode:CanonicalKnowledge:CanonicalEntity {workspace_id: $workspace_id})
+            RETURN n.external_id AS entity_id, n.display_name AS display_name,
+              toLower(trim(n.display_name)) AS normalized_identity, n.status AS status,
+              collect(DISTINCT alias.value) AS aliases, collect(DISTINCT mention.mention_id) AS mention_ids,
+              collect(DISTINCT e.evidence_id) AS evidence_ids, collect(DISTINCT property.property_id) AS property_ids,
+              collect(DISTINCT relation.relation_id) AS relation_ids, collect(DISTINCT operation.operation_id) AS operation_ids,
+              collect(DISTINCT successor.external_id) AS successor_entity_ids, collect(DISTINCT e.generation) AS generations
+        """
+        records, _, _ = self.driver.execute_query(
+            query,
+            workspace_id=self.workspace_id,
+            entity_id=entity_id,
+            database_=self.database,
+        )
+        if not records:
+            return None
+        row = records[0]
+        return CanonicalIdentityAuditView(
+            row["entity_id"],
+            row["display_name"],
+            row["normalized_identity"],
+            row["status"],
+            tuple(item for item in row["aliases"] if item),
+            tuple(item for item in row["mention_ids"] if item),
+            tuple(item for item in row["evidence_ids"] if item),
+            tuple(item for item in row["property_ids"] if item),
+            tuple(item for item in row["relation_ids"] if item),
+            tuple(item for item in row["operation_ids"] if item),
+            tuple(item for item in row["successor_entity_ids"] if item),
+            tuple(item for item in row["generations"] if item),
+        )
+
+    def validate_identity_artifact_references(self, entity_ids: tuple[str, ...]) -> None:
+        """Fail closed when an identity decision points at non-auditable history."""
+        missing = tuple(
+            entity_id
+            for entity_id in entity_ids
+            if self.audit_canonical_identity(entity_id) is None
+        )
+        if missing:
+            raise ValueError(
+                "identity artifact references unrecoverable canonical IDs: " + ", ".join(missing)
+            )
 
     def curation_fingerprint(self) -> str:
         """Hash every workspace-scoped user-curated identity decision and current value."""
@@ -863,9 +1020,7 @@ class Neo4jGraphAdapter:
         reason: str,
     ) -> IdentityOperation:
         require_canonical_id(source_entity_id)
-        invalid_partition = any(
-            not name.strip() or not mentions for name, mentions in partitions
-        )
+        invalid_partition = any(not name.strip() or not mentions for name, mentions in partitions)
         if len(partitions) < 2 or invalid_partition:
             raise ValueError("split requires at least two named, non-empty mention partitions")
         records, _, _ = self.driver.execute_query(
@@ -954,7 +1109,6 @@ class Neo4jGraphAdapter:
             "MATCH (m:CortexMention {workspace_id: $workspace_id})"
             "-[resolution:RESOLVES_TO]->(n:CortexNode:CanonicalKnowledge:CanonicalEntity "
             "{workspace_id: $workspace_id, layer: 'canonical', external_id: $entity_id}) "
-            "WHERE coalesce(resolution.active, true) "
             "MATCH (m)-[:SUPPORTED_BY]->(e:CortexEvidence {workspace_id: $workspace_id}) "
             "MATCH (c:CortexChunk {workspace_id: $workspace_id})-[:HAS_EVIDENCE]->(e) "
             "MATCH (l:CortexLogicalDocument {workspace_id: $workspace_id})-[:HAS_CHUNK]->(c) "
@@ -1025,16 +1179,24 @@ class Neo4jGraphAdapter:
             )
             properties = tuple(
                 CanonicalEntityPropertyQueryView(
-                    item["property_id"], item["key"], item["value"], item["value_type"],
+                    item["property_id"],
+                    item["key"],
+                    item["value"],
+                    item["value_type"],
                     CanonicalEvidenceQueryView(
-                        item["evidence_id"], item["document_id"], item["document_version_id"],
-                        item["logical_document_id"], item["chunk_id"], item["start_offset"],
+                        item["evidence_id"],
+                        item["document_id"],
+                        item["document_version_id"],
+                        item["logical_document_id"],
+                        item["chunk_id"],
+                        item["start_offset"],
                         item["end_offset"],
                         item["source_text"],
                         item["confidence"],
                         item["generation"],
                     ),
-                ) for item in property_records
+                )
+                for item in property_records
             )
             output.append(
                 CanonicalEntityQueryView(
@@ -1042,7 +1204,8 @@ class Neo4jGraphAdapter:
                     row["entity_type"],
                     row["display_name"],
                     row.get("subtype"),
-                    evidence, properties,
+                    evidence,
+                    properties,
                 )
             )
         return tuple(output)
@@ -1057,8 +1220,9 @@ class Neo4jGraphAdapter:
             "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
             "{workspace_id: $workspace_id, layer: 'canonical', entity_type: $resource, "
             "status: 'active'})"
-            "<-[:RESOLVES_TO]-(:CortexMention)-[:SUPPORTED_BY]->"
+            "<-[:RESOLVES_TO]-(m:CortexMention)-[:SUPPORTED_BY]->"
             "(:CortexEvidence {workspace_id: $workspace_id, generation: $generation}) "
+            "WHERE m.decision IN ['auto_link', 'new_canonical', 'manual_link'] "
             "RETURN count(DISTINCT n) AS candidate_count",
             workspace_id=self.workspace_id,
             generation=generation,
@@ -1070,8 +1234,9 @@ class Neo4jGraphAdapter:
             "MATCH (n:CortexNode:CanonicalKnowledge:CanonicalEntity "
             "{workspace_id: $workspace_id, layer: 'canonical', entity_type: $resource, "
             "status: 'active'})"
-            "<-[:RESOLVES_TO]-(:CortexMention)-[:SUPPORTED_BY]->"
+            "<-[:RESOLVES_TO]-(m:CortexMention)-[:SUPPORTED_BY]->"
             "(:CortexEvidence {workspace_id: $workspace_id, generation: $generation}) "
+            "WHERE m.decision IN ['auto_link', 'new_canonical', 'manual_link'] "
             "RETURN DISTINCT n.external_id AS entity_id ORDER BY entity_id LIMIT $limit",
             workspace_id=self.workspace_id,
             generation=generation,
@@ -1100,7 +1265,9 @@ class Neo4jGraphAdapter:
             "-[:HAS_PROPERTY {generation: $generation}]->(p:CortexEntityProperty "
             "{workspace_id: $workspace_id, generation: $generation, status: 'resolved'}) "
             "RETURN n.entity_type AS entity_type, collect(DISTINCT p.key) AS keys",
-            workspace_id=self.workspace_id, generation=generation, database_=self.database,
+            workspace_id=self.workspace_id,
+            generation=generation,
+            database_=self.database,
         )
         return {str(row["entity_type"]): frozenset(row["keys"]) for row in records}
 
@@ -1159,8 +1326,7 @@ class Neo4jGraphAdapter:
             "either": ("-", "-"),
         }[direction]
         pattern = (
-            f"{arrows[0]}[rels:CORTEX_CANONICAL_RELATION*"
-            f"{minimum_hops}..{maximum_hops}]{arrows[1]}"
+            f"{arrows[0]}[rels:CORTEX_CANONICAL_RELATION*{minimum_hops}..{maximum_hops}]{arrows[1]}"
         )
         records, _, _ = self.driver.execute_query(
             "MATCH path=(start:CortexNode:CanonicalKnowledge:CanonicalEntity "
@@ -1197,6 +1363,47 @@ class Neo4jGraphAdapter:
                 )
             )
         return tuple(output)
+
+    def query_canonical_relation_targets(
+        self,
+        generation: str,
+        source_entity_ids: tuple[str, ...],
+        relation_type: str,
+        *,
+        limit: int = 5000,
+    ) -> tuple[CanonicalRelationTargetQueryView, ...]:
+        if not generation.strip() or not relation_type.strip() or not 1 <= limit <= 10_000:
+            raise ValueError("generation, relation type, and bounded limit are required")
+        for entity_id in source_entity_ids:
+            require_canonical_id(entity_id)
+        records, _, _ = self.driver.execute_query(
+            "MATCH (source:CortexNode:CanonicalKnowledge:CanonicalEntity "
+            "{workspace_id: $workspace_id, layer: 'canonical'})"
+            "-[rel:CORTEX_CANONICAL_RELATION {workspace_id: $workspace_id, "
+            "generation: $generation, relation_type: $relation_type}]->"
+            "(target:CortexNode:CanonicalKnowledge:CanonicalEntity "
+            "{workspace_id: $workspace_id, "
+            "layer: 'canonical', entity_type: 'asset_property'}) "
+            "WHERE source.external_id IN $source_entity_ids "
+            "RETURN source.external_id AS source_entity_id, "
+            "target.external_id AS target_entity_id, rel.relation_id AS relation_id "
+            "ORDER BY source_entity_id, target_entity_id, relation_id LIMIT $limit",
+            workspace_id=self.workspace_id,
+            generation=generation,
+            relation_type=relation_type,
+            source_entity_ids=list(source_entity_ids),
+            limit=limit,
+            database_=self.database,
+        )
+        return tuple(
+            CanonicalRelationTargetQueryView(
+                row["source_entity_id"],
+                row["target_entity_id"],
+                row["relation_id"],
+                self.query_canonical_artifact_evidence(generation, (row["relation_id"],)),
+            )
+            for row in records
+        )
 
     def query_event_paths(
         self,
@@ -1273,16 +1480,20 @@ class Neo4jGraphAdapter:
             "event.display_name AS display_name, temporal.normalized_start AS event_date, "
             "collect(DISTINCT participant.external_id) AS participants "
             "ORDER BY event_id LIMIT $limit",
-            workspace_id=self.workspace_id, generation=generation, event_date=event_date,
-            limit=limit, database_=self.database,
+            workspace_id=self.workspace_id,
+            generation=generation,
+            event_date=event_date,
+            limit=limit,
+            database_=self.database,
         )
         return tuple(
             CanonicalEventQueryView(
-                record["event_id"], record["event_type"], record["display_name"],
-                record["event_date"], tuple(item for item in record["participants"] if item),
-                self.query_canonical_artifact_evidence(
-                    generation, (record["event_id"],)
-                ),
+                record["event_id"],
+                record["event_type"],
+                record["display_name"],
+                record["event_date"],
+                tuple(item for item in record["participants"] if item),
+                self.query_canonical_artifact_evidence(generation, (record["event_id"],)),
             )
             for record in records
         )
@@ -1314,9 +1525,7 @@ class Neo4jGraphAdapter:
         )
         output = []
         for record in records:
-            evidence = self.query_evidence_by_id(
-                generation, tuple(record["evidence_ids"])
-            )
+            evidence = self.query_evidence_by_id(generation, tuple(record["evidence_ids"]))
             output.append(
                 CanonicalConflictQueryView(
                     record["left_claim_id"],
@@ -1419,8 +1628,7 @@ class Neo4jGraphAdapter:
                 workspace_id=workspace_id,
                 claim_id=claim.claim_id,
                 evidence=[
-                    {**asdict(item), "evidence_id": item.evidence_id}
-                    for item in claim.evidence
+                    {**asdict(item), "evidence_id": item.evidence_id} for item in claim.evidence
                 ],
             ).consume()
 

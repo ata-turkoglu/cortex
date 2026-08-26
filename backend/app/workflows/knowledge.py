@@ -82,6 +82,17 @@ def resume_or_begin(session: Session, run_id: str) -> str | None:
             raise RuntimeError("running knowledge_reindex has no durable context")
         if context is None:
             return begin(session, run_id)
+        if run.state == "running" and session.scalar(
+            select(WorkflowStepRun).where(
+                WorkflowStepRun.workflow_run_id == run_id,
+                WorkflowStepRun.state == "running",
+            )
+        ):
+            # `dispatch_workflow` deliberately publishes one delayed fallback.
+            # Once the primary delivery has entered an external stage, that
+            # fallback must not run the same generation concurrently. A worker
+            # restart is recovered through the durable interrupted/retry path.
+            return None
         snapshot = snapshot_active_corpus(session, run.workspace_id)
         if snapshot.fingerprint != context.source_fingerprint:
             raise RuntimeError("active corpus changed before knowledge_reindex retry")
@@ -131,10 +142,13 @@ def fail(session: Session, run_id: str, stage: str, summary: str) -> None:
     context = (
         session.query(KnowledgeReindexRunContext).filter_by(workflow_run_id=run_id).one_or_none()
     )
+    # Upstream CLIs commonly put their actionable exception after progress and
+    # Rich-formatted output. Preserve the bounded tail, not the first line.
+    diagnostic = summary[-500:]
     if context:
         generation = session.get(KnowledgeGeneration, context.generation_id)
         if generation and generation.state == "building":
-            fail_stage(session, generation, stage, summary=summary)
+            fail_stage(session, generation, stage, summary=diagnostic)
     step = session.scalar(
         select(WorkflowStepRun).where(
             WorkflowStepRun.workflow_run_id == run_id, WorkflowStepRun.step_name == stage
@@ -143,11 +157,11 @@ def fail(session: Session, run_id: str, stage: str, summary: str) -> None:
     if step and step.state != "completed":
         step.state, step.checkpoint_json, step.updated_at = (
             "failed",
-            json.dumps({"summary": summary[:500]}),
+            json.dumps({"summary": diagnostic}),
             now(),
         )
     run.state, run.finished_at, run.updated_at = "failed", now(), now()
-    event(session, run, "failed", details={"summary": summary[:500]})
+    event(session, run, "failed", details={"summary": diagnostic})
     lock = session.scalar(
         select(WorkspaceLock).where(
             WorkspaceLock.workflow_run_id == run_id, WorkspaceLock.lock_type == "index"
@@ -229,6 +243,16 @@ def stage_is_complete(session: Session, run_id: str, stage: str) -> bool:
     return bool(step and step.state == "completed")
 
 
+def stage_is_running(session: Session, run_id: str, stage: str) -> bool:
+    step = session.scalar(
+        select(WorkflowStepRun).where(
+            WorkflowStepRun.workflow_run_id == run_id,
+            WorkflowStepRun.step_name == stage,
+        )
+    )
+    return bool(step and step.state == "running")
+
+
 def complete(session: Session, run_id: str) -> None:
     """Atomically activate a fully ready candidate and release its workflow lock."""
     run = session.get(WorkflowRun, run_id)
@@ -272,6 +296,11 @@ def execute(run_id: str, session_factory, executor) -> None:
         try:
             if stage_is_complete(session, run_id, stage):
                 continue
+            if stage_is_running(session, run_id, stage):
+                # A delayed broker fallback may arrive while the primary
+                # delivery is in an external stage.  That delivery owns this
+                # checkpoint; recovery must first mark it interrupted.
+                return
             snapshot, generation_id = prepare_stage(session, run_id, stage)
             session.commit()
         finally:

@@ -20,6 +20,7 @@ from app.query.ir.schemas import (
     LimitNode,
     ProjectNode,
     RankNode,
+    RelationAggregateNode,
     ScanNode,
     SortNode,
     TemporalConstraintNode,
@@ -56,6 +57,7 @@ class StructuredQueryEngine:
         inputs: tuple[StructuredValue, ...] = (),
         *,
         population: CanonicalPopulation | None = None,
+        relation_targets: dict[str, tuple[tuple[str, tuple], ...]] | None = None,
     ) -> tuple[StructuredValue, EngineResult]:
         started = perf_counter()
         self._validate(step, node, inputs, population)
@@ -63,7 +65,7 @@ class StructuredQueryEngine:
             assert population is not None
             value = self._scan(population, node.population_mode == "exhaustive")
         else:
-            value = self._apply(node, inputs)
+            value = self._apply(node, inputs, relation_targets)
         return value, self._result(step, value, int((perf_counter() - started) * 1_000))
 
     def _validate(self, step, node, inputs, population) -> None:
@@ -104,13 +106,18 @@ class StructuredQueryEngine:
             completeness=completeness,
         )
 
-    def _apply(self, node: IRNode, inputs: tuple[StructuredValue, ...]) -> StructuredValue:
+    def _apply(
+        self, node: IRNode, inputs: tuple[StructuredValue, ...], relation_targets=None
+    ) -> StructuredValue:
         source = inputs[0]
         if isinstance(node, FilterNode):
             records = tuple(
-                item for item in source.records
+                item
+                for item in source.records
                 if _compare(
-                    item.values.get(node.field.field), node.comparator, node.value,
+                    item.values.get(node.field.field),
+                    node.comparator,
+                    node.value,
                     normalized_string=node.field.field == "surname",
                 )
             )
@@ -165,29 +172,38 @@ class StructuredQueryEngine:
                     joined.extend(_joined_record(left_item, item) for item in matches)
                 elif node.join_type == "left":
                     joined.append(left_item)
-            return _records(
-                tuple(joined), _combined(source.completeness, right.completeness)
-            )
+            return _records(tuple(joined), _combined(source.completeness, right.completeness))
         if isinstance(node, CountNode):
             if source.groups:
                 scalar = {group.group_id: _count(group.records, node) for group in source.groups}
             else:
                 scalar = _count(source.records, node)
             return StructuredValue(
-                kind="scalar", records=source.records, groups=source.groups, scalar=scalar,
+                kind="scalar",
+                records=source.records,
+                groups=source.groups,
+                scalar=scalar,
                 aggregate_function="distinct_count" if node.distinct_fields else "count",
                 evidence=source.evidence,
                 completeness=source.completeness,
             )
         if isinstance(node, AggregateNode):
-            collections = ({group.group_id: group.records for group in source.groups}
-                           if source.groups else {node.alias: source.records})
-            values = {key: _aggregate(items, node.field.field, node.function)
-                      for key, items in collections.items()}
+            collections = (
+                {group.group_id: group.records for group in source.groups}
+                if source.groups
+                else {node.alias: source.records}
+            )
+            values = {
+                key: _aggregate(items, node.field.field, node.function)
+                for key, items in collections.items()
+            }
             return StructuredValue(
-                kind="scalar", records=source.records, groups=source.groups,
+                kind="scalar",
+                records=source.records,
+                groups=source.groups,
                 scalar=values if source.groups else values[node.alias],
-                aggregate_function=node.function, completeness=source.completeness,
+                aggregate_function=node.function,
+                completeness=source.completeness,
                 evidence=source.evidence,
             )
         if isinstance(node, RankNode):
@@ -209,23 +225,61 @@ class StructuredQueryEngine:
                 key=lambda item: _sortable(item.values.get(node.by.field)),
                 reverse=node.direction == "descending",
             )
-            return _records(tuple(records[:node.top_n]), source.completeness)
+            return _records(tuple(records[: node.top_n]), source.completeness)
+        if isinstance(node, RelationAggregateNode):
+            if relation_targets is None:
+                raise StructuredExecutionError("relation aggregate targets are required")
+            records = []
+            for item in source.records:
+                targets = relation_targets.get(item.record_id, ())
+                property_ids = {target_id for target_id, _ in targets}
+                evidence = tuple(
+                    dict.fromkeys((*item.evidence, *(e for _, values in targets for e in values)))
+                )
+                records.append(
+                    item.model_copy(
+                        update={
+                            "values": {**item.values, node.count_alias: len(property_ids)},
+                            "evidence": evidence,
+                        }
+                    )
+                )
+            records.sort(
+                key=lambda item: (
+                    -int(item.values[node.count_alias])
+                    if node.direction == "descending"
+                    else int(item.values[node.count_alias]),
+                    str(item.values.get("display_name", "")).casefold(),
+                    item.record_id,
+                )
+            )
+            return _records(tuple(records), source.completeness)
         if isinstance(node, SortNode):
             records = list(source.records)
             for key in reversed(node.keys):
-                records.sort(key=lambda item: _sortable(item.values.get(key.field.field)),
-                             reverse=key.direction == "descending")
+                records.sort(
+                    key=lambda item: _sortable(item.values.get(key.field.field)),
+                    reverse=key.direction == "descending",
+                )
             return _records(tuple(records), source.completeness)
         if isinstance(node, LimitNode):
             return _records(
                 source.records[node.offset : node.offset + node.limit], source.completeness
             )
         if isinstance(node, ProjectNode):
-            records = tuple(item.model_copy(update={"values": {
-                field.name: item.values.get(
-                    field.source_field.field if field.source_field else field.name
+            records = tuple(
+                item.model_copy(
+                    update={
+                        "values": {
+                            field.name: item.values.get(
+                                field.source_field.field if field.source_field else field.name
+                            )
+                            for field in node.fields
+                        }
+                    }
                 )
-                for field in node.fields}}) for item in source.records)
+                for item in source.records
+            )
             return _records(records, source.completeness)
         if isinstance(node, TemporalConstraintNode):
             records = tuple(
@@ -235,19 +289,30 @@ class StructuredQueryEngine:
             )
             return _records(records, source.completeness)
         if isinstance(node, ExistsNode):
-            return StructuredValue(kind="boolean", records=source.records,
-                                   scalar=bool(source.records), completeness=source.completeness)
+            return StructuredValue(
+                kind="boolean",
+                records=source.records,
+                scalar=bool(source.records),
+                completeness=source.completeness,
+            )
         if isinstance(node, CompareNode):
             right = inputs[1]
-            left_ids, right_ids = ({item.record_id for item in source.records},
-                                   {item.record_id for item in right.records})
-            values = {"values": left_ids == right_ids,
-                      "populations": {"left": len(left_ids), "right": len(right_ids)},
-                      "overlap": sorted(left_ids & right_ids),
-                      "difference": sorted(left_ids - right_ids)}
-            return StructuredValue(kind="comparison", records=source.records + right.records,
-                                   scalar=values[node.comparison],
-                                   completeness=_combined(source.completeness, right.completeness))
+            left_ids, right_ids = (
+                {item.record_id for item in source.records},
+                {item.record_id for item in right.records},
+            )
+            values = {
+                "values": left_ids == right_ids,
+                "populations": {"left": len(left_ids), "right": len(right_ids)},
+                "overlap": sorted(left_ids & right_ids),
+                "difference": sorted(left_ids - right_ids),
+            }
+            return StructuredValue(
+                kind="comparison",
+                records=source.records + right.records,
+                scalar=values[node.comparison],
+                completeness=_combined(source.completeness, right.completeness),
+            )
         raise StructuredExecutionError(f"unsupported structured operator: {node.kind}")
 
     def _result(self, step: ExecutionStep, value: StructuredValue, duration: int) -> EngineResult:
@@ -258,49 +323,81 @@ class StructuredQueryEngine:
         rows: tuple[GroundedItem, ...] = ()
         aggregates: tuple[AggregateResult, ...] = ()
         if value.kind == "records":
-            rows = tuple(GroundedItem(item_id=item.record_id, values=item.values,
-                                      evidence_ids=tuple(e.evidence_id for e in item.evidence))
-                         for item in value.records)
+            rows = tuple(
+                GroundedItem(
+                    item_id=item.record_id,
+                    values=item.values,
+                    evidence_ids=tuple(e.evidence_id for e in item.evidence),
+                )
+                for item in value.records
+            )
         elif value.kind == "groups":
-            rows = tuple(GroundedItem(item_id=group.group_id,
-                                      values={**group.keys, "confirmed_count": len(group.records)},
-                                      evidence_ids=_record_evidence_ids(group.records))
-                         for group in value.groups)
+            rows = tuple(
+                GroundedItem(
+                    item_id=group.group_id,
+                    values={**group.keys, "confirmed_count": len(group.records)},
+                    evidence_ids=_record_evidence_ids(group.records),
+                )
+                for group in value.groups
+            )
         elif value.aggregate_function and evidence_ids:
-            aggregates = (AggregateResult(item_id=f"aggregate-{step.step_id}",
-                                           values={"result": value.scalar},
-                                           evidence_ids=evidence_ids,
-                                           function=value.aggregate_function, value=value.scalar,
-                                           population_count=value.completeness.confirmed_count),)
+            aggregates = (
+                AggregateResult(
+                    item_id=f"aggregate-{step.step_id}",
+                    values={"result": value.scalar},
+                    evidence_ids=evidence_ids,
+                    function=value.aggregate_function,
+                    value=value.scalar,
+                    population_count=value.completeness.confirmed_count,
+                ),
+            )
         elif evidence_ids:
-            rows = (GroundedItem(item_id=f"value-{step.step_id}",
-                                 values={"result": value.scalar}, evidence_ids=evidence_ids),)
+            rows = (
+                GroundedItem(
+                    item_id=f"value-{step.step_id}",
+                    values={"result": value.scalar},
+                    evidence_ids=evidence_ids,
+                ),
+            )
         unsafe = value.completeness.not_safely_enumerable
         failures = (
-            EngineFailure(
-                step_id=step.step_id,
-                engine=step.engine,
-                capability=step.capability,
-                reason="canonical population is not safely enumerable",
-            ),
-        ) if unsafe else ()
+            (
+                EngineFailure(
+                    step_id=step.step_id,
+                    engine=step.engine,
+                    capability=step.capability,
+                    reason="canonical population is not safely enumerable",
+                ),
+            )
+            if unsafe
+            else ()
+        )
         items = rows + aggregates
         return EngineResult(
-            result_id=f"result-{step.step_id}", workspace_id=self.workspace_id,
-            generation_id=self.generation_id, step_id=step.step_id, engine=step.engine,
+            result_id=f"result-{step.step_id}",
+            workspace_id=self.workspace_id,
+            generation_id=self.generation_id,
+            step_id=step.step_id,
+            engine=step.engine,
             capability=step.capability,
             state="partial" if failures or value.completeness.state == "partial" else "success",
-            structured_rows=rows, aggregates=aggregates, text_evidence=evidence,
-            provenance=tuple(ProvenanceLink(result_id=item.item_id,
-                                             evidence_ids=item.evidence_ids) for item in items),
+            structured_rows=rows,
+            aggregates=aggregates,
+            text_evidence=evidence,
+            provenance=tuple(
+                ProvenanceLink(result_id=item.item_id, evidence_ids=item.evidence_ids)
+                for item in items
+            ),
             completeness=value.completeness,
             confidence=1.0 if value.completeness.state == "complete" else 0.8,
             failures=failures,
-            trace=EngineTrace(step_id=step.step_id, engine=step.engine,
-                              capability=step.capability, duration_ms=duration,
-                              counters={
-                                  "confirmed_count": value.completeness.confirmed_count or 0
-                              }),
+            trace=EngineTrace(
+                step_id=step.step_id,
+                engine=step.engine,
+                capability=step.capability,
+                duration_ms=duration,
+                counters={"confirmed_count": value.completeness.confirmed_count or 0},
+            ),
         )
 
 
@@ -340,8 +437,9 @@ def _compare(actual, comparator, expected, *, normalized_string=False):
 def _count(records, node):
     if not node.distinct_fields:
         return len(records)
-    return len({tuple(item.values.get(field.field) for field in node.distinct_fields)
-                for item in records})
+    return len(
+        {tuple(item.values.get(field.field) for field in node.distinct_fields) for item in records}
+    )
 
 
 def _aggregate(records, field, function):
@@ -358,8 +456,10 @@ def _aggregate(records, field, function):
 
 
 def _sortable(value):
-    normalized = value if isinstance(value, bool | int | float | str) else json.dumps(
-        value, ensure_ascii=False, sort_keys=True
+    normalized = (
+        value
+        if isinstance(value, bool | int | float | str)
+        else json.dumps(value, ensure_ascii=False, sort_keys=True)
     )
     return value is None, type(normalized).__name__, normalized
 

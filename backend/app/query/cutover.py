@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core import config
-from ..knowledge.construction import MANDATORY_KNOWLEDGE_STAGES
+from ..knowledge.construction import RETRIEVAL_REQUIRED_STAGES
 from ..knowledge.source_manifest import SourceManifestValidationError, load_generation_manifest
 from ..models import (
     KnowledgeGeneration,
@@ -105,9 +105,9 @@ def _failures(
         or by_stage[stage].state != "ready"
         or by_stage[stage].input_fingerprint != generation.source_fingerprint
         or not by_stage[stage].output_fingerprint
-        for stage in MANDATORY_KNOWLEDGE_STAGES
+        for stage in RETRIEVAL_REQUIRED_STAGES
     ):
-        failures.append("mandatory projections are not ready for one exact generation")
+        failures.append("retrieval projections are not ready for one exact generation")
     else:
         try:
             # These reads prove that the immutable authority and generation-owned lexical
@@ -131,7 +131,6 @@ def _failures(
     for ready, label in (
         (preflight.schema_ready, "schema migration is not ready"),
         (preflight.config_ready, "V2 configuration is not ready"),
-        (preflight.neo4j_ready, "Neo4j is not ready"),
         (preflight.runtime_ready, "Query V2 runtime is not ready"),
     ):
         if not ready:

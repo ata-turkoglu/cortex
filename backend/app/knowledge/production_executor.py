@@ -5,24 +5,26 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
 from ..core.config import Settings, get_settings
+from ..core.embedding_runtime import build_production_embedder
 from ..core.qdrant import get_qdrant_client
 from ..graphrag.adapter import GraphRAGAdapter
 from ..graphrag.neo4j import sync_graph_to_neo4j
+from ..models import KnowledgeGeneration
+from ..providers.base import EmbeddingProvider
 from ..providers.embeddings import (
     EmbeddingConfiguration,
-    OllamaEmbeddingAdapter,
-    OpenAIEmbeddingAdapter,
-    Qwen3EmbeddingAdapter,
     adaptive_embed,
 )
 from ..providers.ollama import OllamaProvider
 from ..retrieval.qdrant import VectorRecord, WorkspaceQdrantStore
 from ..retrieval.schemas import Evidence
 from ..retrieval.sparse import SparseDocument, WorkspaceBM25Index
+from .canonical_core import CanonicalCoreStore
 from .construction_projection import construct_from_bundle, promote_constructed_knowledge
 from .entities import (
     CanonicalEntity,
@@ -31,8 +33,6 @@ from .entities import (
     EntityPropertyValueType,
     EntityType,
     IdentityDecisionKind,
-    normalize_mention,
-    resolve_conservatively,
 )
 from .extraction import (
     ExtractionMetadata,
@@ -45,7 +45,11 @@ from .graph import Neo4jGraphAdapter
 from .model import KnowledgeAuthority, new_canonical_id
 from .pipeline import CorpusSnapshot, StageResult
 from .provider_extractor import OpenAIKnowledgeExtractor
-from .source_manifest import SourceManifestIdentity, write_generation_manifest
+from .source_manifest import (
+    SourceManifestIdentity,
+    load_generation_manifest,
+    write_generation_manifest,
+)
 from .workflow_executor import KnowledgeWorkflowExecutor
 
 
@@ -59,6 +63,77 @@ def _entity_type(value: str) -> EntityType:
         return EntityType(value.casefold())
     except ValueError:
         return EntityType.DYNAMIC
+
+
+_NON_SURNAME_TERMINALS = frozenset({"bey", "hanım", "hanim", "av", "dr", "hakim"})
+
+
+# An extracted ``owns`` edge is countable only when its exact relation span
+# actually states ownership. Endpoint containment proves locality, but not the
+# relationship itself: a person and a property can co-occur without ownership.
+_DIRECT_OWNERSHIP_PATTERN = re.compile(
+    r"\b(?:owns?|owner(?:ship)?|malik\w*|sahib\w*|mülkiyet\w*|tasarruf\w*)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _has_direct_ownership_support(source_text: str) -> bool:
+    """Return whether an exact relation span contains explicit ownership language."""
+    return bool(_DIRECT_OWNERSHIP_PATTERN.search(source_text))
+
+
+_LABEL_BOUND_PROPERTY_FIELDS = (
+    ("province", re.compile(r"^(?P<value>[^\d,.;]+?)\s+ili\b", re.IGNORECASE)),
+    ("district", re.compile(r"\bili\s+(?P<value>[^\d,.;]+?)\s+il\u00e7esi\b", re.IGNORECASE)),
+    (
+        "neighborhood",
+        re.compile(r"\bil\u00e7esi\s+(?P<value>[^\d,.;]+?)\s+mahallesi\b", re.IGNORECASE),
+    ),
+    ("pafta", re.compile(r"(?P<value>\d+)\s+pafta\b", re.IGNORECASE)),
+    ("ada", re.compile(r"(?P<value>\d+)\s+ada\b", re.IGNORECASE)),
+    ("parsel", re.compile(r"(?P<value>\d+)\s+parsel\b", re.IGNORECASE)),
+)
+
+
+def _label_bound_property_fields(source_text: str) -> dict[str, str]:
+    """Recover omitted property keys only from their explicit labels in the mention span.
+
+    This is intentionally not relation inference: it neither creates an ownership
+    edge nor changes extracted values.  The caller only uses a recovered value
+    when the extractor omitted that key and the label is in exact property evidence.
+    """
+    fields: dict[str, str] = {}
+    for key, pattern in _LABEL_BOUND_PROPERTY_FIELDS:
+        match = pattern.search(source_text)
+        if match:
+            value = match.group("value").strip()
+            if value:
+                fields[key] = value
+    return fields
+
+
+def _surname_from_identity_evidence(value: str, provenance):
+    """Conservatively project a surname from the exact canonical identity mention.
+
+    This is a generation-time identity projection, never a query-time name parse.
+    A single-token, titled, punctuated, or parenthesized mention remains unprojected.
+    """
+    normalized = value.strip()
+    if any(marker in normalized for marker in "()[]"):
+        return None
+    parts = re.findall(r"[^\W\d_]+", normalized, flags=re.UNICODE)
+    if len(parts) < 2 or parts[-1].casefold() in _NON_SURNAME_TERMINALS:
+        return None
+    surname = parts[-1]
+    offset = value.rfind(surname)
+    if offset < 0:
+        return None
+    return surname, replace(
+        provenance,
+        start_offset=provenance.start_offset + offset,
+        end_offset=provenance.start_offset + offset + len(surname),
+        source_text=surname,
+    )
 
 
 def _bundle_payload(bundle: KnowledgeExtractionBundle) -> dict[str, object]:
@@ -80,7 +155,16 @@ def _bundle_payload(bundle: KnowledgeExtractionBundle) -> dict[str, object]:
             "schema_version": bundle.metadata.schema_version,
         },
         "mentions": [
-            {"id": item.local_id, "entity_type": item.entity_type, **span(item)}
+            {
+                "id": item.local_id,
+                "entity_type": item.entity_type,
+                "identity_candidates": [
+                    {"canonical_entity_id": value}
+                    for value in item.candidate_canonical_entity_ids
+                ],
+                "candidate_provenance": item.candidate_provenance,
+                **span(item),
+            }
             for item in bundle.mentions
         ],
         "entity_properties": [
@@ -145,10 +229,21 @@ class ProductionKnowledgeExecutor:
     """Executes every mandatory stage with durable, generation-scoped artifacts."""
 
     def __init__(
-        self, workspace_id: str, extractor=None, *, settings: Settings | None = None
+        self,
+        workspace_id: str,
+        extractor=None,
+        *,
+        settings: Settings | None = None,
+        embedding_configuration: EmbeddingConfiguration | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        session_factory=None,
     ) -> None:
         self.workspace_id = workspace_id
         self.settings = settings or get_settings()
+        if embedding_configuration is None or embedding_provider is None:
+            raise RuntimeError("production knowledge embeddings require persisted configuration")
+        self.embedding_configuration = embedding_configuration
+        self.embedding_provider = embedding_provider
         self.extractor = extractor or OpenAIKnowledgeExtractor(
             self.settings.graphrag_extraction_model,
             OllamaProvider() if self.settings.graphrag_extraction_provider == "ollama" else None,
@@ -163,6 +258,7 @@ class ProductionKnowledgeExecutor:
             raise ValueError("knowledge candidate path escapes the data root")
         self.root = root
         self._retrieval: dict[str, tuple[StageResult, StageResult]] = {}
+        self.session_factory = session_factory
 
     def as_workflow_executor(self) -> KnowledgeWorkflowExecutor:
         return KnowledgeWorkflowExecutor(
@@ -182,7 +278,7 @@ class ProductionKnowledgeExecutor:
                 "claim_fact": lambda snapshot, generation: self.typed_stage(
                     "claim_fact", snapshot, generation
                 ),
-                "canonical_graph": self.canonical_graph,
+                "canonical_graph": self.canonical_projection,
                 "bm25": lambda snapshot, generation: self.retrieval(snapshot, generation)[0],
                 "dense_qdrant": lambda snapshot, generation: self.retrieval(snapshot, generation)[
                     1
@@ -242,7 +338,6 @@ class ProductionKnowledgeExecutor:
                     bundle = _bundle_from_payload(
                         json.loads(chunk_artifact.read_text(encoding="utf-8"))
                     )
-                    validate_extraction(bundle, snapshot, generation_id)
                 else:
                     result = self.extractor.extract(
                         CorpusSnapshot(snapshot.workspace_id, snapshot.fingerprint, (chunk,)),
@@ -264,7 +359,9 @@ class ProductionKnowledgeExecutor:
                 ),
                 encoding="utf-8",
             )
-        bundles = tuple(retain_exact_assertions(item, snapshot)[0] for item in bundles)
+        retained_bundles = tuple(retain_exact_assertions(item, snapshot) for item in bundles)
+        bundles = tuple(item[0] for item in retained_bundles)
+        rejected_assertion_count += sum(item[1] for item in retained_bundles)
         evidence_count = sum(
             len(validate_extraction(item, snapshot, generation_id)) for item in bundles
         )
@@ -284,46 +381,187 @@ class ProductionKnowledgeExecutor:
         )
 
     def identity_resolution(self, snapshot: CorpusSnapshot, generation_id: str) -> StageResult:
-        bundles = tuple(
-            retain_exact_assertions(item, snapshot)[0] for item in self._load_bundles(generation_id)
-        )
+        if self.session_factory is None:
+            raise RuntimeError("canonical construction requires a SQLite session factory")
+        if snapshot.workspace_id != self.workspace_id:
+            raise ValueError("canonical construction snapshot crosses executor workspace")
+        bundles = self._load_bundles(generation_id)
+        session = self.session_factory()
         mapping: list[dict[str, object]] = []
-        auto_linked = 0
-        unresolved = 0
-        with Neo4jGraphAdapter.from_settings(
-            snapshot.workspace_id, settings=self.settings
-        ) as graph:
-            graph.ensure_schema()
-            for bundle_index, bundle in enumerate(bundles):
-                evidence = validate_extraction(bundle, snapshot, generation_id)
-                for mention, provenance in zip(bundle.mentions, evidence, strict=False):
-                    entity_type = _entity_type(mention.entity_type)
-                    candidate_rows = graph.identity_candidates(
-                        normalize_mention(mention.span.source_text), entity_type
+        rejected_assertion_count = 0
+        try:
+            sources = load_generation_manifest(
+                session, snapshot.workspace_id, generation_id, self.data_root
+            )
+            generation = session.get(KnowledgeGeneration, generation_id)
+            if generation is None or generation.workspace_id != snapshot.workspace_id:
+                raise ValueError(
+                    "canonical generation is missing or outside the snapshot workspace"
+                )
+            if generation.source_fingerprint != snapshot.fingerprint:
+                raise ValueError("canonical snapshot does not match the target generation")
+            source_by_chunk = {source.chunk_id: source for source in sources}
+            snapshot_by_chunk = {chunk.chunk_id: chunk for chunk in snapshot.chunks}
+            if set(source_by_chunk) != set(snapshot_by_chunk):
+                raise ValueError("canonical manifest does not agree with the generation snapshot")
+            if len(bundles) != len(snapshot.chunks):
+                raise ValueError("canonical extraction bundles do not cover the full manifest")
+            store = CanonicalCoreStore(session, snapshot.workspace_id)
+            for bundle_index, (bundle, chunk) in enumerate(
+                zip(bundles, snapshot.chunks, strict=True)
+            ):
+                source = source_by_chunk.get(chunk.chunk_id)
+                if source is None or (
+                    source.document_id != chunk.document_id
+                    or source.document_version_id != chunk.document_version_id
+                    or source.logical_document_id != chunk.logical_document_id
+                    or source.content != chunk.content
+                    or hashlib.sha256(source.content.encode()).hexdigest() != chunk.content_hash
+                ):
+                    raise ValueError("canonical source evidence is outside its immutable manifest")
+                one_chunk = CorpusSnapshot(snapshot.workspace_id, snapshot.fingerprint, (chunk,))
+                retained, rejected_evidence_count = retain_exact_assertions(bundle, one_chunk)
+                try:
+                    # A dropped exact-evidence assertion can otherwise make a
+                    # countable ownership/property claim disappear and falsely
+                    # advertise this generation as exhaustive-ready.
+                    rejected_assertion_count += rejected_evidence_count
+                    validate_extraction(retained, one_chunk, generation_id)
+                    if any(item.span.chunk_id != chunk.chunk_id for item in retained.mentions):
+                        raise ValueError("canonical extraction crosses manifest chunk boundaries")
+                    durable_people = {}
+                    durable_properties = {}
+                    for item in retained.mentions:
+                        if item.entity_type == "person":
+                            durable = store.persist_person_mention(
+                                generation_id=generation_id,
+                                document_id=chunk.document_id,
+                                document_version_id=chunk.document_version_id,
+                                logical_document_id=chunk.logical_document_id or None,
+                                chunk_id=chunk.chunk_id,
+                                span_start=item.span.start_offset,
+                                span_end=item.span.end_offset,
+                                source_text=item.span.source_text,
+                                extractor_version=retained.metadata.schema_version,
+                            )
+                            decision = store.decide_person(
+                                durable,
+                                candidate_ids=item.candidate_canonical_entity_ids,
+                                candidate_provenance=item.candidate_provenance,
+                            )
+                            durable_people[item.local_id] = durable
+                            mapping.append(
+                                {
+                                    "bundle_index": bundle_index,
+                                    "local_id": item.local_id,
+                                    "mention_id": durable.id,
+                                    "entity_id": decision.canonical_entity_id,
+                                    "decision": {
+                                        "NEW": "new_canonical",
+                                        "LINK": "auto_link",
+                                        "UNRESOLVED": "unresolved",
+                                    }[decision.decision],
+                                    "canonical_display_name": durable.surface_text,
+                                    "candidate_entity_ids": json.loads(
+                                        decision.candidate_entity_ids_json
+                                    ),
+                                }
+                            )
+                        elif item.entity_type == "asset_property":
+                            durable_properties[item.local_id] = store.persist_property_mention(
+                                generation_id=generation_id,
+                                document_id=chunk.document_id,
+                                document_version_id=chunk.document_version_id,
+                                logical_document_id=chunk.logical_document_id or None,
+                                chunk_id=chunk.chunk_id,
+                                span_start=item.span.start_offset,
+                                span_end=item.span.end_offset,
+                                source_text=item.span.source_text,
+                                extractor_version=retained.metadata.schema_version,
+                            )
+                    fields_by_property: dict[str, dict[str, str]] = {}
+                    for item in retained.entity_properties:
+                        if item.mention_id in durable_properties and item.key in {
+                            "province",
+                            "district",
+                            "neighborhood",
+                            "pafta",
+                            "ada",
+                            "parsel",
+                            "independent_section",
+                        }:
+                            fields_by_property.setdefault(item.mention_id, {})[item.key] = (
+                                item.value
+                            )
+                    for item in retained.mentions:
+                        if (
+                            item.entity_type != "asset_property"
+                            or item.local_id not in durable_properties
+                        ):
+                            continue
+                        fields = fields_by_property.setdefault(item.local_id, {})
+                        repaired_fields = _label_bound_property_fields(item.span.source_text)
+                        for key, value in repaired_fields.items():
+                            fields.setdefault(key, value)
+                    for relation in retained.relations:
+                        if relation.relation_type != "owns":
+                            continue
+                        person = durable_people.get(relation.source_mention_id)
+                        property_mention = durable_properties.get(relation.target_mention_id)
+                        if (
+                            person is None
+                            or property_mention is None
+                            or relation.span.start_offset > person.span_start
+                            or relation.span.end_offset < person.span_end
+                            or relation.span.start_offset > property_mention.span_start
+                            or relation.span.end_offset < property_mention.span_end
+                            or not _has_direct_ownership_support(relation.span.source_text)
+                        ):
+                            rejected_assertion_count += 1
+                            continue
+                        property_record = store.upsert_property(
+                            fields_by_property.get(relation.target_mention_id, {})
+                        )
+                        if property_record is None:
+                            rejected_assertion_count += 1
+                            continue
+                        store.persist_ownership_assertion(
+                            generation_id=generation_id,
+                            person_mention=person,
+                            property_mention=property_mention,
+                            property_record=property_record,
+                            span_start=relation.span.start_offset,
+                            span_end=relation.span.end_offset,
+                            source_text=relation.span.source_text,
+                            assertion_rule_version=retained.metadata.schema_version,
+                        )
+                    store.record_chunk(generation_id, chunk.chunk_id, chunk.content_hash)
+                    session.commit()
+                except Exception as error:
+                    session.rollback()
+                    store = CanonicalCoreStore(session, snapshot.workspace_id)
+                    store.record_chunk(
+                        generation_id, chunk.chunk_id, chunk.content_hash, failed=str(error)[:500]
                     )
-                    transient = EntityMention(
-                        new_canonical_id(), mention.span.source_text, entity_type, provenance
-                    )
-                    resolution = resolve_conservatively(transient, candidate_rows)
-                    entity_id = resolution.resolved_entity_id or new_canonical_id()
-                    auto_linked += int(resolution.decision == IdentityDecisionKind.AUTO_LINK)
-                    unresolved += int(resolution.decision == IdentityDecisionKind.UNRESOLVED)
-                    mapping.append(
-                        {
-                            "bundle_index": bundle_index,
-                            "local_id": mention.local_id,
-                            "mention_id": transient.mention_id,
-                            "entity_id": entity_id,
-                            "decision": resolution.decision.value,
-                            "candidate_entity_ids": list(resolution.candidate_entity_ids),
-                        }
-                    )
+                    session.commit()
+            generation = session.get(KnowledgeGeneration, generation_id)
+            if generation is None:
+                raise ValueError("canonical generation disappeared")
+            CanonicalCoreStore(session, snapshot.workspace_id).record_status(
+                generation_id=generation_id,
+                manifest_hash=generation.source_manifest_hash,
+                manifest_chunk_count=generation.source_chunk_count,
+                rejected_assertion_count=rejected_assertion_count,
+            )
+            session.commit()
+        finally:
+            session.close()
         artifact = self._artifact(generation_id, "identity")
         artifact.write_text(json.dumps({"mapping": mapping}, sort_keys=True), encoding="utf-8")
         metrics = {
             "mention_count": len(mapping),
-            "auto_linked_count": auto_linked,
-            "unresolved_count": unresolved,
+            "rejected_assertion_count": rejected_assertion_count,
+            "canonical_projection": "sqlite",
             "artifact": str(artifact.relative_to(self.data_root)),
         }
         return StageResult(
@@ -346,7 +584,11 @@ class ProductionKnowledgeExecutor:
                 retain_exact_assertions(bundle, snapshot)[0],
                 snapshot,
                 generation_id,
-                {row["local_id"]: row["entity_id"] for row in rows if row["bundle_index"] == index},
+                {
+                    row["local_id"]: row["entity_id"]
+                    for row in rows
+                    if row["bundle_index"] == index and row.get("entity_id")
+                },
             )
             for index, bundle in enumerate(bundles)
         )
@@ -368,6 +610,35 @@ class ProductionKnowledgeExecutor:
             metrics,
         )
 
+    def canonical_projection(self, snapshot: CorpusSnapshot, generation_id: str) -> StageResult:
+        """Checkpoint SQLite authority; Neo4j materialization remains deferred."""
+        if self.session_factory is None:
+            raise RuntimeError("canonical construction requires a SQLite session factory")
+        session = self.session_factory()
+        try:
+            from ..models import CanonicalGenerationStatusRecord
+
+            row = session.get(
+                CanonicalGenerationStatusRecord,
+                (snapshot.workspace_id, generation_id, "minimal-core-v1"),
+            )
+            if row is None:
+                raise ValueError("SQLite canonical construction did not produce a status record")
+            metrics = {
+                "sqlite_canonical_status": row.status,
+                "manifest_chunk_count": row.manifest_chunk_count,
+                "processed_chunk_count": row.processed_chunk_count,
+                "failed_chunk_count": row.failed_chunk_count,
+            }
+        finally:
+            session.close()
+        return StageResult(
+            generation_id,
+            snapshot.fingerprint,
+            _fingerprint("canonical_sqlite_projection", generation_id, metrics),
+            metrics,
+        )
+
     def canonical_graph(self, snapshot: CorpusSnapshot, generation_id: str) -> StageResult:
         bundles = tuple(
             retain_exact_assertions(item, snapshot)[0] for item in self._load_bundles(generation_id)
@@ -380,10 +651,20 @@ class ProductionKnowledgeExecutor:
             snapshot.workspace_id, settings=self.settings
         ) as graph:
             graph.ensure_schema()
+            graph.clear_generation_materialization(generation_id)
             for index, bundle in enumerate(bundles):
                 evidence = validate_extraction(bundle, snapshot, generation_id)
                 for extracted, provenance in zip(bundle.mentions, evidence, strict=False):
-                    row = rows_by_key[(index, extracted.local_id)]
+                    row = rows_by_key.get((index, extracted.local_id))
+                    if row is None:
+                        # Extraction retention can reject one mention while preserving
+                        # other exact assertions in the same bundle.  It cannot become
+                        # a canonical entity without a resolved identity decision.
+                        continue
+                    if not row.get("entity_id"):
+                        # Unresolved/ambiguous mentions retain their artifact
+                        # provenance only; they never enter canonical state.
+                        continue
                     entity_id = str(row["entity_id"])
                     mention = EntityMention(
                         str(row["mention_id"]),
@@ -398,10 +679,31 @@ class ProductionKnowledgeExecutor:
                     entities[entity_id] = CanonicalEntity(
                         entity_id,
                         mention.entity_type,
-                        current.display_name if current else extracted.span.source_text,
+                        current.display_name
+                        if current
+                        else str(row.get("canonical_display_name") or extracted.span.source_text),
                         KnowledgeAuthority.EXTRACTED,
                         mentions=(*current.mentions, mention) if current else (mention,),
                     )
+                    if mention.entity_type is EntityType.PERSON:
+                        derived = _surname_from_identity_evidence(
+                            extracted.span.source_text, provenance
+                        )
+                        if derived:
+                            value, surname_provenance = derived
+                            candidate = CanonicalEntityProperty(
+                                new_canonical_id(),
+                                entity_id,
+                                "surname",
+                                value,
+                                EntityPropertyValueType.STRING,
+                                KnowledgeAuthority.EXTRACTED,
+                                generation_id,
+                                surname_provenance,
+                            )
+                            property_candidates.setdefault((entity_id, candidate.key), []).append(
+                                candidate
+                            )
                 property_start = len(bundle.mentions)
                 property_evidence = evidence[
                     property_start : property_start + len(bundle.entity_properties)
@@ -409,7 +711,9 @@ class ProductionKnowledgeExecutor:
                 for extracted_property, provenance in zip(
                     bundle.entity_properties, property_evidence, strict=True
                 ):
-                    row = rows_by_key[(index, extracted_property.mention_id)]
+                    row = rows_by_key.get((index, extracted_property.mention_id))
+                    if row is None:
+                        continue
                     entity_id = str(row["entity_id"])
                     entity = entities.get(entity_id)
                     if entity is None or entity.entity_type is not EntityType.PERSON:
@@ -445,7 +749,11 @@ class ProductionKnowledgeExecutor:
                 )
                 resolved_property_count += 1
             counts = {"relations": 0, "events": 0, "temporals": 0, "claims": 0}
+            governed_ownership_relation_count = 0
             for constructed in self._constructed(snapshot, generation_id):
+                governed_ownership_relation_count += sum(
+                    relation.relation_type == "owns" for relation in constructed.relations
+                )
                 promoted = promote_constructed_knowledge(graph, snapshot, constructed)
                 for key, value in promoted.items():
                     counts[key] += value
@@ -454,6 +762,8 @@ class ProductionKnowledgeExecutor:
             "resolved_entity_property_count": resolved_property_count,
             "conflicted_entity_property_count": conflicted_property_count,
             "entity_property_schema_version": "1",
+            "governed_ownership_relation_count": governed_ownership_relation_count,
+            "governed_relation_projection_schema_version": "1",
             **counts,
         }
         return StageResult(
@@ -494,16 +804,7 @@ class ProductionKnowledgeExecutor:
             bm25_path,
             generation_id=generation_id,
         ).save()
-        provider = (
-            Qwen3EmbeddingAdapter()
-            if self.settings.embedding_provider == "ollama"
-            and self.settings.embedding_model.startswith("qwen3")
-            else (
-                OllamaEmbeddingAdapter()
-                if self.settings.embedding_provider == "ollama"
-                else OpenAIEmbeddingAdapter(self.settings.embedding_model)
-            )
-        )
+        provider = self.embedding_provider
         texts = [item.content for item in evidence]
         vectors = (
             asyncio.run(
@@ -520,7 +821,12 @@ class ProductionKnowledgeExecutor:
         if not vectors:
             raise RuntimeError("knowledge candidate has no embeddings to index")
         configuration = EmbeddingConfiguration(
-            self.settings.embedding_provider, self.settings.embedding_model, len(vectors[0])
+            self.embedding_configuration.provider,
+            self.embedding_configuration.model,
+            len(vectors[0]),
+            self.embedding_configuration.model_digest,
+            self.embedding_configuration.normalized,
+            self.embedding_configuration.text_template_version,
         )
         store = WorkspaceQdrantStore(
             get_qdrant_client(),
@@ -659,5 +965,13 @@ class ProductionKnowledgeExecutor:
         )
 
 
-def create_production_executor(workspace_id: str) -> KnowledgeWorkflowExecutor:
-    return ProductionKnowledgeExecutor(workspace_id).as_workflow_executor()
+def create_production_executor(workspace_id: str, session) -> KnowledgeWorkflowExecutor:
+    configuration, provider = build_production_embedder(session)
+    from sqlalchemy.orm import sessionmaker
+
+    return ProductionKnowledgeExecutor(
+        workspace_id,
+        embedding_configuration=configuration,
+        embedding_provider=provider,
+        session_factory=sessionmaker(bind=session.get_bind(), autoflush=False),
+    ).as_workflow_executor()

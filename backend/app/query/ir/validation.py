@@ -26,6 +26,7 @@ from .schemas import (
     LogicalQueryIR,
     ProjectNode,
     RankNode,
+    RelationAggregateNode,
     RelationReference,
     ResolveNode,
     RetrieveEvidenceNode,
@@ -56,9 +57,7 @@ class IRVocabulary:
     relations: dict[str, RelationDeclaration] = field(default_factory=dict)
     custom_capabilities: frozenset[str] = frozenset()
 
-    def with_governed_properties(
-        self, properties: dict[str, frozenset[str]]
-    ) -> IRVocabulary:
+    def with_governed_properties(self, properties: dict[str, frozenset[str]]) -> IRVocabulary:
         """Add only projection-confirmed fields to this scoped vocabulary snapshot."""
         resources = dict(self.resources)
         for resource, fields in properties.items():
@@ -69,9 +68,7 @@ class IRVocabulary:
 
     @classmethod
     def core(cls) -> IRVocabulary:
-        common_entity = frozenset(
-            {"entity_id", "entity_type", "display_name", "subtype", "status"}
-        )
+        common_entity = frozenset({"entity_id", "entity_type", "display_name", "subtype", "status"})
         resources = {
             "entity": common_entity,
             "person": common_entity,
@@ -116,7 +113,11 @@ class IRVocabulary:
                 "parent_of": RelationDeclaration(
                     source_resources=frozenset({"person"}),
                     target_resources=frozenset({"person"}),
-                )
+                ),
+                "owns": RelationDeclaration(
+                    source_resources=frozenset({"person"}),
+                    target_resources=frozenset({"asset_property"}),
+                ),
             },
         )
 
@@ -192,7 +193,7 @@ def _validate_graph_semantics(
             _require_resource(vocabulary, node.resource)
         for reference in _field_references(node):
             _require_field(vocabulary, reference)
-        if isinstance(node, TraverseNode):
+        if isinstance(node, TraverseNode | RelationAggregateNode):
             _require_relation(vocabulary, node.relation)
         if isinstance(node, CustomCapabilityNode):
             if node.capability not in vocabulary.custom_capabilities:
@@ -296,9 +297,7 @@ def _validate_input_types(node: IRNode, nodes: dict[str, IRNode]) -> None:
         "ranked_set",
         "graph_paths",
     }
-    if isinstance(
-        node, FilterNode | DistinctNode | SortNode | LimitNode | TemporalConstraintNode
-    ):
+    if isinstance(node, FilterNode | DistinctNode | SortNode | LimitNode | TemporalConstraintNode):
         if input_types[0] not in set_types or node.output_type != input_types[0]:
             raise IRValidationError(f"node {node.node_id} must preserve its set input type")
     elif isinstance(node, TraverseNode):
@@ -319,8 +318,22 @@ def _validate_input_types(node: IRNode, nodes: dict[str, IRNode]) -> None:
     elif isinstance(node, RankNode):
         if input_types[0] not in set_types - {"graph_paths"}:
             raise IRValidationError("rank requires an enumerable set input")
+    elif isinstance(node, RelationAggregateNode):
+        if input_types != ("entity_set",):
+            raise IRValidationError("relation aggregate requires one entity_set input")
+        if (
+            node.relation.source_resource != "person"
+            or node.relation.target_resource != "asset_property"
+        ):
+            raise IRValidationError("relation aggregate requires person to asset_property relation")
+        if node.target_identity_field != FieldReference(
+            resource="asset_property", field="entity_id"
+        ):
+            raise IRValidationError(
+                "relation aggregate must distinct-count canonical property identity"
+            )
     elif isinstance(node, RetrieveEvidenceNode):
-        if input_types[0] not in set_types:
+        if input_types and input_types[0] not in set_types:
             raise IRValidationError("retrieve_evidence requires a set or graph input")
     elif isinstance(node, CompareNode):
         if any(value not in set_types | {"scalar"} for value in input_types):
@@ -374,7 +387,7 @@ def _upstream_ids(inputs: tuple[str, ...], nodes: dict[str, IRNode]) -> set[str]
 
 
 def _validate_coverage(graph: LogicalPlanGraph, ir: LogicalQueryIR) -> None:
-    exhaustive_kinds = {"count", "group", "aggregate", "rank"}
+    exhaustive_kinds = {"count", "group", "aggregate", "rank", "relation_aggregate"}
     requires_exhaustive = any(node.kind in exhaustive_kinds for node in graph.nodes) or any(
         isinstance(node, ScanNode) and node.population_mode == "exhaustive" for node in graph.nodes
     )

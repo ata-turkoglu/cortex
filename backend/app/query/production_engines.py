@@ -9,7 +9,7 @@ from time import perf_counter
 from app.engines.graph import GraphValue, KnowledgeGraphEngine
 from app.engines.structured import StructuredQueryEngine, StructuredValue, load_canonical_population
 from app.graphrag.adapter import GraphRAGAdapter, GraphRoute
-from app.query.ir.schemas import EventSetNode, ScanNode
+from app.query.ir.schemas import EventSetNode, RelationAggregateNode, ScanNode
 from app.query.orchestration import CompletenessReport, EngineResult, EngineTrace
 
 from .execution import EngineExecutionContext, EngineExecutionOutput
@@ -40,6 +40,34 @@ class StructuredProductionEngine:
                 if isinstance(context.node, ScanNode)
                 else None
             )
+            relation_targets = None
+            if isinstance(context.node, RelationAggregateNode):
+                source = next(
+                    (
+                        item
+                        for item in context.dependency_values
+                        if isinstance(item, StructuredValue)
+                    ),
+                    None,
+                )
+                if source is None:
+                    raise ValueError("relation aggregate source population is unavailable")
+                rows = reader.query_canonical_relation_targets(
+                    context.scope.generation_id,
+                    tuple(item.record_id for item in source.records),
+                    context.node.relation.relation,
+                )
+                relation_targets = {}
+                for row in rows:
+                    relation_targets.setdefault(row.source_entity_id, []).append(
+                        (
+                            row.target_entity_id,
+                            tuple(
+                                _exact(item, context.scope.workspace_id) for item in row.evidence
+                            ),
+                        )
+                    )
+                relation_targets = {key: tuple(value) for key, value in relation_targets.items()}
             value, result = StructuredQueryEngine(
                 context.scope.workspace_id, context.scope.generation_id
             ).execute(
@@ -49,11 +77,31 @@ class StructuredProductionEngine:
                     item for item in context.dependency_values if isinstance(item, StructuredValue)
                 ),
                 population=population,
+                relation_targets=relation_targets,
             )
             return EngineExecutionOutput(value, result)
         finally:
             with suppress(AttributeError):
                 reader.close()
+
+
+def _exact(item, workspace_id: str):
+    from app.query.orchestration import ExactEvidenceSpan
+
+    return ExactEvidenceSpan(
+        evidence_id=item.evidence_id,
+        workspace_id=workspace_id,
+        document_id=item.document_id,
+        document_version_id=item.document_version_id,
+        logical_document_id=item.logical_document_id,
+        chunk_id=item.chunk_id,
+        start_offset=item.start_offset,
+        end_offset=item.end_offset,
+        source_text=item.source_text,
+        generation_id=item.generation,
+        relevance_score=item.confidence,
+        quality_score=item.confidence,
+    )
 
 
 class GraphProductionEngine:

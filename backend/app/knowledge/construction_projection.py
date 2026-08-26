@@ -89,7 +89,10 @@ def construct_from_bundle(
             item.source_mention_id not in mention_entity_ids
             or item.target_mention_id not in mention_entity_ids
         ):
-            raise ValueError("relation needs resolved canonical entity IDs")
+            # An assertion whose local references were rejected at the extraction
+            # boundary is not canonical knowledge.  Omit it; never invent an ID
+            # or fail an otherwise valid generation because of one proposal.
+            continue
         relation_items.append(
             CanonicalRelation(
                 new_canonical_id(),
@@ -121,7 +124,7 @@ def construct_from_bundle(
     for item, source in zip(bundle.events, event_evidence, strict=True):
         missing = set(item.participant_mention_ids) - mention_entity_ids.keys()
         if missing:
-            raise ValueError("event needs resolved canonical participant IDs")
+            continue
         event_items.append(
             CanonicalEvent(
                 new_canonical_id(),
@@ -140,7 +143,7 @@ def construct_from_bundle(
     for item, source in zip(bundle.claims, claim_evidence, strict=True):
         subject_id = mention_entity_ids.get(item.subject_mention_id)
         if not subject_id:
-            raise ValueError("claim needs a resolved canonical subject ID")
+            continue
         claim_items.append(
             KnowledgeClaim(
                 new_canonical_id(),

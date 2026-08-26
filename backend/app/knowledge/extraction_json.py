@@ -63,6 +63,13 @@ def _rows(payload: dict[str, Any], name: str) -> list[dict[str, Any]]:
     return [_object(item, f"{name} item") for item in _list(payload.get(name, []), name)]
 
 
+def _candidate_ids(row: dict[str, Any]) -> tuple[str, ...]:
+    rows = _list(row.get("identity_candidates", []), "identity_candidates")
+    return tuple(
+        _string(_object(item, "identity candidate"), "canonical_entity_id") for item in rows
+    )
+
+
 def decode_extraction_json(text: str, metadata: ExtractionMetadata) -> KnowledgeExtractionBundle:
     """Decode only the provider schema; exact source validation happens against a snapshot later."""
     try:
@@ -70,7 +77,17 @@ def decode_extraction_json(text: str, metadata: ExtractionMetadata) -> Knowledge
     except json.JSONDecodeError as exc:
         raise ValueError("knowledge extraction response must be valid JSON") from exc
     mentions = tuple(
-        ExtractedMention(_string(row, "id"), _string(row, "entity_type"), _span(row))
+        ExtractedMention(
+            _string(row, "id"),
+            _string(row, "entity_type"),
+            _span(row),
+            _candidate_ids(row),
+            (
+                row.get("candidate_provenance")
+                if isinstance(row.get("candidate_provenance"), str)
+                else None
+            ),
+        )
         for row in _rows(payload, "mentions")
     )
     entity_properties = tuple(

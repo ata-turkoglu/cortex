@@ -24,6 +24,7 @@ from .schemas import (
     LogicalQueryIR,
     OutputProjection,
     RankNode,
+    RelationAggregateNode,
     ResolveNode,
     RetrieveEvidenceNode,
     ScanNode,
@@ -70,6 +71,7 @@ def lower_semantic_understanding(
                     candidate.structured_operation,
                     candidate.group_by,
                     candidate.rank_direction,
+                    candidate.relation_aggregate,
                     candidate.operators,
                     workspace_id,
                     coverage,
@@ -114,6 +116,7 @@ def lower_semantic_understanding(
             understanding.structured_operation,
             understanding.group_by,
             understanding.rank_direction,
+            understanding.relation_aggregate,
             understanding.operators,
             workspace_id,
             coverage,
@@ -146,6 +149,7 @@ def _lower_graph(
     structured_operation: str | None,
     group_by: SemanticGovernedField | None,
     rank_direction: str | None,
+    relation_aggregate,
     operators,
     workspace_id: str,
     coverage: CoverageContract,
@@ -154,6 +158,26 @@ def _lower_graph(
     roots: list[str] = []
     reference_nodes: dict[str, str] = {}
     reference_resources: dict[str, str] = {}
+    operator_set = set(operators)
+    wants_evidence = "retrieve_evidence" in operator_set or "describe" in operator_set
+    # A generic document question has no canonical population to scan.  Binding
+    # it to ``structured.enumerate`` would make retrieval depend on Canonical
+    # Core readiness even though the generation manifest and retrieval indexes
+    # are independently ready.
+    generic_document_retrieval = (
+        coverage.mode == "grounded"
+        and wants_evidence
+        and len(targets) == 1
+        and targets[0].target_type == "document"
+        and not entities
+        and not relations
+        and not temporals
+        and not typed_filters
+        and structured_operation is None
+        and group_by is None
+        and rank_direction is None
+        and relation_aggregate is None
+    )
     for ordinal, entity in enumerate(entities, start=1):
         node = _resolve_node(entity, ordinal, workspace_id)
         nodes.append(node)
@@ -161,7 +185,12 @@ def _lower_graph(
         reference_nodes[entity.reference_id] = node.node_id
         reference_resources[entity.reference_id] = node.resource
 
-    for ordinal, target in enumerate(targets, start=1):
+    # The typed filter is the population boundary for a governed relation
+    # aggregate.  Explanatory semantic targets are not an additional input
+    # population and therefore must not introduce a second scan/root.
+    for ordinal, target in enumerate(
+        () if relation_aggregate or generic_document_retrieval else targets, start=1
+    ):
         if target.reference_id and target.reference_id in reference_nodes:
             continue
         if target.target_type == "event":
@@ -189,7 +218,11 @@ def _lower_graph(
         nodes.append(node)
         roots.append(node.node_id)
 
-    for ordinal, relation in enumerate(relations, start=1):
+    # A governed relation aggregate already carries the complete source-to-target
+    # operation.  Semantic planners may also express that relationship as a
+    # traversal for explanation, but lowering both would create two independent
+    # roots and change the aggregate population.
+    for ordinal, relation in enumerate(() if relation_aggregate else relations, start=1):
         subject_node = reference_nodes.get(relation.subject_reference_id)
         if subject_node is None:
             raise ValueError(f"relation subject is unresolved: {relation.subject_reference_id}")
@@ -279,10 +312,30 @@ def _lower_graph(
         nodes.append(node)
         roots.append(node.node_id)
 
-    if not roots:
+    if not roots and not generic_document_retrieval:
         raise ValueError("semantic understanding contains no lowerable target")
 
-    if structured_operation:
+    if relation_aggregate:
+        if structured_operation != "rank" or len(roots) != 1:
+            raise ValueError("relation aggregate requires one ranked canonical population")
+        node = RelationAggregateNode(
+            node_id="relation_aggregate_1",
+            inputs=(roots[0],),
+            relation={
+                "relation": relation_aggregate.relation,
+                "source_resource": relation_aggregate.source_type,
+                "target_resource": relation_aggregate.target_type,
+            },
+            target_identity_field={
+                "resource": relation_aggregate.target_type,
+                "field": relation_aggregate.distinct_target_identity,
+            },
+            count_alias=relation_aggregate.count_alias,
+            direction=relation_aggregate.direction,
+        )
+        nodes.append(node)
+        roots = [node.node_id]
+    elif structured_operation:
         if coverage.mode != "exhaustive":
             raise ValueError("structured analytics require corpus_required coverage")
         if structured_operation == "compare":
@@ -318,8 +371,18 @@ def _lower_graph(
                 nodes.append(node)
                 roots = [node.node_id]
 
-    operator_set = set(operators)
-    unsupported = operator_set & {"filter", "aggregate", "order"}
+    # These surface operators are permitted only when their semantic fields have
+    # already supplied the governed arguments.  RelationAggregateNode is the
+    # typed composition for all three in a person-to-property ranking.
+    unsupported = {
+        operator
+        for operator, is_typed in (
+            ("filter", bool(typed_filters)),
+            ("aggregate", bool(relation_aggregate or group_by)),
+            ("order", bool(rank_direction or relation_aggregate)),
+        )
+        if operator in operator_set and not is_typed
+    }
     if unsupported:
         raise ValueError(
             "semantic operators require typed arguments before lowering: "
@@ -343,10 +406,23 @@ def _lower_graph(
         )
         nodes.append(node)
         roots = [node.node_id]
-    wants_evidence = "retrieve_evidence" in operator_set or "describe" in operator_set
     if wants_evidence:
-        roots = _map_evidence_roots(nodes, roots)
-    if "summarize" in operator_set or "describe" in operator_set:
+        if generic_document_retrieval:
+            node = RetrieveEvidenceNode(node_id="evidence_1", inputs=())
+            nodes.append(node)
+            roots = [node.node_id]
+        else:
+            roots = _map_evidence_roots(nodes, roots)
+    # A governed relation aggregate is already a complete, deterministic
+    # presentation-ready ranking.  Semantic providers may append a generic
+    # ``summarize`` hint to a list/rank request; treating that hint as a second
+    # root changes an executable exhaustive query into an unsupported summary
+    # request.  It is representation noise, so safely discard it here rather
+    # than inventing a summary capability or weakening the coverage gate.
+    wants_summary = (
+        "summarize" in operator_set or "describe" in operator_set
+    ) and not relation_aggregate
+    if wants_summary:
         if len(roots) != 1:
             raise ValueError("summarize requires one converged logical input")
         node = SummarizeNode(node_id="summarize_1", inputs=(roots[0],))

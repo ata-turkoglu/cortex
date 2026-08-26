@@ -12,12 +12,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
+from ..core.embedding_runtime import (
+    build_production_embedder,
+    load_production_embedding_configuration,
+)
 from ..core.secrets import SecretStore, SecretStoreUnavailable
 from ..core.settings_service import PERSISTED_FIELDS, load_runtime_settings, save_settings
 from ..models import ProviderConnection, SetupState, WorkflowRun
 from ..providers.anthropic import AnthropicProvider
 from ..providers.catalog import DEFAULT_MODELS
-from ..providers.embeddings import OllamaEmbeddingAdapter
+from ..providers.embeddings import embedding_health_check
 from ..providers.ollama import OllamaProvider
 from ..providers.openai import OpenAIProvider
 from .workspaces import get_session
@@ -336,27 +340,27 @@ async def validate_provider(
 
 
 @router.post("/settings/embedding/health")
-async def embedding_health():
-    settings = get_settings()
-    if settings.embedding_provider != "ollama":
+async def embedding_health(session: Annotated[Session, Depends(get_session)]):
+    configuration, adapter = build_production_embedder(session)
+    if configuration.provider != "ollama":
         raise HTTPException(
             422, "only the configured Ollama embedding adapter supports this health test"
         )
-    result = await OllamaEmbeddingAdapter().health_check()
+    result = await embedding_health_check(adapter)
     return result.__dict__
 
 
 @router.get("/settings/embedding/status")
-async def embedding_status():
-    settings = get_settings()
+async def embedding_status(session: Annotated[Session, Depends(get_session)]):
+    configuration = load_production_embedding_configuration(session)
     try:
         models = await OllamaProvider().list_models()
     except Exception:
         models = []
-    installed = next((model for model in models if model.model == settings.embedding_model), None)
+    installed = next((model for model in models if model.model == configuration.model), None)
     return {
-        "provider": settings.embedding_provider,
-        "model": settings.embedding_model,
+        "provider": configuration.provider,
+        "model": configuration.model,
         "installed": installed is not None,
         "dimension": None,
         "model_digest": None,
@@ -416,7 +420,6 @@ async def ollama_models():
     models = await OllamaProvider().list_models()
     return {
         "models": [model.__dict__ for model in models],
-        "missing_default_command": "ollama pull qwen3-embedding:0.6b",
         "warning": "Small local chat models are experimental and not production defaults.",
     }
 

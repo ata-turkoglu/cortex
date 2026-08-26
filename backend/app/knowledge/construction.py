@@ -25,6 +25,15 @@ MANDATORY_KNOWLEDGE_STAGES = (
     "graphrag",
 )
 
+# A candidate becomes the V2 retrieval generation when its immutable source
+# authority and both retrieval projections agree.  Canonical and GraphRAG
+# stages remain durable checkpoints, but they enable capability families rather
+# than making grounded retrieval unavailable.
+RETRIEVAL_REQUIRED_STAGES = ("source_relational", "bm25", "dense_qdrant")
+OPTIONAL_CAPABILITY_STAGES = tuple(
+    stage for stage in MANDATORY_KNOWLEDGE_STAGES if stage not in RETRIEVAL_REQUIRED_STAGES
+)
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -150,6 +159,25 @@ def fail_stage(
     return state
 
 
+def mark_stage_unavailable(
+    session: Session,
+    generation: KnowledgeGeneration,
+    stage: str,
+    *,
+    summary: str,
+) -> KnowledgeStageState:
+    """Record an unavailable optional capability without failing retrieval activation."""
+    if stage not in OPTIONAL_CAPABILITY_STAGES:
+        raise ValueError("only optional capability stages may be unavailable")
+    if generation.state != "building":
+        raise ValueError("only a building generation accepts stage updates")
+    state = stage_state(session, generation, stage)
+    state.state = "unavailable"
+    state.error_json = json.dumps({"summary": summary[:500]}, ensure_ascii=False)
+    state.updated_at = generation.updated_at = _now()
+    return state
+
+
 def validate_manifest_projection_agreement(
     session: Session, generation: KnowledgeGeneration, data_root: Path
 ) -> bool:
@@ -210,7 +238,7 @@ def activate_if_ready(session: Session, generation: KnowledgeGeneration) -> bool
         and by_stage[stage].state == "ready"
         and by_stage[stage].input_fingerprint == generation.source_fingerprint
         and bool(by_stage[stage].output_fingerprint)
-        for stage in MANDATORY_KNOWLEDGE_STAGES
+        for stage in RETRIEVAL_REQUIRED_STAGES
     )
     if not ready:
         return False

@@ -19,15 +19,16 @@ class Settings(BaseSettings):
     neo4j_username: str = "neo4j"
     neo4j_password: str | None = None
     neo4j_connection_timeout_seconds: int = Field(default=5, ge=1, le=60)
-    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_base_url: str = "http://127.0.0.1:11434"
     data_path: Path = Path("./data")
     sqlite_busy_timeout_ms: int = 5000
     upload_max_bytes: int = 50 * 1024 * 1024
     chunk_token_limit: int = 500
     chunk_overlap_tokens: int = 50
     allowed_extensions: str = ".md,.txt,.docx,.pdf"
-    embedding_provider: str = "ollama"
-    embedding_model: str = "qwen3-embedding:0.6b"
+    # Supplied exclusively by the persisted runtime settings row.
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
     embedding_batch_size: int = 64
     embedding_min_batch_size: int = 1
     embedding_timeout_seconds: int = 60

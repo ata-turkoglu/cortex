@@ -46,6 +46,10 @@ def _cap(
 
 DEFAULT_CAPABILITIES: tuple[CapabilityDeclaration, ...] = (
     _cap("structured", "structured.enumerate", SET_TYPES[:-1], coverage="exhaustive"),
+    _cap(
+        "structured", "structured.relation_aggregate", ("ranked_set",),
+        inputs=("entity_set",), coverage="exhaustive",
+    ),
     *(
         _cap("structured", f"structured.{name}", outputs, inputs=SET_TYPES, coverage="exhaustive")
         for name, outputs in (

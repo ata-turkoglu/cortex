@@ -42,6 +42,18 @@ class ExtractedMention:
     local_id: str
     entity_type: str
     span: ExtractedSpan
+    candidate_canonical_entity_ids: tuple[str, ...] = ()
+    candidate_provenance: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.candidate_canonical_entity_ids and not self.candidate_provenance:
+            raise ValueError("identity candidates require audit provenance")
+        if len(set(self.candidate_canonical_entity_ids)) != len(
+            self.candidate_canonical_entity_ids
+        ):
+            raise ValueError("identity candidate IDs must be unique")
+        if any(not value.strip() for value in self.candidate_canonical_entity_ids):
+            raise ValueError("identity candidate IDs must be non-empty")
 
 
 @dataclass(frozen=True)
@@ -156,6 +168,18 @@ def retain_exact_assertions(
 
     mentions = tuple(item for item in bundle.mentions if exact(item.span))
     mention_ids = {item.local_id for item in mentions}
+    mentions_by_id = {item.local_id: item for item in mentions}
+
+    def property_belongs_to_mention(item: ExtractedEntityProperty) -> bool:
+        mention = mentions_by_id.get(item.mention_id)
+        if mention is None or mention.span.chunk_id != item.span.chunk_id:
+            return False
+        # Governed surname assertions must be a literal portion of the referenced
+        # person mention, never a nearby person's token.
+        return (
+            mention.span.start_offset <= item.span.start_offset
+            and item.span.end_offset <= mention.span.end_offset
+        )
     relations = tuple(
         item for item in bundle.relations
         if exact(item.span)
@@ -169,6 +193,7 @@ def retain_exact_assertions(
             exact(item.span)
             and item.mention_id in mention_ids
             and item.value == item.span.source_text
+            and property_belongs_to_mention(item)
         )
     )
     events = tuple(
@@ -218,12 +243,20 @@ def validate_extraction(
     if len(mention_ids) != len(bundle.mentions) or any(not item for item in mention_ids):
         raise ValueError("mention local IDs must be non-empty and unique")
     spans = [mention.span for mention in bundle.mentions]
+    mentions_by_id = {mention.local_id: mention for mention in bundle.mentions}
     for relation in bundle.relations:
         if {relation.source_mention_id, relation.target_mention_id} - mention_ids:
             raise ValueError("relation references an unknown mention")
         spans.append(relation.span)
     for property_ in bundle.entity_properties:
-        if property_.mention_id not in mention_ids or property_.value != property_.span.source_text:
+        mention = mentions_by_id.get(property_.mention_id)
+        if (
+            mention is None
+            or property_.value != property_.span.source_text
+            or mention.span.chunk_id != property_.span.chunk_id
+            or property_.span.start_offset < mention.span.start_offset
+            or property_.span.end_offset > mention.span.end_offset
+        ):
             raise ValueError("entity property must reference a mention and preserve its exact span")
         spans.append(property_.span)
     for event in bundle.events:

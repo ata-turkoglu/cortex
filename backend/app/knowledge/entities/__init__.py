@@ -14,7 +14,9 @@ from .model import (
     IdentityOperation,
     IdentityResolution,
     ResolutionCandidate,
+    canonical_person_display_name,
     normalize_mention,
+    normalize_person_identity,
 )
 
 __all__ = [
@@ -29,6 +31,8 @@ __all__ = [
     "IdentityDecisionKind",
     "IdentityOperation",
     "IdentityResolution",
+    "canonical_person_display_name",
+    "normalize_person_identity",
     "ResolutionCandidate",
     "merge_entities",
     "normalize_mention",

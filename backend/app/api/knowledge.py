@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
+from ..core.settings_service import load_runtime_settings
 from ..core.workspaces import WorkspaceContext
 from ..knowledge.entities import IdentityOperation
 from ..knowledge.graph import Neo4jGraphAdapter
@@ -191,6 +192,9 @@ def activate_cutover(
     generation = session.get(KnowledgeGeneration, payload.generation_id)
     if generation is None or generation.workspace_id != workspace_id:
         raise HTTPException(404, "generation not found in workspace")
+    # Cutover must evaluate the same durable runtime assignment as the API and
+    # worker.  In particular, embedding selection is not an environment default.
+    load_runtime_settings(session)
     settings = get_settings()
     try:
         with Neo4jGraphAdapter.from_settings(workspace_id, settings=settings) as graph:

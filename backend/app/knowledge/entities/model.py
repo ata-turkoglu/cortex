@@ -10,8 +10,45 @@ from ..provenance import ExactSourceProvenance
 
 
 def normalize_mention(value: str) -> str:
+    # Treat Turkish dotted/dotless-I variants as one comparison key.  The
+    # original text remains untouched for display and exact provenance.
+    value = value.translate(str.maketrans({"I": "i", "\u0130": "i", "\u0131": "i"}))
     normalized = unicodedata.normalize("NFKC", value).casefold().strip()
     return re.sub(r"\s+", " ", normalized)
+
+
+_PERSON_TITLES = frozenset({
+    "av", "av.", "dr", "dr.", "prof", "prof.", "bay", "bayan", "sayın", "sayin",
+})
+_PERSON_CONTEXT_PREFIXES = frozenset({"varisleri", "varisi", "mirasçıları", "mirascilari"})
+
+
+def normalize_person_identity(value: str) -> str | None:
+    """Return a comparison-only person identity, preserving the original mention elsewhere."""
+    value = unicodedata.normalize("NFKC", value).strip()
+    value = re.sub(r"\([^)]*\)", " ", value)
+    value = re.sub(r"[\[\],;:]+", " ", value)
+    tokens = [token.strip(". ") for token in value.split()]
+    while tokens and normalize_mention(tokens[0]) in _PERSON_TITLES | _PERSON_CONTEXT_PREFIXES:
+        tokens.pop(0)
+    tokens = [token for token in tokens if token]
+    # A one-token surname, title, initial, or OCR fragment is not enough evidence
+    # to create an extracted canonical person.
+    if len(tokens) < 2 or any(len(token) == 1 for token in tokens):
+        return None
+    return normalize_mention(" ".join(tokens))
+
+
+def canonical_person_display_name(value: str) -> str | None:
+    """Produce a display candidate without titles/context prefixes or parenthetical aliases."""
+    identity = normalize_person_identity(value)
+    if identity is None:
+        return None
+    value = re.sub(r"\([^)]*\)", " ", unicodedata.normalize("NFKC", value)).strip()
+    tokens = [token.strip(". ") for token in re.sub(r"[\[\],;:]+", " ", value).split()]
+    while tokens and normalize_mention(tokens[0]) in _PERSON_TITLES | _PERSON_CONTEXT_PREFIXES:
+        tokens.pop(0)
+    return " ".join(token for token in tokens if token) or None
 
 
 class EntityType(StrEnum):
@@ -87,6 +124,7 @@ class CanonicalEntityProperty:
 
 class IdentityDecisionKind(StrEnum):
     UNRESOLVED = "unresolved"
+    NEW_CANONICAL = "new_canonical"
     AUTO_LINK = "auto_link"
     MANUAL_LINK = "manual_link"
     MERGE = "merge"

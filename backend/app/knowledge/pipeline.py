@@ -13,11 +13,13 @@ from sqlalchemy.orm import Session
 from ..models import Chunk, Document, KnowledgeGeneration
 from .construction import (
     MANDATORY_KNOWLEDGE_STAGES,
+    OPTIONAL_CAPABILITY_STAGES,
     activate_if_ready,
     create_generation,
     fail_stage,
     mark_stage_ready,
     mark_stage_running,
+    mark_stage_unavailable,
     validate_manifest_projection_agreement,
 )
 
@@ -140,10 +142,15 @@ def run_knowledge_construction(
             try:
                 generation = session.get(KnowledgeGeneration, generation_id)
                 if generation is not None:
-                    fail_stage(session, generation, stage, summary=str(exc))
+                    if stage in OPTIONAL_CAPABILITY_STAGES:
+                        mark_stage_unavailable(session, generation, stage, summary=str(exc))
+                    else:
+                        fail_stage(session, generation, stage, summary=str(exc))
                     session.commit()
             finally:
                 session.close()
+            if stage in OPTIONAL_CAPABILITY_STAGES:
+                continue
             raise
         session = session_factory()
         try:

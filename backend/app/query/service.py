@@ -13,7 +13,7 @@ from .briefing import WorkspaceBriefing
 from .context import ConversationContext
 from .execution import GenerationScopeResolver, V2PlanExecutor
 from .ir import IRVocabulary
-from .orchestration import ReasoningPackage, reconcile_engine_results
+from .orchestration import CompletenessReport, ReasoningPackage, reconcile_engine_results
 from .planning import PlanningReadinessSnapshot
 from .runtime import PreparedQuery, QueryV2PreparationService
 from .runtime_inputs import V2RuntimeInputs
@@ -102,6 +102,8 @@ class V2QueryService:
         prepared = await self.preparation.prepare(query, context, vocabulary, readiness, briefing)
         if scope.workspace_id != prepared.physical_plan.workspace_id:
             raise ValueError("GENERATION_SCOPE_WORKSPACE_MISMATCH")
+        if prepared.physical_plan.state != "ready":
+            return self._unsupported_result(prepared, scope)
         from ..knowledge.source_manifest import load_generation_manifest
 
         sources = load_generation_manifest(
@@ -143,6 +145,39 @@ class V2QueryService:
                 reasoning_package_generation=package.generation_id,
                 answer_status=answer.state,
                 citation_count=len(answer.citations),
+            ),
+        )
+
+    def _unsupported_result(
+        self, prepared: PreparedQuery, scope: GenerationScope
+    ) -> V2QueryServiceResult:
+        """Use the normal Result & Evidence/Answer boundary for unavailable capabilities."""
+        package = ReasoningPackage(
+            workspace_id=scope.workspace_id,
+            generation_id=scope.generation_id,
+            state="unsupported",
+            completeness=CompletenessReport(coverage="grounded", state="unknown"),
+            confidence=0.0,
+            issues=tuple(
+                f"capability_unavailable:{issue}" for issue in prepared.physical_plan.issues
+            ),
+        )
+        answer = self.answer_engine.render(package)
+        return V2QueryServiceResult(
+            answer=answer,
+            package=package,
+            prepared=prepared,
+            trace=V2ServiceTrace(
+                workspace_id=scope.workspace_id,
+                generation_id=scope.generation_id,
+                embedding_config_hash=scope.embedding_config_hash,
+                dense_result_count=0,
+                sparse_result_count=0,
+                fused_result_count=0,
+                validated_result_count=0,
+                reasoning_package_generation=package.generation_id,
+                answer_status=answer.state,
+                citation_count=0,
             ),
         )
 

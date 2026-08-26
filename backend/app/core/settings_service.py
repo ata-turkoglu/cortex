@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 from ..models import GlobalSettings, GraphRagState, WorkspaceIndexState
 from .config import Settings, get_settings
 
+
+class RuntimeEmbeddingConfigurationError(RuntimeError):
+    """The durable runtime row did not provide a usable embedding configuration."""
+
 INDEX_DEPENDENT = {
     "embedding_provider",
     "embedding_model",
@@ -70,8 +74,14 @@ def public_values(settings: Settings | None = None) -> dict[str, object]:
 def load_runtime_settings(session: Session) -> dict[str, object]:
     row = session.get(GlobalSettings, "runtime")
     if not row:
-        return public_values()
+        raise RuntimeEmbeddingConfigurationError("persisted runtime settings are missing")
     values = json.loads(row.value_json)
+    provider = values.get("embedding_provider")
+    model = values.get("embedding_model")
+    if provider not in {"ollama", "openai"} or not isinstance(model, str) or not model.strip():
+        raise RuntimeEmbeddingConfigurationError(
+            "persisted runtime embedding provider/model is missing or invalid"
+        )
     runtime = get_settings()
     for name, value in values.items():
         if name in PERSISTED_FIELDS:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,13 +10,11 @@ from qdrant_client import QdrantClient
 from ..core.config import Settings, get_settings
 from ..core.qdrant import get_qdrant_client
 from ..graphrag.adapter import GraphRAGAdapter
+from ..knowledge.canonical_reader import SQLiteCanonicalReader
 from ..knowledge.graph import Neo4jConfigurationError, Neo4jGraphAdapter
 from ..providers.base import EmbeddingProvider
 from ..providers.embeddings import (
     EmbeddingConfiguration,
-    OllamaEmbeddingAdapter,
-    OpenAIEmbeddingAdapter,
-    Qwen3EmbeddingAdapter,
 )
 from ..retrieval.qdrant import WorkspaceQdrantStore
 from ..retrieval.sparse import GenerationBM25Store
@@ -68,8 +65,10 @@ class V2QueryServiceFactory:
         planner: SemanticPlanner | None = None,
         planner_providers: dict[str, StructuredPlannerProvider] | None = None,
         embedding_provider: EmbeddingProvider | None = None,
+        embedding_configuration: EmbeddingConfiguration | None = None,
         answer_engine: AnswerEngine | None = None,
         graphrag_adapter_factory: GraphRAGAdapterFactory | None = None,
+        canonical_session=None,
     ) -> None:
         self.settings = settings or get_settings()
         self.data_root = (data_root or self.settings.data_path).resolve()
@@ -79,14 +78,28 @@ class V2QueryServiceFactory:
         )
         self.planner = planner or self._configured_planner(planner_providers)
         self.preparation = QueryV2PreparationService(self.planner)
-        self.embedding_configuration = EmbeddingConfiguration(
-            self.settings.embedding_provider,
-            self.settings.embedding_model,
-        )
-        provider = embedding_provider or self._configured_embedding_provider()
+        if embedding_configuration is None:
+            if settings is None:
+                raise ProductionV2ConfigurationError(
+                    "production query embeddings require persisted configuration"
+                )
+            if self.settings.embedding_provider is None or self.settings.embedding_model is None:
+                raise ProductionV2ConfigurationError(
+                    "production query embedding provider/model is missing"
+                )
+            embedding_configuration = EmbeddingConfiguration(
+                self.settings.embedding_provider, self.settings.embedding_model
+            )
+        self.embedding_configuration = embedding_configuration
+        if embedding_provider is None:
+            raise ProductionV2ConfigurationError(
+                "production query embeddings require the configured adapter"
+            )
+        provider = embedding_provider
         self.query_embedder = ConfiguredV2QueryEmbedder(provider, self.embedding_configuration)
         self.answer_engine = answer_engine or AnswerEngine()
         self.graphrag_adapter_factory = graphrag_adapter_factory or self._graphrag_adapter
+        self.canonical_session = canonical_session
 
     def build(self, inputs: V2RuntimeInputs) -> V2QueryService:
         """Build a service whose retrieval stores are bound to ``inputs``."""
@@ -101,11 +114,36 @@ class V2QueryServiceFactory:
         )
         dense = V2DenseAdapter(dense_store)
         sparse = V2SparseAdapter(GenerationBM25Store(self.data_root))
+        canonical_ready = any(
+            item.engine == "structured"
+            and item.capability == "structured.enumerate"
+            and item.state == "ready"
+            for item in inputs.readiness.capabilities
+        )
+        graph_ready = any(
+            item.engine == "knowledge_graph" and item.state == "ready"
+            for item in inputs.readiness.capabilities
+        )
 
         def graph_reader(request_scope):
             return Neo4jGraphAdapter.from_settings(request_scope.workspace_id)
 
+        def canonical_reader(request_scope):
+            if self.canonical_session is not None:
+                return SQLiteCanonicalReader(self.canonical_session, request_scope.workspace_id)
+            from ..core.database import SessionLocal
+
+            return SQLiteCanonicalReader(
+                SessionLocal(), request_scope.workspace_id, owns_session=True
+            )
+
         def briefing_loader(request_scope):
+            # ``canonical.graph`` is intentionally unavailable until its
+            # non-authoritative Neo4j projection has a production contract.
+            # Do not probe Neo4j on grounded retrieval requests merely to
+            # construct optional briefing context.
+            if not graph_ready:
+                return None
             try:
                 with Neo4jGraphAdapter.from_settings(request_scope.workspace_id) as graph:
                     return build_workspace_briefing(graph, request_scope.generation_id, limit=100)
@@ -114,16 +152,18 @@ class V2QueryServiceFactory:
                 return None
 
         def property_vocabulary_loader(request_scope):
-            try:
-                with Neo4jGraphAdapter.from_settings(request_scope.workspace_id) as graph:
-                    return graph.queryable_property_vocabulary(request_scope.generation_id)
-            except Neo4jConfigurationError:
+            if not canonical_ready:
                 return {}
+            reader = canonical_reader(request_scope)
+            try:
+                return reader.queryable_property_vocabulary(request_scope.generation_id)
+            finally:
+                reader.close()
 
         registry = ProductionEngineRegistry(
             {
                 "retrieval": RetrievalProductionEngine(dense, sparse),
-                "structured": StructuredProductionEngine(graph_reader),
+                "structured": StructuredProductionEngine(canonical_reader),
                 "knowledge_graph": GraphProductionEngine(graph_reader),
                 "graphrag": GraphRAGProductionEngine(self.graphrag_adapter_factory),
             }
@@ -178,19 +218,6 @@ class V2QueryServiceFactory:
             confidence_threshold=self.settings.semantic_planner_confidence_threshold,
         )
 
-    def _configured_embedding_provider(self) -> EmbeddingProvider:
-        configuration = self.embedding_configuration
-        if configuration.provider == "ollama":
-            if configuration.model.startswith("qwen3"):
-                return Qwen3EmbeddingAdapter(configuration)
-            return OllamaEmbeddingAdapter(configuration)
-        if configuration.provider == "openai":
-            return OpenAIEmbeddingAdapter(configuration.model)
-        raise ProductionV2ConfigurationError(
-            "configured embedding provider cannot satisfy V2 query embedding: "
-            f"{configuration.provider}"
-        )
-
 
 def build_v2_query_service(
     inputs: V2RuntimeInputs, *, factory: V2QueryServiceFactory | None = None
@@ -199,7 +226,7 @@ def build_v2_query_service(
     return (factory or V2QueryServiceFactory()).build(inputs)
 
 
-@lru_cache
 def get_v2_query_service_factory() -> V2QueryServiceFactory:
-    """Process-lifetime production factory; request scope is still built per query."""
-    return V2QueryServiceFactory()
+    raise ProductionV2ConfigurationError(
+        "build the V2 query factory from a request database session"
+    )

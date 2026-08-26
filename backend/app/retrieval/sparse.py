@@ -51,7 +51,10 @@ class WorkspaceBM25Index:
         corpus = [item.content for item in self.documents]
         self._retriever = bm25s.BM25()
         if corpus:
-            self._retriever.index(bm25s.tokenize(corpus, stopwords=[]))
+            self._retriever.index(
+                bm25s.tokenize(corpus, stopwords=[], show_progress=False),
+                show_progress=False,
+            )
 
     def save(self) -> None:
         if self.storage_path is None:

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -125,6 +126,227 @@ class KnowledgeStageState(Base):
     metrics_json: Mapped[str | None] = mapped_column(Text)
     error_json: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class CanonicalEntityRecord(Base):
+    """SQLite authority for a generation-independent canonical Person."""
+
+    __tablename__ = "canonical_entities"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id"),
+        Index(
+            "ix_canonical_entities_workspace_identity",
+            "workspace_id",
+            "entity_type",
+            "normalized_preferred_name",
+        ),
+        CheckConstraint("entity_type = 'person'", name="ck_canonical_entities_person"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False, default="person")
+    preferred_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    normalized_preferred_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class EntityMentionRecord(Base):
+    __tablename__ = "entity_mentions"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "generation_id",
+            "chunk_id",
+            "span_start",
+            "span_end",
+            "entity_type",
+            "extraction_type",
+        ),
+        Index(
+            "ix_entity_mentions_generation_name",
+            "workspace_id",
+            "generation_id",
+            "entity_type",
+            "normalized_text",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    generation_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_generations.id"), nullable=False
+    )
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    surface_text: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_text: Mapped[str] = mapped_column(Text, nullable=False)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    logical_document_id: Mapped[str | None] = mapped_column(String(72))
+    chunk_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    span_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    span_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    extraction_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    extractor_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class IdentityDecisionRecord(Base):
+    __tablename__ = "identity_decisions"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "mention_id"),
+        Index("ix_identity_decisions_workspace_entity", "workspace_id", "canonical_entity_id"),
+        CheckConstraint(
+            "decision IN ('NEW', 'LINK', 'UNRESOLVED')", name="ck_identity_decision_kind"
+        ),
+        CheckConstraint(
+            "(decision IN ('NEW','LINK') AND canonical_entity_id IS NOT NULL) "
+            "OR (decision='UNRESOLVED' AND canonical_entity_id IS NULL)",
+            name="ck_identity_decision_binding",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    mention_id: Mapped[str] = mapped_column(ForeignKey("entity_mentions.id"), nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    canonical_entity_id: Mapped[str | None] = mapped_column(ForeignKey("canonical_entities.id"))
+    decision_basis_json: Mapped[str] = mapped_column(Text, nullable=False)
+    candidate_entity_ids_json: Mapped[str] = mapped_column(Text, nullable=False)
+    resolver_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class CanonicalPropertyRecord(Base):
+    __tablename__ = "canonical_properties"
+    __table_args__ = (UniqueConstraint("workspace_id", "identity_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    property_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="real_property")
+    province: Mapped[str | None] = mapped_column(String(255))
+    district: Mapped[str | None] = mapped_column(String(255))
+    neighborhood: Mapped[str | None] = mapped_column(String(255))
+    pafta: Mapped[str | None] = mapped_column(String(128))
+    ada: Mapped[str | None] = mapped_column(String(128))
+    parsel: Mapped[str | None] = mapped_column(String(128))
+    independent_section: Mapped[str | None] = mapped_column(String(128))
+    identity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_strength: Mapped[str] = mapped_column(String(16), nullable=False, default="strong")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class OwnershipAssertionRecord(Base):
+    __tablename__ = "ownership_assertions"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "generation_id",
+            "person_mention_id",
+            "property_mention_id",
+            "relation_type",
+        ),
+        Index(
+            "ix_ownership_assertions_generation_people",
+            "workspace_id",
+            "generation_id",
+            "person_id",
+            "property_id",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    generation_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_generations.id"), nullable=False
+    )
+    person_id: Mapped[str] = mapped_column(ForeignKey("canonical_entities.id"), nullable=False)
+    property_id: Mapped[str] = mapped_column(ForeignKey("canonical_properties.id"), nullable=False)
+    relation_type: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="document_supported_ownership"
+    )
+    person_mention_id: Mapped[str] = mapped_column(ForeignKey("entity_mentions.id"), nullable=False)
+    property_mention_id: Mapped[str] = mapped_column(
+        ForeignKey("entity_mentions.id"), nullable=False
+    )
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    logical_document_id: Mapped[str | None] = mapped_column(String(72))
+    chunk_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    span_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    span_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    share_numerator: Mapped[int | None] = mapped_column(Integer)
+    share_denominator: Mapped[int | None] = mapped_column(Integer)
+    recorded_date: Mapped[str | None] = mapped_column(String(32))
+    assertion_rule_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class GenerationCanonicalMembershipRecord(Base):
+    __tablename__ = "generation_canonical_memberships"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "generation_id", "membership_basis_mention_id"),
+    )
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    generation_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_generations.id"), primary_key=True
+    )
+    canonical_entity_id: Mapped[str] = mapped_column(
+        ForeignKey("canonical_entities.id"), primary_key=True
+    )
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    surname: Mapped[str | None] = mapped_column(String(255))
+    normalized_surname: Mapped[str | None] = mapped_column(String(255))
+    surname_mention_id: Mapped[str | None] = mapped_column(ForeignKey("entity_mentions.id"))
+    membership_basis_mention_id: Mapped[str] = mapped_column(
+        ForeignKey("entity_mentions.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class CanonicalGenerationStatusRecord(Base):
+    __tablename__ = "canonical_generation_status"
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    generation_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_generations.id"), primary_key=True
+    )
+    projection_version: Mapped[str] = mapped_column(String(32), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    manifest_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    processed_chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    mention_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    resolved_mention_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    unresolved_mention_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    safe_property_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    assertion_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    rejected_assertion_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    failed_chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    projection_row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    failure_reason_json: Mapped[str | None] = mapped_column(Text)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class CanonicalGenerationChunkRecord(Base):
+    """Durable, idempotent accounting for every manifest chunk in a core build."""
+
+    __tablename__ = "canonical_generation_chunks"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "generation_id", "chunk_id"),
+        Index("ix_canonical_generation_chunks_status", "workspace_id", "generation_id", "status"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    generation_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_generations.id"), nullable=False
+    )
+    chunk_id: Mapped[str] = mapped_column(ForeignKey("chunks.id"), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    processed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class KnowledgeReindexRunContext(Base):

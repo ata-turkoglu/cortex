@@ -9,13 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
+from ..core.embedding_runtime import build_production_embedder
 from ..core.qdrant import get_qdrant_client
 from ..core.workspaces import WorkspaceContext
 from ..models import Chunk, Document, LogicalDocument
 from ..providers.embeddings import (
     EmbeddingConfiguration,
-    OllamaEmbeddingAdapter,
-    OpenAIEmbeddingAdapter,
     Qwen3EmbeddingAdapter,
     adaptive_embed,
     prepared_text_hash,
@@ -78,14 +77,8 @@ def rebuild_active_workspace(session: Session, workspace_id: str) -> IndexingSum
     sparse.save()
     state = context.index_state
     state.sparse_state, state.updated_at = "ready", datetime.now(UTC)
+    configuration, provider = build_production_embedder(session)
     settings = get_settings()
-    provider = (
-        Qwen3EmbeddingAdapter()
-        if settings.embedding_provider == "ollama" and settings.embedding_model.startswith("qwen3")
-        else OllamaEmbeddingAdapter()
-        if settings.embedding_provider == "ollama"
-        else OpenAIEmbeddingAdapter(settings.embedding_model)
-    )
     texts = [
         provider.prepare_document(
             item.content, title=item.source, heading=item.metadata.get("heading")
@@ -110,7 +103,8 @@ def rebuild_active_workspace(session: Session, workspace_id: str) -> IndexingSum
         raise RuntimeError("active workspace has no embeddings to index")
     dimension = len(vectors[0]) if vectors else 0
     configuration = EmbeddingConfiguration(
-        settings.embedding_provider, settings.embedding_model, dimension
+        configuration.provider, configuration.model, dimension, configuration.model_digest,
+        configuration.normalized, configuration.text_template_version,
     )
     store = WorkspaceQdrantStore(
         get_qdrant_client(), workspace_id, embedding_config_hash=configuration.fingerprint

@@ -251,6 +251,25 @@ class RankNode(BaseModel):
     top_n: int | None = Field(default=None, ge=1, le=10_000)
 
 
+class RelationAggregateNode(BaseModel):
+    """Count distinct governed relation targets for every source record.
+
+    Unlike a graph traversal this is a left-preserving aggregate: every source
+    canonical identity remains a row even when it has no matching relation.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["relation_aggregate"] = "relation_aggregate"
+    node_id: Identifier
+    inputs: tuple[Identifier]
+    output_type: Literal["ranked_set"] = "ranked_set"
+    relation: RelationReference
+    target_identity_field: FieldReference
+    count_alias: Identifier = "property_count"
+    direction: Literal["ascending", "descending"] = "descending"
+
+
 class SortNode(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -297,7 +316,9 @@ class RetrieveEvidenceNode(BaseModel):
 
     kind: Literal["retrieve_evidence"] = "retrieve_evidence"
     node_id: Identifier
-    inputs: tuple[Identifier]
+    # A generic grounded document query has no canonical population to constrain.
+    # It is therefore allowed to retrieve directly from the immutable generation.
+    inputs: tuple[Identifier, ...] = Field(default=(), max_length=1)
     output_type: Literal["evidence_set"] = "evidence_set"
     query_text: str | None = Field(default=None, max_length=2_000)
     maximum_items: int = Field(default=20, ge=1, le=1_000)
@@ -355,6 +376,7 @@ IRNode = Annotated[
     | AggregateNode
     | CountNode
     | RankNode
+    | RelationAggregateNode
     | SortNode
     | LimitNode
     | ProjectNode

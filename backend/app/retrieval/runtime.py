@@ -8,11 +8,10 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
+from ..core.embedding_runtime import build_production_embedder
 from ..core.qdrant import get_qdrant_client
 from ..core.workspaces import WorkspaceContext
 from ..providers.embeddings import (
-    OllamaEmbeddingAdapter,
-    OpenAIEmbeddingAdapter,
     Qwen3EmbeddingAdapter,
 )
 from .hybrid import HybridRetriever, RetrievalLimits
@@ -46,7 +45,7 @@ class HybridRetrievalRuntime:
         query_vector: list[float] | None = None
         dense_error: str | None = None
         try:
-            query_vector = self._embed_query(query)
+            query_vector = self._embed_query(session, query)
         except Exception as exc:  # Sparse retrieval remains a valid, explicit degradation.
             dense_error = self._reason("embedding", exc)
 
@@ -96,24 +95,13 @@ class HybridRetrievalRuntime:
         path: Path = context.resource_path(BM25_RESOURCE)
         return WorkspaceBM25Index.load(workspace_id, path)
 
-    def _embed_query(self, query: str) -> list[float]:
-        settings = get_settings()
-        if settings.embedding_provider == "ollama":
-            provider = (
-                Qwen3EmbeddingAdapter()
-                if settings.embedding_model.startswith("qwen3")
-                else OllamaEmbeddingAdapter()
-            )
-            prepared = (
-                provider.prepare_query(query)
-                if isinstance(provider, Qwen3EmbeddingAdapter)
-                else query
-            )
-        elif settings.embedding_provider == "openai":
-            provider = OpenAIEmbeddingAdapter(settings.embedding_model)
-            prepared = query
-        else:
-            raise ValueError("unsupported embedding provider")
+    def _embed_query(self, session: Session, query: str) -> list[float]:
+        _, provider = build_production_embedder(session)
+        prepared = (
+            provider.prepare_query(query)
+            if isinstance(provider, Qwen3EmbeddingAdapter)
+            else query
+        )
         vectors = asyncio.run(provider.embed([prepared]))
         return vectors[0]
 

@@ -57,7 +57,7 @@ class OpenAIProvider:
         if not api_key:
             return []
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
                 response = await client.get(
                     "https://api.openai.com/v1/models",
                     headers={"Authorization": f"Bearer {api_key}"},
@@ -79,7 +79,7 @@ class OpenAIProvider:
         api_key = get_settings().openai_api_key or SecretStore().get("openai_api_key")
         if not api_key:
             raise RuntimeError("OpenAI is not configured")
-        async with httpx.AsyncClient(timeout=180) as client:
+        async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
             response = await client.post(
                 "https://api.openai.com/v1/responses",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -134,7 +134,7 @@ class OpenAIProvider:
         api_key = get_settings().openai_api_key or SecretStore().get("openai_api_key")
         if not api_key:
             raise RuntimeError("OpenAI is not configured")
-        async with httpx.AsyncClient(timeout=180) as client:
+        async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
             response = await client.post(
                 "https://api.openai.com/v1/responses",
                 headers={"Authorization": f"Bearer {api_key}"},

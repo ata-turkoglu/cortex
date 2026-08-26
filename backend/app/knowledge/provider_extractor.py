@@ -24,8 +24,15 @@ provide chunk_id,
 start_offset, end_offset, source_text, and confidence. Never infer facts or spans. Mention IDs are
 local to this response; relation/event/claim references must use those IDs. Keep temporal
 original_text exactly equal to its source_text. source_text must be copied as one literal,
-contiguous substring of content. Offsets are zero-based Python Unicode string indices. If an
-assertion cannot be supported by an exact literal span, omit it instead of paraphrasing."""
+contiguous substring of content. Offsets are zero-based Python Unicode string indices. For every
+person mention, emit the governed surname property only when the surname itself is an exact
+literal span and the person name is unambiguous. For an asset_property mention, emit only
+label-bound province, district, neighborhood, pafta, ada, parsel, and independent_section values
+whose literal spans are contained in that property mention; never invent or shift a cadastral value.
+Emit relation_type `owns` only for a direct,
+local, document-supported ownership clause from a person mention to an asset_property mention;
+never use co-occurrence, proximity alone, or a payment amount as ownership. If an assertion
+cannot be supported by an exact literal span, omit it instead of paraphrasing."""
 
 _SPAN_PROPERTIES = {
     "chunk_id": {"type": "string"},
@@ -58,7 +65,10 @@ _EXTRACTION_SCHEMA: dict[str, object] = {
             ["id", "entity_type"],
         )},
         "entity_properties": {"type": "array", "items": _row(
-            {"mention_id": {"type": "string"}, "key": {"type": "string", "enum": ["surname"]},
+            {"mention_id": {"type": "string"}, "key": {"type": "string", "enum": [
+                "surname", "province", "district", "neighborhood", "pafta", "ada", "parsel",
+                "independent_section"
+            ]},
              "value": {"type": "string"}},
             ["mention_id", "key", "value"],
         )},

@@ -132,7 +132,12 @@ def execute_workflow(run_id: str) -> None:
         from ..knowledge.production_executor import create_production_executor
         from ..workflows.knowledge import execute as execute_knowledge
 
-        execute_knowledge(run_id, SessionLocal, create_production_executor(run.workspace_id))
+        configuration_session = SessionLocal()
+        try:
+            executor = create_production_executor(run.workspace_id, configuration_session)
+        finally:
+            configuration_session.close()
+        execute_knowledge(run_id, SessionLocal, executor)
         logger.info("knowledge workflow completed: run_id=%s", run_id)
         dispatch_queued_workflows("knowledge_reindex", limit=1)
         return

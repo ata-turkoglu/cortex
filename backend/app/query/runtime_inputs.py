@@ -8,12 +8,50 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import KnowledgeGeneration, KnowledgeStageState, QueryRuntimeActivation
+from ..models import (
+    CanonicalGenerationStatusRecord,
+    KnowledgeGeneration,
+    KnowledgeStageState,
+    QueryRuntimeActivation,
+)
 from .briefing import WorkspaceBriefing
 from .context import ConversationContext, load_conversation_context
 from .ir import IRVocabulary
 from .planning import CapabilityReadiness, PlanningReadinessSnapshot
 from .scope import GenerationScope
+
+CAPABILITY_FAMILIES = {
+    "retrieval.grounded": ("retrieval.hybrid_search", "retrieval.semantic_search"),
+    "graphrag.grounded": ("graphrag.local", "graphrag.global", "graphrag.drift"),
+    "canonical.exhaustive": (
+        "structured.enumerate",
+        "structured.filter",
+        "structured.join",
+        "structured.distinct",
+        "structured.group",
+        "structured.aggregate",
+        "structured.count",
+        "structured.rank",
+        "structured.sort",
+        "structured.limit",
+        "structured.project",
+        "structured.temporal_filter",
+        "structured.compare",
+        "structured.exists",
+        "structured.relation_aggregate",
+    ),
+    "canonical.graph": (
+        "graph.entity_resolve",
+        "graph.traverse",
+        "graph.multi_hop",
+        "graph.temporal_reasoning",
+        "graph.event_population",
+        "graph.event_filter",
+        "graph.event_participation",
+        "graph.provenance_traversal",
+        "graph.contradiction_analysis",
+    ),
+}
 
 
 class RuntimeInputError(ValueError):
@@ -124,69 +162,47 @@ def _readiness(
     required = ("source_relational", "bm25", "dense_qdrant")
     if any(states.get(stage) is None or states[stage].state != "ready" for stage in required):
         raise RuntimeInputError("active generation V2 source/retrieval projections are not ready")
-    canonical_ready = (
-        states.get("canonical_graph") is not None and states["canonical_graph"].state == "ready"
+    canonical_status = session.scalar(
+        select(CanonicalGenerationStatusRecord).where(
+            CanonicalGenerationStatusRecord.workspace_id == workspace_id,
+            CanonicalGenerationStatusRecord.generation_id == generation_id,
+            CanonicalGenerationStatusRecord.projection_version == "minimal-core-v1",
+        )
     )
-    canonical_metrics = (
-        json.loads(states["canonical_graph"].metrics_json or "{}") if canonical_ready else {}
-    )
-    property_filter_ready = bool(
-        canonical_metrics.get("resolved_entity_property_count")
-        and canonical_metrics.get("entity_property_schema_version") == "1"
-    )
+    canonical_ready = bool(canonical_status and canonical_status.status == "READY")
     graphrag_ready = states.get("graphrag") is not None and states["graphrag"].state == "ready"
-    canonical_capabilities = (
-        "structured.enumerate",
-        "structured.filter",
-        "structured.join",
-        "structured.distinct",
-        "structured.group",
-        "structured.aggregate",
-        "structured.count",
-        "structured.rank",
-        "structured.sort",
-        "structured.limit",
-        "structured.project",
-        "structured.temporal_filter",
-        "structured.compare",
-        "structured.exists",
-        "graph.entity_resolve",
-        "graph.traverse",
-        "graph.multi_hop",
-        "graph.temporal_reasoning",
-        "graph.event_population",
-        "graph.event_filter",
-        "graph.event_participation",
-        "graph.provenance_traversal",
-        "graph.contradiction_analysis",
-    )
+    canonical_capabilities = CAPABILITY_FAMILIES["canonical.exhaustive"]
     canonical_entries = tuple(
         CapabilityReadiness(
             workspace_id=workspace_id,
             engine=("structured" if capability.startswith("structured.") else "knowledge_graph"),
             capability=capability,
-            # A document scan is the retrieval source prerequisite and does not read the
-            # canonical graph. All other structured/graph capabilities require canonical state.
-            state=(
-                "ready"
-                if capability == "structured.enumerate"
-                or (
-                    canonical_ready and (capability != "structured.filter" or property_filter_ready)
-                )
-                else "unavailable"
-            ),
+            state=("ready" if canonical_ready else "unavailable"),
             generation_id=generation_id,
-            ready_projections=("canonical_graph",) if canonical_ready else (),
-            detail=None
-            if capability == "structured.enumerate"
-            or (canonical_ready and (capability != "structured.filter" or property_filter_ready))
-            else (
-                "governed entity property projection is not ready for this generation"
-                if canonical_ready and capability == "structured.filter"
-                else "canonical graph projection is not ready for this generation"
+            ready_projections=("sqlite_canonical_core",) if canonical_ready else (),
+            detail=(
+                None
+                if canonical_ready
+                else (
+                    f"canonical exhaustive status is {canonical_status.status.lower()}"
+                    if canonical_status
+                    else "SQLite canonical completeness is not ready for this generation"
+                )
             ),
         )
         for capability in canonical_capabilities
+    )
+    graph_entries = tuple(
+        CapabilityReadiness(
+            workspace_id=workspace_id,
+            engine="knowledge_graph",
+            capability=capability,
+            state="unavailable",
+            generation_id=None,
+            ready_projections=(),
+            detail="Neo4j is a rebuildable projection and canonical.graph is not implemented",
+        )
+        for capability in CAPABILITY_FAMILIES["canonical.graph"]
     )
     graphrag_entries = tuple(
         CapabilityReadiness(
@@ -220,6 +236,7 @@ def _readiness(
         active_generation_id=generation_id,
         capabilities=(
             *canonical_entries,
+            *graph_entries,
             CapabilityReadiness(
                 workspace_id=workspace_id,
                 engine="retrieval",
