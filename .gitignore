@@ -68,11 +68,10 @@ frontend/src/api/generated/*.tmp
 /.tmp/
 /backend/app/evaluation/
 /backend/evaluation/
-/backend/tests/test_*.py
+/backend/tests/
 !/backend/app/evaluation/
 !/backend/app/evaluation/*.py
-!/backend/tests/test_query_v2_uploaded_file_acceptance.py
-!/backend/tests/test_query_v2_graphrag_bridge.py
 /frontend/src/**/*.test.tsx
+/frontend/src/**/*.test.ts
 /docs/architecture/evaluation.md
 !/docs/architecture/evaluation.md
