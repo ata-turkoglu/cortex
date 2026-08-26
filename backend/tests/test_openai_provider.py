@@ -72,6 +72,7 @@ def test_openai_provider_reads_wire_response_output(monkeypatch):
 
 def test_openai_provider_sends_responses_strict_json_schema(monkeypatch):
     request_json = {}
+    client_options = {}
 
     class Client:
         async def __aenter__(self):
@@ -91,7 +92,10 @@ def test_openai_provider_sends_responses_strict_json_schema(monkeypatch):
     monkeypatch.setattr(
         "app.providers.openai.get_settings", lambda: type("S", (), {"openai_api_key": "test"})()
     )
-    monkeypatch.setattr("app.providers.openai.httpx.AsyncClient", lambda **_: Client())
+    monkeypatch.setattr(
+        "app.providers.openai.httpx.AsyncClient",
+        lambda **kwargs: (client_options.update(kwargs) or Client()),
+    )
     result = asyncio.run(
         OpenAIProvider().generate_structured(
             "gpt-5.6-luna",
@@ -108,6 +112,7 @@ def test_openai_provider_sends_responses_strict_json_schema(monkeypatch):
         "strict": True,
         "schema": {"type": "object", "additionalProperties": False},
     }
+    assert client_options["trust_env"] is False
 
 
 def test_openai_provider_lists_models_from_models_api(monkeypatch):

@@ -19,6 +19,7 @@ from app.knowledge.workflow_executor import KnowledgeWorkflowExecutor
 from app.main import app
 from app.models import Base, KnowledgeGeneration, Message, QueryRun
 from app.providers.base import GeneratedText
+from app.providers.embeddings import EmbeddingConfiguration
 from app.query.conversation_service import create_conversation
 from app.query.cutover import CutoverEvaluation, CutoverPreflight, attempt_cutover
 from app.query.production import V2QueryServiceFactory
@@ -54,6 +55,10 @@ def _production_retrieval_executor(settings, workspace_id):
     production = ProductionKnowledgeExecutor.__new__(ProductionKnowledgeExecutor)
     production.workspace_id = workspace_id
     production.settings = settings
+    production.embedding_configuration = EmbeddingConfiguration(
+        "ollama", "acceptance-embedding"
+    )
+    production.embedding_provider = DeterministicEmbeddingProvider()
     production.extractor = None
     production.data_root = settings.data_path.resolve()
     production.root = (
@@ -112,10 +117,6 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
     monkeypatch.setattr("app.core.config.get_settings", lambda: settings)
     monkeypatch.setattr("app.workers.broker.dispatch_workflow", lambda *_: None)
     monkeypatch.setattr("app.knowledge.production_executor.get_qdrant_client", lambda: qdrant)
-    monkeypatch.setattr(
-        "app.knowledge.production_executor.OllamaEmbeddingAdapter",
-        lambda *args, **kwargs: DeterministicEmbeddingProvider(),
-    )
 
     def session_override():
         session = session_local()
@@ -185,7 +186,7 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
         preflight=CutoverPreflight(
             schema_ready=True,
             config_ready=True,
-            neo4j_ready=True,
+            neo4j_ready=False,
             runtime_ready=True,
             current_source_fingerprint=generation.source_fingerprint,
             curation_before_fingerprint="uploaded-fixture-curation",
@@ -203,6 +204,13 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
     session.commit()
     inputs = factory.context_loader.load(session, workspace["id"], conversation.id)
     session.commit()
+    readiness = {(item.engine, item.capability): item for item in inputs.readiness.capabilities}
+    assert readiness[("retrieval", "retrieval.hybrid_search")].state == "ready"
+    assert all(
+        item.state == "unavailable"
+        for item in inputs.readiness.capabilities
+        if item.capability.startswith(("structured.", "graph."))
+    )
     service = factory.build(inputs)
 
     grounded = asyncio.run(
@@ -211,7 +219,11 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
     repeated = asyncio.run(
         service.execute_inputs(session, "Describe the deed with zephyr-741 evidence", inputs)
     )
-    assert grounded.answer.state == "grounded"
+    assert grounded.answer.state == "grounded", {
+        "logical_ir": grounded.prepared.logical_ir.model_dump(mode="json"),
+        "physical_plan": grounded.prepared.physical_plan.model_dump(mode="json"),
+        "package_issues": grounded.package.issues,
+    }
     assert grounded.answer.citations
     assert grounded.trace.dense_result_count > 0
     assert grounded.trace.sparse_result_count > 0
@@ -304,7 +316,16 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
     )
     monkeypatch.setattr(WorkspaceBM25Index, "load", staticmethod(guarded_bm25_load))
 
-    monkeypatch.setattr("app.query.production_chat.get_v2_query_service_factory", lambda: factory)
+    monkeypatch.setattr(
+        "app.query.production_chat.build_production_embedder",
+        lambda _session: (
+            EmbeddingConfiguration("ollama", "acceptance-embedding"),
+            DeterministicEmbeddingProvider(),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.query.production_chat.V2QueryServiceFactory", lambda **_kwargs: factory
+    )
     monkeypatch.setattr(
         "app.workers.broker.summarize_conversation.send", lambda *_args, **_kwargs: None
     )

@@ -1,3 +1,6 @@
+import json
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -19,6 +22,16 @@ def test_runtime_settings_never_return_neo4j_credentials():
     engine = create_engine("sqlite:///:memory:")
     GlobalSettings.__table__.create(engine)
     with Session(engine) as session:
+        session.add(
+            GlobalSettings(
+                key="runtime",
+                value_json=json.dumps(
+                    {"embedding_provider": "ollama", "embedding_model": "bge-m3:latest"}
+                ),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
         values = load_runtime_settings(session)
     assert "neo4j_password" not in values
     assert "neo4j_uri" not in values

@@ -65,6 +65,11 @@ def test_secret_store_set_falls_back_when_no_os_keyring_is_available(monkeypatch
         "set_password",
         lambda *_: (_ for _ in ()).throw(secrets.KeyringError("unavailable")),
     )
+    monkeypatch.setattr(
+        secrets.keyring,
+        "get_password",
+        lambda *_: (_ for _ in ()).throw(secrets.KeyringError("unavailable")),
+    )
     monkeypatch.setenv("CORTEX_SECRET_STORE_PATH", str(tmp_path))
     SecretStore().set("openai_api_key", "sk-secret")
     assert SecretStore().get("openai_api_key") == "sk-secret"
