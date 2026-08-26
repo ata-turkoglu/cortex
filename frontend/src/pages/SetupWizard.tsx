@@ -64,14 +64,14 @@ export function SetupWizard() {
         <div className="grid gap-2">
           <AInfoPanel>
             Ollama is optional. Cortex will not download models. Missing
-            embedding model command:{" "}
+            optional catalog model command, if you select it:{" "}
             <code>ollama pull qwen3-embedding:0.6b</code>
           </AInfoPanel>
           <AButton label="Test Ollama availability" onClick={testOllama} />
         </div>
       ) : step === 5 ? (
         <AInfoPanel>
-          Default embedding: Ollama qwen3-embedding:0.6b. Changing it later
+          Select an embedding provider and model. Cortex does not choose one automatically. Changing it later
           requires full dense reindexing.
         </AInfoPanel>
       ) : (

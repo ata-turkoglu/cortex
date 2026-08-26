@@ -54,6 +54,7 @@ const layerDescriptions: Record<string, string> = {
 export function OperationalSettingsPage() {
   const confirm = useConfirmation();
   const [values, setValues] = useState<Record<string, unknown>>({});
+  const [savedEmbedding, setSavedEmbedding] = useState<{ provider: unknown; model: unknown }>();
   const [notice, setNotice] = useState("");
   const [diagnostics, setDiagnostics] = useState<{
     windows: { data_path: string; ollama_base_url: string };
@@ -78,6 +79,7 @@ export function OperationalSettingsPage() {
       .getSettings()
       .then((data) => {
         setValues(data.settings);
+        setSavedEmbedding({ provider: data.settings.embedding_provider, model: data.settings.embedding_model });
         const configuredProvider = layers
           .map(([layer]) => data.settings[`${layer}_provider`])
           .find((provider) => provider === "openai" || provider === "anthropic");
@@ -97,7 +99,7 @@ export function OperationalSettingsPage() {
             layer === "embedding" ? model.embeddings : model.chat,
           );
           const selected = String(next[`${layer}_model`] ?? "");
-          if (!selected && compatible.length) {
+          if (layer !== "embedding" && !selected && compatible.length) {
             next[`${layer}_model`] = compatible[0].model;
           }
         }
@@ -152,7 +154,7 @@ export function OperationalSettingsPage() {
     setValues({
       ...values,
       [`${layer}_provider`]: provider,
-      [`${layer}_model`]: models[0]?.model ?? "",
+      [`${layer}_model`]: layer === "embedding" ? "" : models[0]?.model ?? "",
     });
   };
   const selectProjectApiProvider = (provider: ProviderName) => {
@@ -239,8 +241,8 @@ export function OperationalSettingsPage() {
   };
   const save = async () => {
     const changed =
-      values.embedding_model !== undefined &&
-      values.embedding_model !== "qwen3-embedding:0.6b";
+      savedEmbedding !== undefined &&
+      (values.embedding_provider !== savedEmbedding.provider || values.embedding_model !== savedEmbedding.model);
     if (changed) {
       const accepted = await confirm({
         title: "Embedding ayarını değiştir",
@@ -253,6 +255,7 @@ export function OperationalSettingsPage() {
       .updateSettings({ ...values, embedding_change_confirmed: changed })
       .then((result) => {
         setValues(result.settings);
+        setSavedEmbedding({ provider: result.settings.embedding_provider, model: result.settings.embedding_model });
         setNotice(
           result.reindex_required
             ? "Saved. Workspaces were marked for reindexing."

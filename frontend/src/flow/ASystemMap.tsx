@@ -319,25 +319,25 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-canonical-resolution",
-    label: "Canonical Entity Resolution",
+    label: "Canonical Briefing (blocked capability)",
     boundary: "backend/app/query/briefing.py",
     documentation: "docs/architecture/query-v2/query-runtime.md",
     context: "backend/app/query/understanding/AGENTS.md · CLAUDE.md",
     description:
-      "Resolves exact display-name or alias matches from the selected generation's canonical identity catalogue.",
+      "Optional canonical identity briefing for capabilities whose separate projection is ready; normal retrieval does not require it.",
     guarantee:
-      "Traversal starts from opaque canonical IDs; ambiguous names remain unresolved and historical generations do not read latest identity state.",
+      "Canonical identity is not production accepted; unavailable canonical state cannot block retrieval.grounded.",
     kind: "safety",
     variant: "query",
   },
   {
     id: "v2-query-governed-vocabulary",
-    label: "Governed Vocabulary Validation",
+    label: "Governed Vocabulary (canonical blocked)",
     boundary: "backend/app/query/ir/validation.py · backend/app/query/runtime_inputs.py",
     documentation: "docs/architecture/query-v2/query-runtime.md",
     context: "backend/app/query/ir/AGENTS.md · CLAUDE.md",
     description:
-      "Validates entity-type-specific, generation-bound typed filters before lowering or material execution.",
+      "Validates entity-type-specific, generation-bound typed filters only when the canonical capability is separately ready.",
     guarantee:
       "An undeclared field or entity/property combination fails closed; it cannot use arbitrary Neo4j properties or retrieval as an exhaustive substitute.",
     kind: "safety",
@@ -352,7 +352,7 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
     description:
       "Temporal ranges, fuzzy and relative dates have no production semantic lowering.",
     guarantee:
-      "Exact-day event membership and governed surname GROUP/RANK/COMPARE are active; these remaining requests stay unsupported or unresolved.",
+      "Canonical exhaustive and graph semantics remain unavailable; unsupported requests stay explicit rather than falling back to retrieval.",
     kind: "safety",
     variant: "query",
   },
@@ -384,25 +384,25 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-structured",
-    label: "StructuredQueryEngine / Canonical Population",
+    label: "canonical.exhaustive (not accepted)",
     boundary: "backend/app/engines/structured/",
     documentation: "docs/architecture/query-v2/structured-graph-engines.md",
     context: "backend/app/engines/structured/AGENTS.md · CLAUDE.md",
     description:
-      "Loads the fixed workspace + knowledge-generation canonical population and executes governed LIST/COUNT/GROUP/RANK/COMPARE; document source scans remain non-material retrieval prerequisites.",
+      "Structured Engine would load a canonical population for LIST/COUNT/GROUP/RANK/COMPARE, but this capability is not production accepted.",
     guarantee:
-      "Canonical identity, not mention or alias cardinality, is analytic authority; withheld governed properties and unavailable generation projections fail closed.",
+      "Unavailable population completeness fails closed. Retrieval top-k cannot substitute for exhaustive semantics.",
     kind: "retrieval",
     variant: "query",
   },
   {
     id: "v2-query-list-count",
-    label: "Governed Filter / CountNode",
+    label: "Canonical structured operations (blocked)",
     boundary: "backend/app/engines/structured/engine.py · backend/app/query/planning/planner.py",
     documentation: "docs/architecture/query-v2/structured-graph-engines.md",
     context: "backend/app/engines/structured/AGENTS.md · backend/app/query/planning/AGENTS.md",
     description:
-      "Applies validated governed filters, then returns a canonical LIST or authoritative CountNode result from the exhaustive population.",
+      "Represents canonical filters, relations, and aggregates that remain blocked pending canonical acceptance.",
     guarantee:
       "Retrieval top-k, evidence, citation, and answer-rendering cardinality never determine exhaustive COUNT.",
     kind: "processor",
@@ -410,21 +410,21 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-knowledge-graph",
-    label: "Knowledge Graph",
+    label: "canonical.graph (not accepted)",
     boundary: "backend/app/engines/graph/ · backend/app/knowledge/graph/",
     documentation: "docs/architecture/query-v2/structured-graph-engines.md",
     context:
       "backend/app/engines/graph/AGENTS.md · backend/app/knowledge/graph/AGENTS.md",
     description:
-      "Executes workspace- and generation-scoped canonical Neo4j queries, including exact event_date membership through graph.event_filter.",
+      "Represents structured relation, traversal, and event queries through the Neo4j adapter; this capability is not production accepted.",
     guarantee:
-      "Exact-day event membership is graph-authoritative rather than retrieval top-k; document_date never substitutes for event_date.",
+      "Neo4j is involved in the projection but is not documented as fully proven durable canonical authority.",
     kind: "retrieval",
     variant: "query",
   },
   {
     id: "v2-query-retrieval",
-    label: "Dense + Sparse / RRF",
+    label: "retrieval.grounded (READY)",
     boundary: "backend/app/engines/hybrid/ · backend/app/retrieval/",
     documentation: "docs/architecture/retrieval-boundaries.md",
     context:
@@ -438,14 +438,14 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-graphrag",
-    label: "GraphRAG",
+    label: "graphrag.grounded (PARTIAL)",
     boundary: "backend/app/graphrag/",
     documentation: "docs/architecture/graphrag-boundary.md",
     context: "backend/app/graphrag/AGENTS.md · CLAUDE.md",
     description:
-      "GraphRAG Local, Global, and DRIFT normalized artifacts run through the V2 registry and exact trusted-source bridge before EngineResult reconciliation.",
+      "GraphRAG Local, Global, and DRIFT use normalized generation artifacts and the trusted-source bridge before EngineResult reconciliation.",
     guarantee:
-      "GraphRAG is not canonical truth; unresolvable, cross-generation, cross-workspace, or hash-mismatched source references fail closed, and AnswerEngine remains the sole final renderer.",
+      "PARTIAL / readiness-dependent: GraphRAG is not canonical truth; invalid source references fail closed and AnswerEngine remains the sole final renderer.",
     kind: "retrieval",
     variant: "graphrag",
   },
@@ -551,9 +551,9 @@ const INDEXING_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
     documentation: "docs/architecture/query-v2/knowledge-construction.md",
     context: "backend/app/knowledge/entities/AGENTS.md · CLAUDE.md",
     description:
-      "Applies conservative, reversible identity resolution using stable opaque canonical IDs.",
+      "Applies conservative, reversible identity resolution using stable opaque canonical IDs; validated case/title/context variants remain mentions or aliases.",
     guarantee:
-      "Ambiguous mentions remain unresolved and user-curated decisions outrank validated and extracted proposals.",
+      "Ambiguous or fragment mentions remain unresolved and never mint canonical nodes; user-curated decisions outrank validated and extracted proposals.",
     kind: "safety",
     variant: "processing",
   },
@@ -616,9 +616,9 @@ const INDEXING_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
     documentation: "docs/architecture/query-v2/knowledge-construction.md",
     context: "backend/app/knowledge/graph/AGENTS.md · CLAUDE.md",
     description:
-      "Projects canonical entities, generation-scoped governed properties, relations, events, temporals, claims, facts, conflicts, and exact evidence into Neo4j.",
+      "Builds the currently incomplete canonical/Neo4j projection; this is not a production-accepted durable canonical authority.",
     guarantee:
-      "Canonical graph writes are workspace- and generation-bound; governed properties retain exact evidence and cannot be inferred from display names at query time.",
+      "Canonical lifecycle and exhaustive projection correctness remain blocked; no production completeness claim is shown here.",
     kind: "storage",
     variant: "graphrag",
   },
@@ -755,8 +755,13 @@ staticMaps.query.edges = [
   connectManifest("v2-query-chat-api", "v2-query-service"),
   connectManifest("v2-query-service", "v2-query-conversation-context"),
   connectManifest("v2-query-conversation-context", "v2-query-understanding"),
-  connectManifest("v2-query-understanding", "v2-query-canonical-resolution"),
-  connectManifest("v2-query-canonical-resolution", "v2-query-ir"),
+  connectManifest("v2-query-understanding", "v2-query-ir"),
+  connectManifest(
+    "v2-query-understanding",
+    "v2-query-canonical-resolution",
+    "canonical.* only",
+  ),
+  connectManifest("v2-query-canonical-resolution", "v2-query-ir", "when ready"),
   connectManifest("v2-query-understanding", "v2-query-governed-vocabulary"),
   connectManifest("v2-query-understanding", "v2-query-deferred-semantics", "unsupported"),
   connectManifest("v2-query-governed-vocabulary", "v2-query-ir"),
@@ -919,6 +924,8 @@ function nodePresentation(
     qdrant: { kind: "storage", layer: "Vector persistence" },
     neo4j: { kind: "storage", layer: "Knowledge graph persistence" },
     ollama: { kind: "llm-local", layer: "Local provider" },
+    "ollama-models": { kind: "worker", layer: "Model provisioning" },
+    "ollama-volume": { kind: "storage", layer: "Persistent model storage" },
     graphrag: { kind: "worker", layer: "GraphRAG execution" },
     openai: { kind: "llm-api", layer: "API provider" },
     anthropic: { kind: "llm-api", layer: "API provider" },
@@ -1186,6 +1193,8 @@ export function ASystemMap() {
     () => ({
       nodes: [
         ["frontend", "healthy"],
+        ["ollama-models", "bootstrap"],
+        ["ollama-volume", "persistent"],
         ...Object.entries(services).filter(([id]) => id !== "frontend"),
       ].map(
         ([id, status], index): MapNode => ({
@@ -1212,6 +1221,9 @@ export function ASystemMap() {
         ["backend", "redis"],
         ["backend", "qdrant"],
         ["backend", "ollama"],
+        ["worker", "ollama"],
+        ["ollama-models", "ollama"],
+        ["ollama", "ollama-volume"],
         ["redis", "worker"],
         ["worker", "qdrant"],
         ["worker", "graphrag"],

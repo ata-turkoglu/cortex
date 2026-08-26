@@ -1,63 +1,4 @@
 services:
-  frontend:
-    image: node:24.0.2-alpine3.21
-    working_dir: /app/frontend
-    command: sh -c "corepack pnpm install --frozen-lockfile && corepack pnpm dev --host 0.0.0.0"
-    ports: ["3000:5173"]
-    environment:
-      VITE_API_PROXY_TARGET: ${VITE_API_PROXY_TARGET:-http://backend:8000}
-    volumes:
-      - "../:/app"
-      - "frontend-node-modules:/app/node_modules"
-      - "frontend-package-node-modules:/app/frontend/node_modules"
-  backend:
-    build: { context: .., dockerfile: backend/Dockerfile, target: runtime }
-    ports: ["4000:8000"]
-    environment:
-      TZ: Europe/Istanbul
-      CORTEX_DATABASE_URL: sqlite:////data/sqlite/cortex.db
-      CORTEX_DATA_PATH: /data
-      CORTEX_REDIS_URL: redis://redis:6379/0
-      CORTEX_QDRANT_URL: http://qdrant:6333
-      CORTEX_NEO4J_URI: bolt://neo4j:7687
-      CORTEX_NEO4J_DATABASE: neo4j
-      CORTEX_NEO4J_USERNAME: neo4j
-      CORTEX_NEO4J_PASSWORD: ${CORTEX_NEO4J_PASSWORD:-cortex-local-neo4j}
-      CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
-      CORTEX_SECRET_STORE_PATH: /data/secrets
-      CORTEX_OPENAI_API_KEY: ${CORTEX_OPENAI_API_KEY:-}
-      CORTEX_ANTHROPIC_API_KEY: ${CORTEX_ANTHROPIC_API_KEY:-}
-    volumes: ["../data:/data"]
-    extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on:
-      redis: { condition: service_started }
-      qdrant: { condition: service_started }
-      neo4j: { condition: service_healthy }
-    stop_grace_period: 30s
-  worker:
-    build: { context: .., dockerfile: backend/Dockerfile, target: worker }
-    command: uv run --frozen --no-sync dramatiq app.workers
-    environment:
-      TZ: Europe/Istanbul
-      CORTEX_DATABASE_URL: sqlite:////data/sqlite/cortex.db
-      CORTEX_DATA_PATH: /data
-      CORTEX_REDIS_URL: redis://redis:6379/0
-      CORTEX_QDRANT_URL: http://qdrant:6333
-      CORTEX_NEO4J_URI: bolt://neo4j:7687
-      CORTEX_NEO4J_DATABASE: neo4j
-      CORTEX_NEO4J_USERNAME: neo4j
-      CORTEX_NEO4J_PASSWORD: ${CORTEX_NEO4J_PASSWORD:-cortex-local-neo4j}
-      CORTEX_OLLAMA_BASE_URL: http://host.docker.internal:11434
-      CORTEX_SECRET_STORE_PATH: /data/secrets
-      CORTEX_OPENAI_API_KEY: ${CORTEX_OPENAI_API_KEY:-}
-      CORTEX_ANTHROPIC_API_KEY: ${CORTEX_ANTHROPIC_API_KEY:-}
-    volumes: ["../data:/data"]
-    extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on:
-      redis: { condition: service_started }
-      qdrant: { condition: service_started }
-      neo4j: { condition: service_healthy }
-    stop_grace_period: 30s
   redis:
     image: redis:7.4.2-alpine3.21
     ports: ["6379:6379"]
@@ -83,6 +24,35 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+  ollama:
+    image: ollama/ollama@sha256:b88c73ace3e115f8ec53dc8761ae1c0aabfa675406e3681786b98757ce050f42
+    container_name: cortex-ollama
+    environment:
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+    ports: ["127.0.0.1:11434:11434"]
+    volumes: ["cortex-ollama-models:/root/.ollama"]
+    healthcheck:
+      # `ollama list` uses the service's /api/tags endpoint; the image has no curl/wget binary.
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+  ollama-models:
+    image: ollama/ollama@sha256:b88c73ace3e115f8ec53dc8761ae1c0aabfa675406e3681786b98757ce050f42
+    container_name: cortex-ollama-models
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CORTEX_OLLAMA_REQUIRED_MODELS: ${CORTEX_OLLAMA_REQUIRED_MODELS:-bge-m3:latest}
+    entrypoint: ["/bin/sh", "/bootstrap/ollama-bootstrap.sh"]
+    volumes:
+      - "./ollama-bootstrap.sh:/bootstrap/ollama-bootstrap.sh:ro"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
 volumes:
-  frontend-node-modules:
-  frontend-package-node-modules:
+  cortex-ollama-models:
+    name: cortex_ollama_models
