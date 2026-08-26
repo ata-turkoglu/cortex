@@ -2,10 +2,10 @@
 
 ## Query V2 ownership packages
 
-The backend now exposes navigation-first V2 ownership packages under `app/query/`,
-`app/knowledge/`, `app/engines/`, and `app/reasoning/`. They contain scoped instructions and Python
-package markers but do not alter the active V1 runtime. Existing implementations remain at their V1
-paths until the owning V2 phase migrates them; see `query-v2/repository-boundaries.md` for the
+The backend exposes V2 ownership packages under `app/query/`, `app/knowledge/`, `app/engines/`,
+and `app/reasoning/`. Production query execution is V2-only. Historical compatibility
+implementations remain at their V1 paths only where a worker, evaluation runner, migration, or
+persisted-data reader still references them; see `query-v2/repository-boundaries.md` for the
 no-duplication map.
 
 Phase 13 adds a detached internal production composition behind the stable chat API route.

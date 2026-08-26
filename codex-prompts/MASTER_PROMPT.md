@@ -85,28 +85,16 @@ This is a new system. Do not reuse or depend on the old KnowledgeOS project.
 
 - Docker Compose
 - Services:
-  - frontend
-  - backend
-  - worker
-  - redis
-  - qdrant
-- Ollama is provided by the existing KnowledgeOS Docker stack and must not be
-  duplicated by Cortex.
-- The local layout is `D:\Merter\KnowledgeOS` for KnowledgeOS and
-  `D:\Merter\Cortex` for Cortex. Start KnowledgeOS from its repository with
-  `docker compose up -d`.
-- KnowledgeOS publishes Ollama on host port `11434` and stores the models in
-  its existing `ollama-data` volume.
-- When Cortex runs inside Docker Desktop on Windows, use
-  `OLLAMA_BASE_URL=http://host.docker.internal:11434` for the backend and
-  worker. When Cortex runs on the host, use
-  `OLLAMA_BASE_URL=http://localhost:11434`.
-- Add `extra_hosts: ["host.docker.internal:host-gateway"]` to Cortex services
-  when Docker compatibility requires it.
-- Do not add an Ollama service to Cortex Compose, pull models during startup,
-  or mount/copy the KnowledgeOS `ollama-data` volume into another container.
-- If both projects are later combined into one Compose project, keep one
-  Ollama service and use `OLLAMA_BASE_URL=http://ollama:11434`.
+- redis
+- qdrant
+- neo4j
+- ollama
+- ollama-models (one-shot, idempotent model bootstrap)
+- Docker Compose owns the Cortex infrastructure services. Frontend, backend,
+  and worker run on the host and use `OLLAMA_BASE_URL=http://127.0.0.1:11434`.
+- Cortex owns its persistent Ollama model volume and must not reference or
+  share a KnowledgeOS service or volume at runtime. The bootstrap checks its
+  explicit required-model list and pulls only missing models.
 
 ---
 
@@ -682,8 +670,8 @@ Performance:
 ## Multilingual local embedding default
 
 Use Ollama `qwen3-embedding:0.6b` as the generic V1 embedding default only
-when it is installed. For the actual shared KnowledgeOS deployment, prefer the
-installed model discovered from `/api/tags`; the current expected model is
+when it is installed. For the Cortex-owned deployment, prefer the persisted
+configured model discovered from `/api/tags`; the current expected model is
 `bge-m3:latest`.
 
 Reasons and constraints:
@@ -695,9 +683,8 @@ Reasons and constraints:
 - Cortex must test the model during setup before allowing indexing.
 - If the generic model is not installed, show:
   `ollama pull qwen3-embedding:0.6b`
-- Do not execute that command automatically. When the shared KnowledgeOS
-  runtime already provides `bge-m3:latest`, use it rather than downloading a
-  second embedding model.
+- The Cortex bootstrap may provision the persisted required local model into
+  its own volume, but it must skip a model already present.
 - The setup wizard may offer the discovered BGE model as the active local
   embedding choice.
 - OpenAI `text-embedding-3-small` remains an optional provider/model choice, not the default.

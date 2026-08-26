@@ -3,13 +3,19 @@
 ## Query V2 ownership
 
 `app/retrieval/` remains the implementation boundary for the V2 Retrieval Engine. It is not copied
-under `app/engines/`; typed cross-engine composition belongs to `app/engines/hybrid/`. The Phase 02
-package scaffold changes navigation only and leaves current retrieval behavior intact.
+under `app/engines/`; typed cross-engine composition belongs to `app/engines/hybrid/`.
 
 LlamaIndex routes Hybrid Search and separate GraphRAG Local, Global, and DRIFT engines.
 Hybrid search combines workspace-filtered Qdrant dense retrieval, bm25s sparse retrieval,
 fusion, and a local BGE reranker. Embedding configuration changes require dense reindexing;
 vectors with incompatible dimensions/configurations may never share an active vector field.
+
+Embedding provider and model selection is durable runtime configuration. Production code resolves
+it only through `app.core.embedding_runtime`: database session, `load_runtime_settings`, strict
+configuration validation, then the configured adapter. Cortex has no implicit production embedding
+model fallback: missing configuration fails closed, produces no adapter or fingerprint, and backend
+and worker use the same persisted configuration. Catalog models are selectable options, never runtime
+defaults.
 
 Phase 13's production V2 composition uses the same retrieval implementations through stricter
 adapters. `V2DenseAdapter` can call only `WorkspaceQdrantStore.search_generation()`, whose filter
@@ -19,18 +25,12 @@ chunk/document/version/logical-document/content-hash identity and are validated 
 immutable generation source manifest before reconciliation. Neither adapter can reach
 `HybridRetrievalRuntime`, workspace-only dense search, or the legacy workspace BM25 artifact.
 
-## Structured query execution
+## Capability boundary
 
-Chat creates a validated compositional query plan before Hybrid Search. The plan records the
-operation, entity mentions/resolution confidence, date constraints, and whether a request needs
-exhaustive retrieval, aggregation, or deduplication. Entity resolution reads only active chunks
-from the requested workspace; resolved names provide bounded additional HybridRetriever queries,
-then an operation-aware deterministic selector favors resolved full names, descriptive context, and
-document-diverse evidence while penalizing numeric/OCR shorthand, stubs, and evidence without the
-resolved entity. It does not
-alter dense, BM25, fusion, or reranker scoring. Explicit exhaustive property LIST/COUNT requests
-use a separate workspace-scoped aggregation boundary that processes active relational candidates;
-it does not change Hybrid Search, Qdrant, BM25, or GraphRAG ranking/indexing.
+`retrieval.grounded` is ready when the source manifest and at least one generation-bound retrieval
+projection are ready. It is independent of `canonical.exhaustive` and `canonical.graph`. Retrieval
+never claims corpus completeness and cannot replace a canonical list/count/group/rank/compare,
+relation traversal, or property inventory.
 
 ## Phase 6 implementation boundary
 
@@ -44,11 +44,9 @@ change marks the workspace `reindex_required`; only a successful full replacemen
 mark the new fingerprint ready. `app/providers/embeddings.py` owns the stable title/heading/content template,
 so Unicode—including Turkish text—is passed through unchanged.
 
-Sparse indexes are per-workspace bm25s corpora and are never shared. The corpus and its
-evidence metadata persist beneath the workspace-owned `bm25_chunks` resource path and reject
-cross-workspace loads. `HybridRetrievalRuntime` is the chat-facing composition boundary: it loads
-that index, creates the configured query embedding, binds `WorkspaceQdrantStore` to the active
-workspace/configuration hash, and calls `HybridRetriever.search()`.
+The production V2 sparse adapter reads only `knowledge-candidates/<generation>/bm25`. The older
+workspace-owned `bm25_chunks` format and `HybridRetrievalRuntime` remain Historical / V1
+compatibility paths; they are not reached by production V2 chat.
 
 ## Ingestion indexing contract
 
@@ -69,14 +67,8 @@ normalizing line endings; retrieval feature code never owns model-specific prefi
 Embedding calls use the global bounded embedding timeout so a local model outage becomes a
 visible, retryable workflow failure instead of leaving an ingestion run indefinitely running.
 
-Entity/document-list questions are planned as `entity_document_lookup` with `needs_list=true`.
-Their hybrid candidates are grouped by `document_id`, and
-returned as unique document matches that retain ordered matching chunks. Answer context is formed
-as document blocks with document code, title, page, original source, and document type; synthesis
-emits one concise row and one citation per document instead of passage dumps.
-Here `document_id` is the logical-document ID when a source container was split; evidence also
-retains `source_document_id` and `source_original`. Retrieval therefore labels a hit `B-2/i`
-rather than `MERTER B.docx`, while source inspection can still navigate back to the DOCX.
+Document lookup remains a grounded retrieval use case. It may group validated evidence by document,
+but it is not an exhaustive corpus inventory.
 
 An incompatible embedding configuration creates one idempotent `dense_reindex` workflow request.
 The new configuration cannot become active until that full replacement workflow marks its dense

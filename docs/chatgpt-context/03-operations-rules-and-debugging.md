@@ -1,6 +1,6 @@
 # Cortex operations, rules, and debugging context
 
-Canonical deployment is Docker Compose with frontend, backend, worker, Redis, and Qdrant. SQLite and Cortex runtime files are host-mounted. Ollama remains an optional host service: containers use `host.docker.internal:11434`, host processes use localhost, and backend/worker must share the configured base URL. Treat intended deployment architecture separately from temporary local health/debug state.
+Canonical deployment runs frontend, backend, and worker on the host, while Docker Compose owns Redis, Qdrant, Neo4j, Cortex Ollama, and its one-shot model bootstrap. Cortex Ollama publishes `127.0.0.1:11434` and owns the `cortex_ollama_models` volume; host backend and worker must use the same `CORTEX_OLLAMA_BASE_URL=http://127.0.0.1:11434`. KnowledgeOS is not a Cortex runtime dependency. Treat intended deployment architecture separately from temporary local health/debug state.
 
 Provider adapters support Ollama, OpenAI, and Anthropic for LLM layers; Ollama/OpenAI for embeddings; reranking is local BGE. Global settings select layer-specific provider/model assignments. API keys are not returned to UI or stored in plaintext SQLite. Deterministic parsing/routing/validation avoids LLM calls; configured runtime settings, not this file, determine active models.
 
@@ -9,4 +9,3 @@ Rules: only explicit exhaustive inventory/grouping/total/count semantics select 
 Architecture changes update owning docs, linked `/system-map`, and affected context in the same change. Current implementation status and validation history are authoritative in `codex-prompts/IMPLEMENTATION_STATUS.md`; GraphRAG requires user-provided credentials/model setup.
 
 For zero evidence inspect workspace ID, active document/version/chunk state, BM25/dense readiness, embedding hash, Qdrant filter, and component counts. For entity failures inspect `query_plan.entities` and candidate/basis metadata. For route failures inspect plan reason codes, `execution_route`, selected routes, and GraphRAG readiness. For citation mismatch compare `evidence_selection`, answer markers, `citation_summary`, and final `citations_json`. For property errors trace claim fields, ownership binding, identity/provenance, and aggregation processed/completion counts. For stale runtime compare served API health/version, Compose images, ports/proxy target, and worker/backend mounts.
-

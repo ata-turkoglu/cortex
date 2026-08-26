@@ -23,8 +23,10 @@ There is no V1 branch or automatic fallback.
 
 The live service executes a generation-bound physical DAG. Retrieval, structured canonical,
 canonical-graph, and GraphRAG steps are dispatched through a request-scoped engine registry and
-converge through the same Result & Evidence boundary. The planner may include
-`structured.enumerate` as a non-material document source-scan prerequisite. GraphRAG Local,
+converge through the same Result & Evidence boundary. Capability readiness is independent:
+`retrieval.grounded` is ready, `graphrag.grounded` is partial/readiness-dependent, and
+`canonical.exhaustive` plus `canonical.graph` are not production accepted. The planner does not
+advertise structured enumeration unless canonical readiness is present. GraphRAG Local,
 Global, and DRIFT read only the selected generation's normalized artifacts; the bridge rejects an
 artifact unless its complete source identity resolves to one trusted source chunk and exact span.
 
@@ -80,11 +82,6 @@ standard planner tier even when short. If all bounded planner repairs fail, prod
 `unsupported` response with a sanitized `semantic_planner_output_invalid` reason; provider output
 and validation details are never exposed. Provider prose is never treated as executable IR.
 
-Known unsupported exhaustive relation aggregates are rejected deterministically before a planner or
-retrieval call. In particular, the live scope cannot count property records per person and rank the
-people: only the governed `person.surname` population analytics are authoritative today. The chat
-response records `relation_aggregation_unsupported` and explains this limitation rather than asking
-the user to restate an already explicit request.
 
 The Phase 06 semantic contract is `SemanticUnderstanding` schema version `1.0`. It contains typed
 entities, targets, relations, semantic operators, coverage, candidate interpretations, explicit
@@ -120,8 +117,8 @@ Validation covers schema version, types, field/relation validity, DAG integrity,
 compatibility, workspace scope, and evidence requirements. Invalid IR cannot reach an engine.
 
 Phase 07 implements this contract behind the inactive V2 boundary as `LogicalQueryIR` schema
-version `1.0`. Nineteen discriminated operator nodes cover scan, resolution, filtering, traversal,
-joins, distinct/group/aggregate/count, rank/sort/limit/project, temporal constraints, evidence
+version `1.0`. Twenty discriminated operator nodes cover scan, resolution, filtering, traversal,
+joins, distinct/group/aggregate/count, governed relation aggregation, rank/sort/limit/project, temporal constraints, evidence
 retrieval, comparison, existence, summarization requests, and governed custom capabilities. Nodes
 declare logical input/output types and form an acyclic graph whose every node must contribute to a
 root. Output projection, evidence requirements, and coverage are separate typed contracts.
@@ -269,66 +266,25 @@ IR validation rejects fields not advertised by that exact projection. The proper
 an explicit, exact-span extraction assertion during knowledge construction, not by parsing a
 display name at query time. Conflicting candidate values remain absent from the queryable projection.
 
-## Production-ready governed LIST/COUNT
+## Canonical structured and graph capabilities
 
-Semantic governed `LIST` and `COUNT` are production-ready for the advertised vocabulary. The
-runtime chain is: `SemanticPlannerAdapter` -> `SemanticUnderstanding` -> generation-bound governed
-vocabulary validation -> typed `LogicalQueryIR` -> physical plan -> `StructuredQueryEngine` canonical
-population -> governed filter -> LIST or `CountNode` -> final-logical-root selection ->
-`reconcile_engine_results` -> `ReasoningPackage` -> `AnswerEngine`.
+The typed runtime supports planning canonical LIST/COUNT/GROUP/RANK/COMPARE, relation traversal,
+property inventory, and exact-date canonical event queries, but none is production accepted. Their
+authority depends on the incomplete canonical identity, property, relation, lifecycle, and
+population projection. These requests must fail closed when the required canonical capability is
+unavailable; dense/sparse retrieval cannot provide an exhaustive substitute or a fake zero.
 
-`workspace_id` and `knowledge_generation_id` are fixed inputs to structured execution. The same
-canonical identity may have different governed property state in two generations; a historical
-generation request reads its selected generation without latest-generation leakage. The initial
-vocabulary is entity-type-specific: `person.surname` may be valid while `person.favorite_color`
-and `organization.surname` are invalid. Invalid exhaustive semantics fail closed before material
-execution: they neither access arbitrary Neo4j properties nor fall back to retrieval approximation,
-fake zero, or an empty exhaustive result.
-
-LIST and COUNT use canonical-identity cardinality. Mentions and aliases preserve provenance and
-identity resolution history but never increase canonical entity COUNT. An authoritative exhaustive
-COUNT comes only from the generation-bound structured canonical population. Retrieval top-k,
-evidence, citation, and `AnswerEngine` rendering cardinality are never authoritative COUNT sources.
-
-Only `EngineResult` values for final logical IR roots enter final reconciliation for a semantic
-operation. Intermediate execution-DAG scans are prerequisites, not user-facing results; this keeps
-an exhaustive scan from leaking into a filtered LIST result.
-
-Direct canonical `person --parent_of--> person` traversal is also production-ready. The semantic
-planner resolves an exact parent display name or alias from the selected generation's identity
-catalogue, lowers an outgoing typed `TraverseNode`, and dispatches it to `KnowledgeGraphEngine`.
-The graph adapter binds both relation evidence and reads to workspace + generation; retrieval does
-not determine relation membership. Persisted final-result conversation-referent traversal is also
-production-ready for governed direct relations. Exact-day canonical event membership is also
-production-ready: a Turkish dotted date is normalized, typed as `event_date`, lowered as
-`EventSetNode -> TemporalConstraintNode`, and dispatched as the generation-bound,
-graph-authoritative `graph.event_filter`. `event_date` never means `document_date`, and
-dense/sparse retrieval never determines exact event membership. The typed events flow from
-`EngineResult.events` through reconciliation into `ReasoningPackage.events` and the
-`AnswerEngine`. Ranges and fuzzy/relative temporal work remain incomplete. GraphRAG provenance is
-complete for artifacts that carry the required exact source identity; missing or ambiguous identity
-fails closed rather than falling back to a native GraphRAG answer.
-
-## Production-ready governed GROUP/RANK/COMPARE
-
-The same generation-bound canonical person population used by governed LIST/COUNT is authoritative
-for the initial analytic scope: `person.surname`. `GROUP` lowers to a canonical exhaustive scan and
-`GroupNode(person.surname)`; `RANK` adds `RankNode(measure=canonical_count, direction)` and orders
-ties by the stable normalized group key; `COMPARE` lowers two governed surname filters from the
-same workspace/generation into `CompareNode(populations)`. Structured execution returns typed
-grounded rows through `EngineResult`, final-root reconciliation, `ReasoningPackage`, and
-`AnswerEngine`; rendering never recalculates counts, ordering, or differences.
-
-Withheld/conflicted or missing governed surnames contribute to none of these analytic results.
-Retrieval top-k, aliases, mentions, and answer prose never provide analytic authority. Unsupported
-fields or resource/property combinations fail during vocabulary validation before structured or
-retrieval execution. Cross-workspace and cross-generation comparison remain unsupported.
+When canonical work resumes, canonical-identity cardinality, exact evidence, and final-root
+reconciliation remain the intended safeguards. That intended design is not evidence of current
+acceptance. Neo4j is involved in canonical projection but is not documented here as fully proven
+durable canonical authority.
 
 ## Sharp runtime activation
 
 The workspace-scoped query_runtime_activations record is the sole V1/V2 runtime pointer. Phase 13
-activation requires an active exact-generation projection, an unchanged current corpus, successful
-schema/config/Neo4j/runtime preflight, preserved user curation, and a passing versioned evaluation.
+activation requires an active exact-generation retrieval projection, an unchanged current corpus,
+successful schema/config/runtime preflight, preserved user curation, and a passing versioned
+evaluation. Neo4j readiness governs canonical capabilities, not normal retrieval cutover.
 Every rejected attempt is durable and leaves the pointer unchanged. External health, graph,
 retrieval, and model evaluation calls are detached inputs to the gate and never run inside the
 SQLite activation transaction.

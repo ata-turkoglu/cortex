@@ -12,6 +12,8 @@ For Query Architecture V2, enter the smallest owning boundary before reading cod
   remain in `app/retrieval/` and `app/graphrag/`
 - `app/reasoning/` — durable research and composition
 
-These directories are target ownership boundaries until their implementation phases activate them.
-The V1 runtime remains under `app/chat/`, `app/aggregation/`, `app/retrieval/`, and `app/graphrag/`;
-do not duplicate those implementations during migration.
+Production query execution enters through `app/api/chat.py` and `app/query/production_chat.py`.
+`app/retrieval/` and `app/graphrag/` remain active V2 adapter boundaries. `app/chat/` and
+`app/aggregation/` contain historical or compatibility code; do not route production V2 requests
+through them or delete them without proving that workers, evaluation, and persisted compatibility
+do not require them.

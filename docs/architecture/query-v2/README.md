@@ -1,11 +1,10 @@
 # Cortex Query Architecture V2
 
-Status: **binding target architecture; not the active production runtime**.
+Status: **active V2 production runtime, with capability-specific acceptance.**
 
-The active V1 runtime remains documented in
-[`../query-answer-pipeline.md`](../query-answer-pipeline.md). The discovery notes under
-[`../discovery/query-v2/`](../discovery/query-v2/) describe the code as inspected on
-2026-08-16; they are evidence for this design, not an architecture contract.
+The production chat entrypoint is V2-only. Discovery notes under
+[`../discovery/query-v2/`](../discovery/query-v2/) are explicitly Historical / V1 investigation,
+not a description of the current runtime.
 
 V2 turns Cortex from a route-oriented RAG orchestrator into a conversation-aware workspace
 intelligence system. It separates semantic interpretation from physical execution, uses a
@@ -54,11 +53,14 @@ force unless this V2 contract explicitly supersedes them at cutover.
 | Answer Engine | final user-facing response and answer state | engine execution or source mutation |
 | Indexing V2 / Knowledge Construction | provenance-bearing knowledge extraction, validation, projections, readiness | overwriting user curation |
 
-## Activation and documentation policy
+## Capability status
 
-After sharp cutover, these documents describe the active V2-only production query
-entrypoint. `/system-map` now manifests the implemented V2 subsystem topology and its inactive
-activation boundary; it does not claim that requests execute through that topology. Each
-implementation phase must update its owning code, tests, architecture document, scoped AI
-navigation, and runtime manifest when a represented boundary changes. A partial V2 generation is
-never activated or described as corpus-complete.
+| Capability family | Status | Required readiness |
+| --- | --- | --- |
+| `retrieval.grounded` | READY | immutable source manifest and dense and/or BM25 projection |
+| `graphrag.grounded` | PARTIAL | source manifest and generation GraphRAG artifacts |
+| `canonical.exhaustive` | NOT PRODUCTION ACCEPTED | complete canonical population/projection |
+| `canonical.graph` | NOT PRODUCTION ACCEPTED | canonical relation/event projection |
+
+Canonical readiness must not conceptually define all V2 readiness. Each implementation change must
+update its owning code, tests, architecture document, scoped AI navigation, and `/system-map`.

@@ -11,13 +11,21 @@ worker → workspace files (source, normalized Markdown, BM25, GraphRAG artifact
 FastAPI/worker → configured Ollama/OpenAI/Anthropic adapters
 ```
 
-The backend owns API contracts and command/query persistence. The worker owns long-running side effects. SQLite is relational source-of-record; Neo4j is the Query V2 persistent/queryable knowledge graph; Qdrant and BM25 are retrieval projections. GraphRAG workspace artifacts are extracted producer output, not canonical truth; active V1 Local/Global/DRIFT still reads them until V2 cutover.
+The backend owns API contracts and command/query persistence. The worker owns long-running side effects. SQLite is the relational/application source of record; Qdrant and BM25 are generation-bound retrieval projections. Neo4j participates in incomplete canonical structured projection and must not be treated as proven durable canonical authority. GraphRAG artifacts are extracted generation products, not canonical truth; V2 GraphRAG is partial/readiness-dependent.
 
-Start with root `AGENTS.md`, `.ai/project-map.yaml`, and `docs/ai/index.md`. For query/retrieval/aggregation/citation work read `docs/architecture/CORTEX_RULEBOOK.md`. Main locations: query planning/execution `backend/app/chat/`; retrieval `backend/app/retrieval/`; property aggregation `backend/app/aggregation/property.py`; ingestion `backend/app/ingestion/`; GraphRAG `backend/app/graphrag/`; workflows `backend/app/workflows/`; relational models/migrations `backend/app/models.py` and `backend/alembic/`; frontend system map `frontend/src/flow/ASystemMap.tsx`.
+Start with root `AGENTS.md`, `.ai/project-map.yaml`, and `docs/ai/index.md`. For
+query/retrieval/aggregation/citation work read `docs/architecture/CORTEX_RULEBOOK.md`. Main
+locations: production query planning/execution `backend/app/query/`; retrieval
+`backend/app/retrieval/`; canonical construction `backend/app/knowledge/`; GraphRAG
+`backend/app/graphrag/`; workflows `backend/app/workflows/`; relational models/migrations
+`backend/app/models.py` and `backend/alembic/`; frontend system map
+`frontend/src/flow/ASystemMap.tsx`. `backend/app/chat/` and
+`backend/app/aggregation/property.py` are Historical / V1 compatibility paths.
 
 Query V2 target ownership is scaffolded under `backend/app/query/`, `knowledge/`, `engines/`, and
 `reasoning/`, each with child scoped context. These are navigation and ownership boundaries until
-their implementation phases activate them; the active V1 runtime paths above remain authoritative.
+their implementation phases activate them. Production query navigation begins at `app/query/`, not
+at historical V1 compatibility modules.
 
 `/knowledge` is the workspace-scoped manual canonical curation route. It lists canonical entities,
 exact evidence spans and identity history, and exposes reason-required merge, split, and alias

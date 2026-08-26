@@ -58,7 +58,7 @@ Future-version ideas are listed in `docs/FUTURE_BACKLOG.md` and must not be impl
 - Batch API guidance for offline workloads
 - GraphRAG cost controls
 - Windows 11/Docker Desktop/WSL2 compatibility requirements
-- Shared Ollama connectivity with the existing KnowledgeOS Docker stack
+- Cortex-owned Ollama service, model bootstrap, and persistent model volume
 - Evaluation fixture schema
 - Vitest, Testing Library, Playwright, and pytest strategy
 

@@ -20,6 +20,13 @@ Every post-commit dispatch also publishes one delayed idempotent fallback delive
 transient consumer gap after Redis accepts the first message: the worker claims only runs still
 in `queued` state, so a run already claimed by the first delivery is skipped safely.
 
+For `knowledge_reindex`, a delayed delivery also stops when a durable stage checkpoint is already
+`running`; it cannot execute the same external generation stage concurrently. Restart recovery
+first marks the interrupted run, after which retry resumes from the safe checkpoint. Failure
+records retain the bounded diagnostic tail because external CLIs commonly emit their actionable
+error after progress output. GraphRAG mirroring resolves its embedding adapter from persisted
+runtime configuration in a short database operation before external work begins.
+
 Retry resumes from the failed checkpoint when one exists. If an external indexing adapter fails
 before recording its first checkpoint, retry instead starts from the first incomplete step.
 

@@ -1,7 +1,8 @@
 # Query V2 knowledge construction contract
 
-This document defines the target canonical knowledge and indexing architecture. It does not change
-the active V1 indexing workflow by itself.
+> Status: Canonical construction and lifecycle are incomplete / blocked. This document records the
+> intended boundaries and current implementation, not production acceptance for canonical entities,
+> relations, properties, exhaustive population, or Neo4j as durable canonical authority.
 
 ## Knowledge and graph ownership
 
@@ -34,12 +35,14 @@ operations. The workspace curation API/UI exposes merge, split, alias add/remove
 inspection, and history.
 
 Phase 05 delivery status: SQLite persists opaque workspace-scoped candidate generations, durable
-run context, and every mandatory checkpoint. The specialized worker snapshots active chunks,
-checkpoints provider extraction per chunk, resumes the same candidate after interruption, runs all
-model/store calls outside SQLite transactions, and activates only after all eleven matching stages
-are ready. BM25 files, Qdrant points, and Microsoft GraphRAG artifacts are generation-scoped.
-Readiness is exposed at `GET /workspaces/{workspace_id}/knowledge/readiness` and in the knowledge
-curation UI. A failed or mixed-generation candidate cannot replace the prior active generation.
+run context, and every construction checkpoint. The specialized worker snapshots active chunks,
+checkpoints provider extraction per chunk, resumes the same candidate after interruption, and runs
+all model/store calls outside SQLite transactions. Retrieval activation requires only matching
+source/relational, BM25, and dense/Qdrant projections; canonical and GraphRAG failures become
+durable unavailable capability states. BM25 files, Qdrant points, and Microsoft GraphRAG artifacts
+are generation-scoped. Readiness is exposed at
+`GET /workspaces/{workspace_id}/knowledge/readiness` and in the knowledge curation UI. A failed or
+mixed-generation retrieval projection cannot replace the prior active generation.
 
 Provider output enters through a typed extraction envelope for mentions, relations, events,
 temporals, and claims. Before any promotion, every assertion span must identify a snapshot chunk
@@ -69,6 +72,19 @@ source text. Merge retains one stable primary ID, tombstones superseded identiti
 mention/alias links, and records its sources/results/evidence/reason. Split requires every active
 mention to be assigned exactly once, creates new opaque IDs, and retains the source identity plus a
 lossless operation record. Alias removal is an inactive user-curated tombstone, not deletion.
+
+The extraction lifecycle is explicit: `unresolved` is retained as an evidence-bearing proposal and
+never creates a canonical node; `new_canonical` may mint a UUID only after type-specific validation;
+and `auto_link`/`manual_link` attach a mention to an existing canonical ID. For People, comparison
+normalization folds case (including Turkish dotted/dotless-I), titles, context prefixes, punctuation,
+and parenthetical variants while keeping the original mention and exact source span. One-token
+names, initials, and other fragments cannot mint extracted canonical People. A valid variant is an
+alias or mention of the same identity, not a second display-name node.
+
+Every extracted property is bound to its referenced resolved mention: its chunk must match and its
+exact span must be enclosed by that mention's span. Relations, events, and claims require resolved
+endpoint bindings before materialization. Therefore a nearby surname or co-occurring name cannot be
+assigned to another Person, and unresolved/ambiguous mention IDs cannot enter canonical relations.
 
 Claims move through `ExtractedClaim → SupportedClaim → VerifiedFact`. Support requires source
 evidence; verification requires an applicable deterministic or reviewed validator. Conflicting
@@ -110,6 +126,14 @@ replace extracted proposals for that generation, but it cannot erase higher-prec
 validated decisions. Quality takes priority over cost; selected provider/model and extraction
 versions are recorded.
 
+Before rebuilding one candidate generation, the canonical graph adapter removes that generation's
+rebuildable extracted mentions, properties, relations, and artifacts, then rematerializes only
+accepted identity decisions. Canonical identity nodes are never physically discarded by generation
+cleanup: extracted identities with no accepted mention decision are retired and remain auditable by
+their opaque ID, while user-curated and validated knowledge is preserved. Candidate matching
+considers active accepted identity evidence only, so retired, failed, or stale identities cannot
+influence a later generation.
+
 ## Immutable generation source manifest
 
 Every candidate generation has one immutable authority record at
@@ -137,25 +161,28 @@ metadata are not eligible for V2 trusted-source use; no query-time backfill or
 live relational fallback is permitted.
 ## Generation readiness and cutover
 
-A generation is corpus-complete only when source/relational, entity/mention, identity resolution,
-relation, event, temporal, claim/fact, canonical graph, BM25, dense/Qdrant, and GraphRAG stages are
-all ready for that exact generation. Mandatory failure, stale output, or cross-generation mixing
-blocks activation and exhaustive answers.
+A generation is retrieval-ready when source/relational, BM25, and dense/Qdrant are ready for that
+exact generation and agree with the immutable manifest. That gate enables
+`retrieval.grounded`; it does not make a canonical or GraphRAG claim. Canonical construction stages
+independently enable `canonical.exhaustive` and `canonical.graph`; GraphRAG independently enables
+`graphrag.grounded`. An unavailable family fails closed for its own request without blocking
+grounded retrieval or permitting a retrieval substitute for exhaustive answers.
 
-V2 migration performs schema/config migration, verifies Neo4j, fully reprocesses source material,
-builds all projections, checks completeness, runs acceptance evaluation, and only then atomically
-activates the V2 generation. The previous active generation remains available until successful
-activation. There is no long-running dual V1/V2 execution mode.
+V2 migration performs schema/config migration, fully reprocesses source material, validates the
+retrieval authority, runs acceptance evaluation, and then atomically activates the V2 retrieval
+generation. Neo4j readiness is required only by canonical capability families, not by normal V2
+retrieval cutover. The previous active generation remains available until successful activation.
+There is no long-running dual V1/V2 execution mode.
 
 The readiness records are `knowledge_generations` and `knowledge_stage_states`. Stage executors
 receive an immutable `CorpusSnapshot` and the opaque candidate generation ID. Their result must
 echo both the generation ID and source fingerprint and provide a non-empty output fingerprint.
 This prevents a stale external projection from being credited to a newer corpus snapshot.
 
-Phase 13 adds a second, deliberately separate runtime gate. The projection generation may become
-active after its eleven same-generation checkpoints pass, but live query routing does not move
-from V1 to V2 until schema/config/Neo4j/runtime preflight, a fresh corpus fingerprint, a
-before/after user-curation fingerprint, and the acceptance evaluation all pass. The durable
+Phase 13 adds a second, deliberately separate runtime gate. The retrieval generation may become
+active after its three retrieval projections pass, but live query routing does not move from V1 to
+V2 until schema/config/runtime preflight, a fresh corpus fingerprint, a before/after
+user-curation fingerprint, and the acceptance evaluation all pass. The durable
 query_runtime_activations row is the only live pointer; every accepted or rejected attempt is
 recorded in query_cutover_attempts. Rejection never mutates that pointer.
 

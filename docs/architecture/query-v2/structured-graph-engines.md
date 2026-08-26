@@ -1,7 +1,8 @@
 # Query V2 structured and knowledge graph engines
 
-Status: **Structured and canonical graph engine steps are dispatched by live V2 chat through the
-generation-bound physical-plan registry.**
+Status: **The steps are dispatched by V2 chat, but `canonical.exhaustive` and `canonical.graph`
+are not production accepted.** Surname LIST/COUNT, GROUP/RANK/COMPARE, traversal, ownership
+inventory, and exact-date canonical events must fail closed when unavailable.
 
 Both engines consume typed Phase 08 steps and emit Phase 09 `EngineResult` values. Neither engine
 authors final prose, persists assistant messages, or calls the V1 chat runtime.
@@ -21,14 +22,20 @@ no exact evidence, or unresolved candidates remain, the snapshot is marked
 `unresolved_candidate_ids`, and partial state; they never substitute top-k retrieval or an
 approximate total.
 
+Population membership requires an accepted (`new_canonical`, `auto_link`, or `manual_link`)
+generation-bound mention decision. Unresolved mentions and aliases are identity evidence, not
+analytic rows. Answer rendering presents ranked People by display name and supported count; opaque
+IDs, entity types, workspace IDs, and generation IDs remain internal trace fields.
+
 ### Governed canonical entity properties
 
 Canonical identity is stable; queryable knowledge about that identity is stored as a separate,
 generation-scoped `CortexEntityProperty` projection. Each resolved property has a closed vocabulary
 definition, typed value, authority, generation, and a `SUPPORTED_BY` link to exact evidence. The
-initial governed definition is `person.surname` (`string`, equality only). It is populated only by
-an explicit extraction-stage `entity_properties` assertion whose value is its exact source span;
-the runtime never derives it from `display_name`.
+initial governed definition is `person.surname` (`string`, equality only). It is populated at
+generation construction from an explicit extraction-stage `entity_properties` assertion or a
+conservative last-name projection of the exact Person mention span. Both paths retain an exact
+surname span; the runtime never derives it from `display_name`.
 
 When multiple distinct values are proposed for one entity/property in a generation, no resolved
 property is projected. Structured filtering therefore cannot fabricate a value from a conflict.
@@ -58,6 +65,17 @@ two governed surname-filtered populations from the same workspace and generation
 counts independently. Missing or conflicted/withheld property values are excluded rather than
 forming synthetic groups. These operators use `StructuredQueryEngine` only; retrieval top-k,
 mentions, aliases, citation counts, and AnswerEngine rendering have no authority over their values.
+
+### Governed person-to-property ranking
+
+`RelationAggregateNode` implements exhaustive requests such as “people with surname X, ordered by
+their property-record count.” It composes one canonical Person scan, a governed `person.surname`
+filter, and an exact `person --owns--> asset_property` lookup. The graph adapter reads only
+generation- and workspace-bound `CORTEX_CANONICAL_RELATION` rows, counts distinct target canonical
+property IDs per canonical person, preserves zero-count source people, and ranks by count then
+normalized display name and canonical ID. Relation evidence and source identity evidence remain on
+each row. The capability is unavailable for generations without the versioned ownership projection;
+it never falls back to retrieval, mention rows, or query-time arithmetic.
 
 ## Knowledge Graph Engine
 

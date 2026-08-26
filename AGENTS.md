@@ -1,9 +1,11 @@
 # Cortex AI Development Context
 
-Read this file before changing Cortex. The binding V1 product and architecture decisions
-are in `codex-prompts/MASTER_PROMPT.md` and `codex-prompts/docs/DECISIONS.md`; do not
-silently deviate from them. Use `.ai/project-map.yaml` and `docs/ai/index.md` to find the
-smallest relevant module before searching files.
+Read this file before changing Cortex. The binding product decisions are in
+`codex-prompts/MASTER_PROMPT.md` and `codex-prompts/docs/DECISIONS.md`; do not silently
+deviate from them. Production chat is V2-only under `backend/app/query/`; `backend/app/chat/`
+is historical/compatibility code unless a current call site proves otherwise. Use
+`.ai/project-map.yaml` and `docs/ai/index.md` to find the smallest relevant module before
+searching files.
 
 Before changing query, retrieval, aggregation, normalization, citation, or answer architecture,
 also read `docs/architecture/CORTEX_RULEBOOK.md`.

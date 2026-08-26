@@ -1,9 +1,12 @@
 # Deployment Boundary
 
-Cortex Compose runs frontend, backend, worker, Redis, Qdrant, and Neo4j with exact image
-tags. SQLite and runtime data use configurable host mounts. Cortex must not create a second
-Ollama container or duplicate KnowledgeOS models; Docker Desktop services use
-`OLLAMA_BASE_URL=http://host.docker.internal:11434`, while host processes use localhost.
+Cortex Compose owns infrastructure only: Redis, Qdrant, Neo4j, Ollama, and the one-shot
+`ollama-models` bootstrap, all with exact image references. Frontend, backend, and worker run on
+the host. Cortex Ollama publishes only `127.0.0.1:11434`, stores models in the named
+`cortex_ollama_models` volume, and is reached by both host backend and host worker through
+`CORTEX_OLLAMA_BASE_URL=http://127.0.0.1:11434`. It has no runtime dependency on KnowledgeOS.
+`ollama-models` waits for Ollama health, checks `CORTEX_OLLAMA_REQUIRED_MODELS`, and pulls only
+missing models; the persisted configured embedding model is currently `bge-m3:latest`.
 
 Query V2 pins Neo4j Community `2026.07.1` and the official Python driver `6.2.0`. Neo4j persists
 under `data/neo4j`, publishes Browser HTTP on 7474 and Bolt on 7687, and exposes an authenticated
@@ -25,18 +28,18 @@ with the mounted repository layout. The root workspace and `frontend` package ea
 `node_modules` volume so host-created pnpm symlinks never point to Windows-only paths inside the
 Linux container.
 
-Vite proxies browser requests beginning with `/api` to the API service. Host development defaults
-to `http://localhost:4000`; Compose sets `VITE_API_PROXY_TARGET=http://backend:8000` so browser
-requests served on port 3000 never incorrectly target the Vite port.
+Vite proxies browser requests beginning with `/api` to the host API. Host development defaults to
+`http://localhost:4000`; configure `VITE_API_PROXY_TARGET=http://127.0.0.1:4000` when needed so
+browser requests served on port 3000 never incorrectly target the Vite port.
 
 Runtime containers use `TZ=Europe/Istanbul` for local operational timestamps. Persistent API
 timestamps remain UTC and the frontend explicitly formats them for the Istanbul time zone.
 
-For no-build host development, Redis, Qdrant, and Neo4j are published on `localhost:6379`,
-`localhost:6333`, and `localhost:7687`. Set the host backend's Neo4j URI to
-`bolt://localhost:7687` and `VITE_API_PROXY_TARGET=http://host.docker.internal:4000`, recreate the
-frontend/Redis/Qdrant/Neo4j Compose services, then run backend and worker from `backend/.venv` with
-the same mounted `data` directory. The normal Compose default remains `http://backend:8000`.
+For host development, Compose publishes Redis, Qdrant, Neo4j, and Ollama on
+`localhost:6379`, `localhost:6333`, `localhost:7687`, and `127.0.0.1:11434`. Set the host
+backend and worker URIs to `redis://localhost:6379/0`, `http://localhost:6333`,
+`bolt://localhost:7687`, and `http://127.0.0.1:11434`; run frontend, backend, and worker from
+their host development environments with the same `data` directory.
 
 The Dockerfile has two build targets. `runtime` is the API image and installs only the `query`
 group. `worker` inherits it and installs `retrieval` plus `graphrag`; this is where GraphRAG's

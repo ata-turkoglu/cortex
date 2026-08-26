@@ -1,6 +1,6 @@
 # Architecture Rules
 
-Cortex is a local, single-user, workspace-based application. Binding V1 decisions remain
+Cortex is a local, single-user, workspace-based application. Binding product decisions remain
 in `codex-prompts/docs/DECISIONS.md`; this directory records their implementation-facing
 interpretation. A public interface, schema, module ownership, folder layout, or runtime
 workflow change must update the appropriate document here in the same change.
@@ -8,15 +8,16 @@ workflow change must update the appropriate document here in the same change.
 See `backend-foundation.md`, `deployment.md`, `retrieval-boundaries.md`,
 `graphrag-boundary.md`, and `evaluation.md` before implementing their respective areas.
 
-Query Architecture V2 is a binding **target** contract under [`query-v2/`](query-v2/README.md).
-It is intentionally separate from the active V1 chat runtime documented in
-[`query-answer-pipeline.md`](query-answer-pipeline.md). Phase 12 makes `/system-map` the manifest
-of implemented V2 subsystem boundaries and contracts, with Phase 13 production activation complete and full-generation
-acceptance and sharp runtime cutover.
+[`CANONICAL_CORE_V2.md`](CANONICAL_CORE_V2.md) is the proposed, implementation-ready minimal
+canonical authority/readiness design for the first exhaustive Person/property capability. It does
+not represent implemented or production-accepted canonical functionality.
 
-Phase 06 conversation-context persistence and schema-constrained semantic understanding are
-implemented under `backend/app/query/` but are not connected to the active V1 chat entrypoint.
-Accordingly, these boundaries appear in `/system-map` without claiming that V2 chat is active.
-Phase 07 adds the versioned typed Logical Query IR, semantic lowering, governed workspace vocabulary,
-and fail-closed DAG/type/coverage/evidence validation under the same inactive boundary. Physical
-engine selection remains a later phase, so this also does not change the current System Map.
+Query Architecture V2 under [`query-v2/`](query-v2/README.md) is the active production runtime.
+`POST /chat` enters `backend/app/query/production_chat.py`; it does not call the historical V1
+orchestration in `backend/app/chat/`. `/system-map` is the current V2 topology and must show the
+separate readiness of `retrieval.grounded`, `graphrag.grounded`, `canonical.exhaustive`, and
+`canonical.graph`.
+
+The V2 retrieval path is production-accepted. Canonical structured and graph capabilities remain
+blocked pending separate acceptance; Neo4j must not be described as fully proven durable canonical
+authority. See [`V1_CLEANUP_REVIEW.md`](V1_CLEANUP_REVIEW.md) for preserved legacy/compatibility code.

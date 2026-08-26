@@ -35,16 +35,42 @@ Codex must keep this file updated.
 
 ## Current phase
 
-- Phase: Query V2 production cutover complete
-- Status: The defined production scope is V2-only, generation-bound, provenance-safe, and validated.
-  `POST /chat` has no reachable V1 final-answer fallback; AnswerEngine is the sole final renderer.
-  Dense/sparse retrieval, structured analytics, canonical graph/event traversal, conversation
-  referents, and trusted GraphRAG Local/Global/DRIFT all converge through final-root reconciliation.
-- Next target: none within the defined Query V2 production scope.
+- Phase: V2 stabilization and documentation alignment
+- Status: `POST /chat` is V2-only and `retrieval.grounded` is production-accepted: immutable
+  generation manifests, generation-bound dense/BM25 retrieval, fusion, evidence validation,
+  reconciliation, AnswerEngine ownership, and persistence are covered by the uploaded-file
+  acceptance. `graphrag.grounded` is partial/readiness-dependent. `canonical.exhaustive` and
+  `canonical.graph` are **not production accepted**; canonical lifecycle is incomplete.
+- Next target: complete the adversarial and full-V2 acceptance suite for `canonical.exhaustive`.
+  Cortex now owns Ollama 0.32.6 and the `cortex_ollama_models` volume; its persisted
+  `bge-m3:latest` embedding health check succeeds at 1024 dimensions without KnowledgeOS.
+  The isolated `canonical-acceptance-20260826` fixture ingestion was retried successfully.
+  Candidate generation `a08ffb52-3699-4e50-8af1-2cd41e3cda0d` has ready source, BM25, dense,
+  and SQLite canonical stages, but canonical SQLite status is `PARTIAL` (7 mentions, 2 safe
+  properties, 2 assertions, 1 rejected assertion). It cannot be activated or used for the final
+  HTTP canonical gate; no live workspace was rebuilt or cut over.
+  The SQLite construction/read adapter is implemented (including `0023` surname projection and
+  `0024` manifest-chunk accounting), but it is not production accepted and has not been run against
+  an existing user generation.
 - Started: 2026-08-21
-- Last updated: 2026-08-23
+- Last updated: 2026-08-26
+
+## Stabilization correction
+
+Earlier Phase 13â€“15 entries recorded implementation milestones too broadly. The acceptance suite
+uses no-op canonical and GraphRAG construction stages, so it proves V2 retrieval/citation behavior,
+not canonical structured population, relation/event traversal, lifecycle, or live GraphRAG
+acceptance. Those capabilities must not be reported as production-ready until their own acceptance
+fixtures pass.
 
 ## Completed work
+
+- Completed V2 validation cleanup and readiness separation: retrieval activation/cutover now gates
+  only immutable source, BM25, and dense/Qdrant projections. `graphrag.grounded`,
+  `canonical.exhaustive`, and `canonical.graph` are independently represented as unavailable or
+  ready capability families. Unavailable canonical plans return a normal V2 `ReasoningPackage` and
+  AnswerEngine unsupported answer without retrieval fallback; they no longer produce a global
+  request failure or block `retrieval.grounded`.
 
 - Completed Query Architecture V2 Phase 13: a real uploaded text file now passes parsing,
   normalization, logical-document/chunk creation, immutable manifest construction, generation-owned
@@ -298,6 +324,7 @@ Codex must keep this file updated.
 
 ## Validation history
 
+| 2026-08-25 | V2 validation cleanup and canonical readiness separation | 44 focused runtime-input/planning/AnswerEngine/cutover/construction/GraphRAG tests; touched-file Ruff; focused System Map tests; alternate-output Vite build; context validation; `git diff --check` | Passed. Standard frontend build output remains externally locked at `frontend/dist/logo.png`; the same build succeeded to a temporary alternate output directory, which was removed. |
 | 2026-08-23 | Query V2 final production/cutover audit | 133 focused Query V2 tests; 12 live Neo4j tests with zero skips; 25 focused GraphRAG tests; 3 uploaded-file/production-evaluation tests; full 9-test frontend/System Map suite; Query V2 Ruff; frontend lint/build; context validation; staged and unstaged `git diff --check` | Passed (known local-Qdrant payload-index, Pydantic field-attribute, and Vite bundle-size warnings only) |
 | 2026-08-23 | GraphRAG trusted provenance bridge | 31 focused GraphRAG adapter/V2 bridge/plan-executor tests; touched-file Ruff; 9 frontend tests including System Map; context validation; staged and unstaged `git diff --check` | Passed (one existing Pydantic field-attribute warning) |
 | 2026-08-22 | Query Architecture V2 Phase 15 final integration audit | 57 focused V2 runtime/planning/bridge/reconciliation/answer/cutover/acceptance tests; full backend pytest (341 passed, 2 skipped); complete backend Ruff; 9 frontend tests; frontend lint/build; generated 26 AI-context adapters; context validation; `git diff --check` | Passed (local-Qdrant payload-index, Pydantic, LlamaIndex deprecation, and Vite bundle-size warnings only) |

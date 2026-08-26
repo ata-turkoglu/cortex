@@ -1,7 +1,9 @@
 # Cortex
 
-Cortex is a local, single-user, workspace-based knowledge platform. Its V1 architecture
-is specified by the versioned build pack in [`codex-prompts/`](codex-prompts/README.md).
+Cortex is a local, single-user, workspace-based knowledge platform. Production chat is V2-only:
+the generation-bound runtime under `backend/app/query/` owns planning, execution, evidence
+reconciliation, answer rendering, and persistence. The original V1 build pack remains historical
+product context in [`codex-prompts/`](codex-prompts/README.md), not the production query design.
 
 ## Development baseline
 
@@ -19,7 +21,8 @@ versions are permitted.
 Start with [`AGENTS.md`](AGENTS.md) for AI-assisted work and
 [`docs/ai/index.md`](docs/ai/index.md) for module routing. Runtime data belongs under
 `data/` and is intentionally not versioned. `codex-prompts/IMPLEMENTATION_STATUS.md`
-is the authoritative implementation tracker.
+is the authoritative implementation tracker. For the active query path, begin with
+[`docs/architecture/query-v2/query-runtime.md`](docs/architecture/query-v2/query-runtime.md).
 
 ## Validation commands
 

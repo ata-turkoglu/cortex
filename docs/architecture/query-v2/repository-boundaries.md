@@ -1,10 +1,10 @@
 # Query V2 repository boundaries
 
-Status: **Phase 02 repository contract; runtime remains V1-equivalent**.
+Status: **active V2 ownership contract.**
 
-The V2 packages establish ownership and AI navigation before behavior moves. They intentionally do
-not re-export V1 classes as V2 contracts: V1 `QueryPlan`, route selection, GraphRAG native answer,
-and property aggregation do not satisfy the V2 IR/result invariants.
+The V2 packages own production chat. Historical V1 `QueryPlan`, route selection, GraphRAG native
+answer, and property aggregation do not satisfy V2 IR/result invariants and are not production
+dependencies.
 
 ## Ownership tree
 
@@ -25,17 +25,17 @@ marker. Root → backend → parent → child navigation is recorded in `.ai/pro
 
 ## No-duplication mapping
 
-| Concern | Active V1 owner | V2 owner / migration rule |
+| Concern | Current V2 owner | Historical / compatibility note |
 | --- | --- | --- |
-| Query parsing, entity resolution, routes, answer orchestration | `app/chat/` | Move by later phases into `query/`; keep V1 imports stable until sharp cutover |
-| Property-only exhaustive aggregation | `app/aggregation/property.py` | Preserve safety rules; general structured execution belongs to `engines/structured/` |
-| Dense/BM25/fusion/reranking | `app/retrieval/` | Existing package remains the Retrieval Engine implementation; do not create `engines/retrieval/` |
-| Microsoft GraphRAG adapter and artifacts | `app/graphrag/` | Existing package remains the GraphRAG Engine adapter; do not create `engines/graphrag/` |
+| Production query runtime, planning, reconciliation, answer persistence | `app/query/` | `app/chat/` is retained only where historical evaluation/worker compatibility still references it |
+| Structured canonical execution | `app/engines/structured/` | `app/aggregation/property.py` is Historical / V1 and is not a V2 structured authority |
+| Dense/BM25/fusion/reranking | `app/retrieval/` | Existing package remains the V2 Retrieval Engine adapter; do not create `engines/retrieval/` |
+| Microsoft GraphRAG adapter and artifacts | `app/graphrag/` | Existing package remains the V2 GraphRAG adapter; do not create `engines/graphrag/` |
 | Durable jobs and checkpoints | `app/workflows/` | Reused by query/research/composition; workflow persistence is not copied |
-| Canonical knowledge | none | New implementation belongs to `knowledge/` and the Cortex graph adapter |
-| Canonical structured/graph execution | none | New implementation belongs to `engines/structured/` and `engines/graph/` |
-| Cross-engine reconciliation | partial in `app/chat/` | New implementation belongs to `query/orchestration/` Result & Evidence boundary |
-| Durable research/composition | none | New implementation belongs to `reasoning/` and reuses `app/workflows/` |
+| Canonical knowledge | `app/knowledge/` and graph adapter | Incomplete / blocked; do not describe Neo4j as proven durable canonical truth |
+| Canonical structured/graph execution | `app/engines/structured/` and `app/engines/graph/` | Not production accepted |
+| Cross-engine reconciliation | `app/query/orchestration/` | V1 evidence helpers are historical only |
+| Durable research/composition | `app/reasoning/` | Reuses `app/workflows/` |
 
 ## Dependency direction
 

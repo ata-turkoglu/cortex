@@ -143,22 +143,16 @@ This file is binding for V1.
 ## Docker
 
 - Docker Compose services:
-  - frontend
-  - backend
-  - worker
   - redis
   - qdrant
+  - neo4j
+  - ollama
+  - ollama-models (one-shot idempotent bootstrap)
 - SQLite and data directories are host-mounted.
-- Ollama may remain on the host.
-- The existing Ollama runtime is owned by the KnowledgeOS Compose stack at
-  `D:\Merter\KnowledgeOS` and is shared by both projects.
-- Cortex connects to it with `http://host.docker.internal:11434` from Docker
-  Desktop, or `http://localhost:11434` when running directly on the host.
-- Cortex backend and worker must receive the same `OLLAMA_BASE_URL`.
-- Do not define a second Ollama container, duplicate model files, or share the
-  `ollama-data` volume between separate Ollama containers.
-- If a future root Compose file combines both projects, use one Ollama service
-  and `OLLAMA_BASE_URL=http://ollama:11434`.
+- Frontend, backend, and worker run on the host. Backend and worker use the
+  same `CORTEX_OLLAMA_BASE_URL=http://127.0.0.1:11434`.
+- Cortex owns its Ollama service, idempotent model bootstrap, and named model
+  volume. It must not reference a KnowledgeOS Compose service or volume at runtime.
 
 ## Dependency and version policy
 
@@ -256,13 +250,15 @@ This file is binding for V1.
 
 ## Ollama
 
-- Cortex lists installed models but does not download or delete them.
+- Cortex lists installed models and its Compose bootstrap provisions only the
+  explicit required Cortex model list. The bootstrap never deletes models and
+  skips models already installed in the Cortex-owned volume.
 - Small local models may be offered as experimental/offline options only.
 - No Ollama chat model is a production default.
 - Discover installed models through `/api/tags`; do not assume that the
   build-pack example `qwen3-embedding:0.6b` is installed.
-- The current KnowledgeOS defaults are expected to be `qwen3:4b` for chat and
-  `bge-m3:latest` for embeddings, subject to discovery at runtime.
+- The persisted Cortex embedding model is authoritative. The current local
+  configuration uses `bge-m3:latest`, subject to runtime discovery.
 
 ## Windows
 

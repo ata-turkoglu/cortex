@@ -23,7 +23,7 @@
 | Graph Relationship Extraction | OpenAI   | gpt-5.6-luna                                                 |
 | Graph Community Summarization | OpenAI   | gpt-5.6-luna                                                 |
 | GraphRAG Query Synthesis      | OpenAI   | gpt-5.6-luna                                                 |
-| Embeddings                    | Ollama   | Installed shared KnowledgeOS model (currently bge-m3:latest) |
+| Embeddings                    | Ollama   | Cortex-owned provisioned model (currently bge-m3:latest) |
 | Reranker                      | Local    | BGE family, configurable                                     |
 
 ## Optional quality profile
@@ -34,7 +34,9 @@ Automatic escalation is disabled by default.
 
 ## Ollama
 
-Ollama is optional. Cortex may list installed models and show pull commands, but it does not download or delete models in V1.
+Ollama is optional. Cortex may list installed models and show pull commands. Its Compose bootstrap
+provisions only the explicit required Cortex model list, never deletes models, and skips models
+already present in the Cortex-owned volume.
 
 Small models such as `gemma3:1b` and `qwen3:1.7b` must be labeled experimental/offline and are not production defaults.
 
@@ -48,12 +50,12 @@ Generic default when installed:
 - Installation command shown by Cortex:
   `ollama pull qwen3-embedding:0.6b`
 
-Shared KnowledgeOS deployment override:
+Cortex-owned deployment:
 
-- Discover installed models from `http://host.docker.internal:11434/api/tags`.
-- Use `bge-m3:latest` for embeddings when it is installed in KnowledgeOS.
-- Do not download `qwen3-embedding:0.6b` automatically and do not create a
-  second Ollama container or model volume for Cortex.
+- Discover installed models from `http://127.0.0.1:11434/api/tags`.
+- Use the persisted configuration, currently `bge-m3:latest`, for embeddings.
+- Provision it into Cortex's own model volume when absent; do not use a
+  KnowledgeOS service or model volume.
 
 Optional:
 

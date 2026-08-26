@@ -1,5 +1,9 @@
 # System Map runtime manifest
 
+> Current V2 capability status: `retrieval.grounded` is ready; `graphrag.grounded` is partial and
+> readiness-dependent; `canonical.exhaustive` and `canonical.graph` are blocked/not production
+> accepted. The system map must not depict Neo4j canonical functionality as fully ready.
+
 `/system-map` is implemented in `frontend/src/flow/ASystemMap.tsx`; shared React Flow behavior
 remains behind `frontend/src/flow/AFlowCanvas.tsx`. The exported `SYSTEM_MAP_V2_MANIFEST` is the
 canonical UI manifest for Query V2 and Indexing V2. Its tests require every subsystem to name a
@@ -67,7 +71,9 @@ Reasoning & Composition receives a reconciled
 | GraphRAG | `backend/app/graphrag/` | GraphRAG scoped context |
 | Generation / Readiness | `backend/app/knowledge/generation.py`, `backend/app/workflows/knowledge.py` | knowledge and workflow scoped contexts |
 
-The canonical KG Build and GraphRAG stages are separate projections. BM25, Dense/Qdrant, and
+The canonical KG Build and GraphRAG stages are separate projections. KG rebuild first clears only
+generation-derived extracted artifacts and then rematerializes accepted identity decisions;
+unresolved or fragment mentions never become canonical population rows. BM25, Dense/Qdrant, and
 GraphRAG must independently report matching generation and source fingerprints before the
 Generation / Readiness gate can activate a candidate.
 
@@ -81,3 +87,10 @@ prove full-corpus completeness across every workspace.
 Review the manifest, its linked docs, and `ASystemMap.test.tsx` together whenever a subsystem
 boundary changes. The Live system tab reports current health; transient local debugging failures
 must not be encoded as architecture.
+
+## Local model infrastructure
+
+The Live system view also shows the host frontend/backend/worker relationship to Cortex-owned
+Ollama on `127.0.0.1:11434`, its one-shot `ollama-models` provisioner, and the persistent
+`cortex_ollama_models` volume. The provisioner waits for Ollama health and pulls only missing
+models; it is not an inference service. Cortex does not use KnowledgeOS Ollama or its volume.

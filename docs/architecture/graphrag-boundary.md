@@ -29,7 +29,8 @@ external ID, original GraphRAG attributes, and available logical-document proven
 Upstream Microsoft GraphRAG 2.6 has no native Neo4j storage provider. Cortex therefore preserves
 native Parquet/JSON as the Local/Global/DRIFT runtime source while synchronizing the extracted view
 to Neo4j through its adapter. `GraphRAGEngineOutput` is the non-final typed finding contract for the
-later Result & Evidence cutover; active V1 queries retain their existing behavior in this phase.
+later Result & Evidence cutover. Production V2 GraphRAG now uses the trusted bridge, but remains
+partial/readiness-dependent rather than production-accepted end to end.
 
 ## Upstream compatibility and limitations
 
