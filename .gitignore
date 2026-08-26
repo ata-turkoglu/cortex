@@ -66,9 +66,11 @@ frontend/src/api/generated/*.tmp
 
 # Local-only validation and unpublished test work
 /.tmp/
+/.validation-pytest/
 /backend/app/evaluation/
 /backend/evaluation/
 /backend/tests/
+/backend/.tmp-pytest-*/
 !/backend/app/evaluation/
 !/backend/app/evaluation/*.py
 /frontend/src/**/*.test.tsx
