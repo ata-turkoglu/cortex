@@ -56,6 +56,32 @@ retrieval top-k, evidence and citation lists, and AnswerEngine rendering cannot 
 that count. Invalid entity-type/property combinations fail during governed vocabulary validation,
 before a structured read; no retrieval fallback or arbitrary Neo4j property read is allowed.
 
+An explicit Turkish plural Person inventory such as `Etkin belgelerde geçen kişileri listele` is
+also exhaustive even when it omits `tüm`. Semantic completion supplies the unfiltered Person target,
+LIST operation, and corpus-required coverage only when the request has no filter, relation,
+grouping, ranking, or conflicting operation. It does not broaden descriptive requests or change a
+more specific Person query.
+
+The narrower active-document forms `Etkin belgelerde geçen kişileri listele` and `Etkin belgelerde
+geçen tüm kişileri listele` are governed deterministic semantics: they bypass the remote semantic
+planner while emitting the same versioned Person/LIST/corpus-required contract. This is not an
+LLM or retrieval fallback and cannot interpret named, filtered, ranked, counted, or relational
+queries; it prevents a transient planner-provider outage from rejecting an otherwise unambiguous
+bounded inventory.
+
+### Canonical Person presentation
+
+Answer rendering retains every distinct canonical Person row. It normalizes only obvious all-upper
+or all-lower archival display casing using Turkish-aware rules, then groups rows by the resulting
+visible name. For an inventory, a collision is displayed once with its number of distinct canonical
+identity candidates and an explicit statement that they were not merged. This grouping is
+presentation-only: it never changes stored identity, LIST/COUNT/RANK membership, or metrics. Where
+a row must remain individually visible (for example ranking), its label uses deterministic
+`kimlik adayı N/M` wording rather than implying that the name denotes N confirmed people. Answer
+metadata retains the opaque canonical ID, original preferred name, rendered label, and collision
+size for technical inspection. The chat frontend renders backend prose and has no separate
+structured-row list renderer.
+
 ### Governed GROUP/RANK/COMPARE
 
 The initial production analytic vocabulary is limited to `person.surname`. GROUP creates

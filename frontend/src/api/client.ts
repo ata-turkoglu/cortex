@@ -101,6 +101,38 @@ export type KnowledgeGeneration = {
     error: Record<string, unknown> | null;
   }[];
 };
+export type IdentityCurationItem = {
+  mention_id: string;
+  raw_mention: string;
+  document_id: string;
+  document_version_id: string;
+  chunk_id: string;
+  span_start: number;
+  span_end: number;
+  source_excerpt: string;
+  automatic_reason: string;
+  population_affecting: boolean;
+  curation_state: string | null;
+  target_canonical_entity_id: string | null;
+};
+export type IdentityCurationDecision = {
+  decision_id: string;
+  mention_id: string;
+  action: "LINK_TO_EXISTING" | "KEEP_UNRESOLVED";
+  canonical_entity_id: string | null;
+  actor: string;
+  reason: string;
+  previous_decision_id: string | null;
+  active: boolean;
+  created_at: string;
+};
+export type CanonicalPersonSuggestion = {
+  canonical_entity_id: string;
+  preferred_name: string;
+  mention_count: number;
+  document_count: number;
+  sample_mentions: string[];
+};
 const base = "/api/v1";
 function mutationMessage(path: string, method: string) {
   if (path === "/workspaces" && method === "POST") return "Çalışma alanı oluşturuldu.";
@@ -150,6 +182,18 @@ export const apiClient = {
   graph: (workspaceId: string) => request<GraphExplorer>(`/workspaces/${workspaceId}/graph`),
   knowledgeReadiness: (workspaceId: string) =>
     request<KnowledgeGeneration[]>(`/workspaces/${workspaceId}/knowledge/readiness`),
+  unresolvedIdentityCuration: (workspaceId: string, generationId?: string) =>
+    request<IdentityCurationItem[]>(`/workspaces/${workspaceId}/knowledge/identity-curation/unresolved${generationId ? `?generation_id=${encodeURIComponent(generationId)}` : ""}`),
+  searchIdentityCurationCandidates: (workspaceId: string, query: string) =>
+    request<CanonicalPersonSuggestion[]>(`/workspaces/${workspaceId}/knowledge/identity-curation/candidates?q=${encodeURIComponent(query)}`),
+  identityCurationCandidateDetail: (workspaceId: string, entityId: string) =>
+    request<CanonicalPersonSuggestion & { mentions: { raw_mention: string; document_id: string; chunk_id: string; decision_basis: string }[] }>(`/workspaces/${workspaceId}/knowledge/identity-curation/candidates/${entityId}`),
+  submitIdentityCuration: (workspaceId: string, mentionId: string, payload: { action: "LINK_TO_EXISTING" | "KEEP_UNRESOLVED"; canonical_entity_id?: string | null; reason: string; actor?: string }) =>
+    request<IdentityCurationDecision>(`/workspaces/${workspaceId}/knowledge/identity-curation/items/${mentionId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  identityCurationHistory: (workspaceId: string, mentionId: string) =>
+    request<IdentityCurationDecision[]>(`/workspaces/${workspaceId}/knowledge/identity-curation/items/${mentionId}/history`),
   listCanonicalEntities: (workspaceId: string) =>
     request<CanonicalEntity[]>(`/workspaces/${workspaceId}/knowledge/entities`),
   entityEvidence: (workspaceId: string, entityId: string) =>

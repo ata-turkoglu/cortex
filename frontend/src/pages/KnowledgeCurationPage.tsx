@@ -3,6 +3,9 @@ import {
   apiClient,
   type CanonicalEntity,
   type EntityEvidence,
+  type IdentityCurationDecision,
+  type IdentityCurationItem,
+  type CanonicalPersonSuggestion,
   type IdentityOperation,
   type KnowledgeGeneration,
 } from "../api/client";
@@ -37,6 +40,11 @@ export function KnowledgeCurationPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generations, setGenerations] = useState<KnowledgeGeneration[]>([]);
+  const [unresolvedItems, setUnresolvedItems] = useState<IdentityCurationItem[]>([]);
+  const [selectedCurationItem, setSelectedCurationItem] = useState<IdentityCurationItem | null>(null);
+  const [candidateId, setCandidateId] = useState("");
+  const [curationCandidates, setCurationCandidates] = useState<CanonicalPersonSuggestion[]>([]);
+  const [curationHistory, setCurationHistory] = useState<IdentityCurationDecision[]>([]);
 
   const selected = entities.find((entity) => entity.entity_id === selectedId) ?? null;
   const mergeOptions = useMemo(
@@ -49,14 +57,16 @@ export function KnowledgeCurationPage() {
   const refresh = useCallback(async () => {
     if (!workspaceId) return;
     try {
-      const [nextEntities, nextHistory, nextGenerations] = await Promise.all([
+      const [nextEntities, nextHistory, nextGenerations, nextUnresolved] = await Promise.all([
         apiClient.listCanonicalEntities(workspaceId),
         apiClient.identityHistory(workspaceId),
         apiClient.knowledgeReadiness(workspaceId),
+        apiClient.unresolvedIdentityCuration(workspaceId),
       ]);
       setEntities(nextEntities);
       setHistory(nextHistory);
       setGenerations(nextGenerations);
+      setUnresolvedItems(nextUnresolved);
       setSelectedId((current) =>
         nextEntities.some((entity) => entity.entity_id === current)
           ? current
@@ -67,6 +77,13 @@ export function KnowledgeCurationPage() {
       setError("Canonical bilgi servisine ulaşılamadı.");
     }
   }, [workspaceId]);
+  useEffect(() => {
+    if (!workspaceId || !selectedCurationItem) return;
+    void apiClient.identityCurationHistory(workspaceId, selectedCurationItem.mention_id)
+      .then(setCurationHistory).catch(() => setCurationHistory([]));
+    void apiClient.searchIdentityCurationCandidates(workspaceId, selectedCurationItem.raw_mention)
+      .then(setCurationCandidates).catch(() => setCurationCandidates([]));
+  }, [selectedCurationItem, workspaceId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
@@ -106,6 +123,33 @@ export function KnowledgeCurationPage() {
         işlemleri kaynak kayıtları silmez; evidence ve karar geçmişi korunur.
       </AInfoPanel>
       {error && <AInfoPanel title="İşlem uyarısı">{error}</AInfoPanel>}
+      <ACard title="Unresolved identity queue">
+        <ATable value={unresolvedItems} emptyMessage="No population-affecting unresolved identity." size="small">
+          <AColumn field="raw_mention" header="Mention" />
+          <AColumn field="automatic_reason" header="Automatic decision" />
+          <AColumn field="curation_state" header="Curation" />
+          <AColumn header="Review" body={(item: IdentityCurationItem) => (
+            <AButton label="Review" text onClick={() => setSelectedCurationItem(item)} />
+          )} />
+        </ATable>
+        {selectedCurationItem && (
+          <div className="form-stack mt-4">
+            <strong>{selectedCurationItem.raw_mention}</strong>
+            <p>{selectedCurationItem.source_excerpt}</p>
+            <ATable value={curationCandidates} emptyMessage="No matching canonical Person." size="small">
+              <AColumn field="preferred_name" header="Candidate" />
+              <AColumn header="Evidence" body={(item: CanonicalPersonSuggestion) => `${item.mention_count} mentions / ${item.document_count} documents`} />
+              <AColumn header="Samples" body={(item: CanonicalPersonSuggestion) => item.sample_mentions.join(", ") || "—"} />
+              <AColumn header="Select" body={(item: CanonicalPersonSuggestion) => (
+                <AButton label={candidateId === item.canonical_entity_id ? "Selected" : "Select"} text onClick={() => setCandidateId(item.canonical_entity_id)} />
+              )} />
+            </ATable>
+            <AButton label="Link to selected Person" disabled={busy || !candidateId || !reason.trim()} onClick={() => void mutate(() => apiClient.submitIdentityCuration(workspaceId, selectedCurationItem.mention_id, { action: "LINK_TO_EXISTING", canonical_entity_id: candidateId, reason }))} />
+            <AButton label="Keep unresolved" severity="secondary" disabled={busy || !reason.trim()} onClick={() => void mutate(() => apiClient.submitIdentityCuration(workspaceId, selectedCurationItem.mention_id, { action: "KEEP_UNRESOLVED", reason }))} />
+            <div>History: {curationHistory.map((item) => item.action).join(" → ") || "—"}</div>
+          </div>
+        )}
+      </ACard>
       <ACard title="Knowledge generation readiness">
         <ATable value={generations} emptyMessage="Henüz knowledge generation yok." size="small">
           <AColumn field="generation_id" header="Generation" />

@@ -100,19 +100,26 @@ class MicrosoftGraphRAGRunner:
             value for value in (backend_root, os.environ.get("PYTHONPATH")) if value
         )
         environment = {**os.environ, "GRAPHRAG_API_KEY": api_key, "PYTHONPATH": python_path}
-        completed = subprocess.run(
-            [sys.executable, "-m", "app.graphrag.cli", *arguments],
-            cwd=graph_root,
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            # GraphRAG and its dependencies can emit Windows-console encoded diagnostics.
-            # Never let an undecodable diagnostic crash subprocess's reader thread and hide the
-            # actual upstream failure behind a secondary NoneType.strip AttributeError.
-            errors="replace",
-            env=environment,
-        )
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "app.graphrag.cli", *arguments],
+                cwd=graph_root,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                # GraphRAG and its dependencies can emit Windows-console encoded diagnostics.
+                # Never let an undecodable diagnostic crash subprocess's reader thread and hide the
+                # actual upstream failure behind a secondary NoneType.strip AttributeError.
+                errors="replace",
+                env=environment,
+                timeout=settings.graphrag_command_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GraphRAGExecutionError(
+                "GraphRAG command exceeded its configured "
+                f"{settings.graphrag_command_timeout_seconds}s deadline"
+            ) from exc
         if completed.returncode:
             detail = (completed.stderr or "").strip() or (completed.stdout or "").strip()
             # Rich-formatted tracebacks put the actionable exception at the end. Keep a bounded

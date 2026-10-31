@@ -117,6 +117,11 @@ mirrors all eleven workflow/generation checkpoints, and releases its index lock 
 path. Activation is atomic only after source, typed knowledge, canonical graph, BM25, Qdrant, and
 GraphRAG report matching readiness.
 
+Provider-backed canonical extraction also applies an outer coroutine deadline around each request.
+This complements the provider HTTP deadline: a transport that fails to settle must surface as a
+stage failure for the durable retry lifecycle, rather than leaving a running checkpoint without
+executor progress. Retry reuses already persisted per-chunk extraction artifacts.
+
 Phase 11 adds `research_runs` and `composition_runs` as independent durable state machines. A
 research run checkpoints goal decomposition, multiple Query IR/physical-plan slots, reconciled
 evidence packages, cross-source claims, and validation. A composition run checkpoints its outline,

@@ -1,5 +1,6 @@
 """Provider-neutral structured extraction envelope with exact-source validation."""
 
+import re
 from dataclasses import dataclass, replace
 
 from .pipeline import CorpusSnapshot
@@ -111,6 +112,81 @@ class KnowledgeExtractionBundle:
     events: tuple[ExtractedEvent, ...] = ()
     temporals: tuple[ExtractedTemporal, ...] = ()
     claims: tuple[ExtractedClaim, ...] = ()
+
+
+_DASH_SEPARATED_PEOPLE = re.compile(
+    r"^(?P<left>[^\W\d_]+(?:[ .'][^\W\d_]+){1,4})\s+[-–—]\s+"
+    r"(?P<right>[^\W\d_]+(?:[ .'][^\W\d_]+){1,4})$",
+    flags=re.UNICODE,
+)
+_PERSON_LIST_SEPARATOR = re.compile(r"\s+[-–—]\s+", flags=re.UNICODE)
+_REPRESENTATIVE_PEOPLE = re.compile(
+    r"^(?P<principal>[^\W\d_]+(?:[ .'][^\W\d_]+){1,4})\s+"
+    r"U\.?\s*Vekili\s+(?P<representative>Av\.\s+(?:[^\W\d_]+\.\s+)?"
+    r"[^\W\d_]+(?:\s+[^\W\d_]+){1,3})$",
+    flags=re.UNICODE,
+)
+
+
+def split_composite_person_mentions(bundle: KnowledgeExtractionBundle) -> KnowledgeExtractionBundle:
+    """Split audited, explicit Person-only extraction boundary errors.
+
+    The correction operates only on an entire emitted Person span with no dependent
+    assertions, so it cannot silently retarget a relation, claim, property, or event.
+    Each replacement retains an exact, contiguous source span; it never links
+    identities or treats the principal and representative as the same person.
+    """
+    referenced = {
+        *(item.mention_id for item in bundle.entity_properties),
+        *(item.source_mention_id for item in bundle.relations),
+        *(item.target_mention_id for item in bundle.relations),
+        *(mention_id for item in bundle.events for mention_id in item.participant_mention_ids),
+        *(item.subject_mention_id for item in bundle.claims),
+    }
+    mentions: list[ExtractedMention] = []
+    for mention in bundle.mentions:
+        if mention.entity_type != "person" or mention.local_id in referenced:
+            mentions.append(mention)
+            continue
+        values = _dash_separated_person_values(mention.span.source_text)
+        if values is None:
+            representative = _REPRESENTATIVE_PEOPLE.fullmatch(mention.span.source_text)
+            values = tuple(representative.groupdict().values()) if representative else None
+        if values is None:
+            mentions.append(mention)
+            continue
+        cursor = 0
+        for index, value in enumerate(values, start=1):
+            offset = mention.span.source_text.index(value, cursor)
+            cursor = offset + len(value)
+            mentions.append(
+                ExtractedMention(
+                    f"{mention.local_id}__split_{index}",
+                    "person",
+                    ExtractedSpan(
+                        mention.span.chunk_id,
+                        mention.span.start_offset + offset,
+                        mention.span.start_offset + offset + len(value),
+                        value,
+                        mention.span.confidence,
+                    ),
+                )
+            )
+    return replace(bundle, mentions=tuple(mentions))
+
+
+def _dash_separated_person_values(value: str) -> tuple[str, ...] | None:
+    """Return only a bounded list of name-like segments separated by literal dashes."""
+    parts = tuple(item.strip() for item in _PERSON_LIST_SEPARATOR.split(value))
+    if len(parts) < 2 or len(parts) > 8:
+        return None
+    if any(
+        len(re.findall(r"[^\W\d_]+", item, flags=re.UNICODE)) < 2
+        or any(character.isdigit() or character in "'’" for character in item)
+        for item in parts
+    ):
+        return None
+    return parts
 
 
 def align_unique_exact_spans(

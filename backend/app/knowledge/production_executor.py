@@ -38,6 +38,7 @@ from .extraction import (
     ExtractionMetadata,
     KnowledgeExtractionBundle,
     retain_exact_assertions,
+    split_composite_person_mentions,
     validate_extraction,
 )
 from .extraction_json import decode_extraction_json
@@ -222,7 +223,9 @@ def _bundle_from_payload(payload: dict[str, object]) -> KnowledgeExtractionBundl
         key: payload.get(key, [])
         for key in ("mentions", "entity_properties", "relations", "events", "temporals", "claims")
     }
-    return decode_extraction_json(json.dumps(provider_payload, ensure_ascii=False), metadata)
+    return split_composite_person_mentions(
+        decode_extraction_json(json.dumps(provider_payload, ensure_ascii=False), metadata)
+    )
 
 
 class ProductionKnowledgeExecutor:
@@ -248,6 +251,8 @@ class ProductionKnowledgeExecutor:
             self.settings.graphrag_extraction_model,
             OllamaProvider() if self.settings.graphrag_extraction_provider == "ollama" else None,
             provider_name=self.settings.graphrag_extraction_provider,
+            request_timeout_seconds=self.settings.knowledge_extraction_request_timeout_seconds,
+            concurrency=self.settings.knowledge_extraction_concurrency,
         )
         root = (
             self.settings.data_path / "workspaces" / workspace_id / "knowledge-candidates"
@@ -330,27 +335,42 @@ class ProductionKnowledgeExecutor:
         else:
             chunk_root = self._generation_root(generation_id) / "extraction-chunks"
             chunk_root.mkdir(parents=True, exist_ok=True)
-            collected = []
+            collected_by_chunk: dict[str, KnowledgeExtractionBundle] = {}
+            missing_chunks = []
             rejected_assertion_count = 0
             for chunk in snapshot.chunks:
                 chunk_artifact = chunk_root / f"{chunk.chunk_id}.json"
                 if chunk_artifact.is_file():
-                    bundle = _bundle_from_payload(
+                    collected_by_chunk[chunk.chunk_id] = _bundle_from_payload(
                         json.loads(chunk_artifact.read_text(encoding="utf-8"))
                     )
                 else:
+                    missing_chunks.append(chunk)
+            if missing_chunks:
+                # Each successful bounded provider batch is checkpointed before
+                # the next starts.  A later transient failure therefore resumes
+                # from validated chunk artifacts rather than recharging or
+                # reprocessing the entire candidate corpus.
+                batch_size = getattr(self.extractor, "concurrency", len(missing_chunks))
+                for offset in range(0, len(missing_chunks), batch_size):
+                    batch = missing_chunks[offset : offset + batch_size]
                     result = self.extractor.extract(
-                        CorpusSnapshot(snapshot.workspace_id, snapshot.fingerprint, (chunk,)),
+                        CorpusSnapshot(
+                            snapshot.workspace_id, snapshot.fingerprint, tuple(batch)
+                        ),
                         generation_id,
                     )
-                    bundle = result.bundles[0]
+                    if len(result.bundles) != len(batch):
+                        raise RuntimeError("knowledge extractor returned an incomplete chunk batch")
                     rejected_assertion_count += result.rejected_assertion_count
-                    chunk_artifact.write_text(
-                        json.dumps(_bundle_payload(bundle), ensure_ascii=False, sort_keys=True),
-                        encoding="utf-8",
-                    )
-                collected.append(bundle)
-            bundles = tuple(collected)
+                    for chunk, bundle in zip(batch, result.bundles, strict=True):
+                        chunk_artifact = chunk_root / f"{chunk.chunk_id}.json"
+                        chunk_artifact.write_text(
+                            json.dumps(_bundle_payload(bundle), ensure_ascii=False, sort_keys=True),
+                            encoding="utf-8",
+                        )
+                        collected_by_chunk[chunk.chunk_id] = bundle
+            bundles = tuple(collected_by_chunk[chunk.chunk_id] for chunk in snapshot.chunks)
             artifact.write_text(
                 json.dumps(
                     {"bundles": [_bundle_payload(item) for item in bundles]},
@@ -518,12 +538,29 @@ class ProductionKnowledgeExecutor:
                             or not _has_direct_ownership_support(relation.span.source_text)
                         ):
                             rejected_assertion_count += 1
+                            if person is not None:
+                                store.persist_rejected_ownership_blocker(
+                                    generation_id=generation_id,
+                                    person_mention=person,
+                                    span_start=relation.span.start_offset,
+                                    span_end=relation.span.end_offset,
+                                    source_text=relation.span.source_text,
+                                    reason="ownership assertion lacks direct local support",
+                                )
                             continue
                         property_record = store.upsert_property(
                             fields_by_property.get(relation.target_mention_id, {})
                         )
                         if property_record is None:
                             rejected_assertion_count += 1
+                            store.persist_rejected_ownership_blocker(
+                                generation_id=generation_id,
+                                person_mention=person,
+                                span_start=relation.span.start_offset,
+                                span_end=relation.span.end_offset,
+                                source_text=relation.span.source_text,
+                                reason="ownership assertion lacks a safely identified property",
+                            )
                             continue
                         store.persist_ownership_assertion(
                             generation_id=generation_id,
@@ -547,6 +584,13 @@ class ProductionKnowledgeExecutor:
             generation = session.get(KnowledgeGeneration, generation_id)
             if generation is None:
                 raise ValueError("canonical generation disappeared")
+            remapped_people = CanonicalCoreStore(
+                session, snapshot.workspace_id
+            ).consolidate_exact_person_identities(generation_id)
+            for row in mapping:
+                if row["mention_id"] in remapped_people:
+                    row["entity_id"] = remapped_people[row["mention_id"]]
+                    row["decision"] = "auto_link"
             CanonicalCoreStore(session, snapshot.workspace_id).record_status(
                 generation_id=generation_id,
                 manifest_hash=generation.source_manifest_hash,

@@ -46,12 +46,18 @@ declared weaker capability and retain partial-result semantics. Exhaustive work 
 grounded retrieval, use stale readiness, cross workspaces, or mix generations. Missing readiness,
 active generation, or required projections makes the plan unsupported.
 
-For the production governed LIST/COUNT subset, the plan fixes workspace and knowledge generation,
-uses the generation-bound canonical population, and sends only final logical IR roots to
+For the production governed LIST/COUNT subset, including the explicit active-corpus Person-list
+request, the plan fixes workspace and knowledge generation, uses the generation-bound canonical
+population, and sends only final logical IR roots to
 reconciliation. `CountNode` is authoritative only over that canonical population; retrieval top-k
 and evidence cardinality are never exhaustive COUNT substitutes. Relation traversal, conversation
 referents, exact temporal/event semantics, `GROUP`, `RANK`, `COMPARE`, and the GraphRAG trusted
 exact-provenance bridge remain unavailable rather than being silently lowered.
+
+When the semantic planner supplies the intentionally generic `entity` target together with a
+complete governed `Person` typed-filter boundary, the target is explanatory: lowering derives the
+canonical population from the typed filter. This narrow rule does not infer `Person` for arbitrary
+generic entity targets.
 
 ## Activation boundary
 

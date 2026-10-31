@@ -50,6 +50,17 @@ def lower_semantic_understanding(
     coverage = _coverage(understanding.coverage)
     evidence = EvidenceRequirement()
     if understanding.state == "unresolved":
+        if _is_unstructured_grounded_retrieval(understanding, coverage):
+            graph = _lower_literal_grounded_retrieval(understanding.operators)
+            return LogicalQueryIR(
+                workspace_id=workspace_id,
+                state="resolved",
+                nodes=graph.nodes,
+                root_ids=graph.root_ids,
+                output=graph.output,
+                coverage=coverage,
+                evidence=evidence,
+            )
         return LogicalQueryIR(
             workspace_id=workspace_id,
             state="unresolved",
@@ -140,6 +151,40 @@ def lower_semantic_understanding(
     )
 
 
+def _is_unstructured_grounded_retrieval(
+    understanding: SemanticUnderstanding, coverage: CoverageContract
+) -> bool:
+    """Allow grounded discovery without turning an unresolved name into an ID.
+
+    Entity resolution remains authoritative for canonical operations.  This narrow
+    shape has no canonical population, predicate, graph edge, or semantic operation
+    to execute. The original user wording is the retrieval term and the resulting
+    evidence stays grounded rather than exhaustive.
+    """
+    return (
+        coverage.mode == "grounded"
+        and not understanding.relations
+        and not understanding.temporal_constraints
+        and not understanding.typed_filters
+        and understanding.structured_operation is None
+        and understanding.group_by is None
+        and understanding.rank_direction is None
+        and understanding.relation_aggregate is None
+    )
+
+
+def _lower_literal_grounded_retrieval(operators: tuple[str, ...]) -> _GraphResult:
+    """Lower literal-name retrieval without a ResolveNode or canonical scan."""
+    nodes: list[IRNode] = [RetrieveEvidenceNode(node_id="evidence_1", inputs=())]
+    roots = ["evidence_1"]
+    if "describe" in operators or "summarize" in operators:
+        nodes.append(SummarizeNode(node_id="summarize_1", inputs=(roots[0],)))
+        roots = ["summarize_1"]
+    return _GraphResult(
+        tuple(nodes), tuple(roots), _output_projection(nodes[-1].output_type)
+    )
+
+
 def _lower_graph(
     entities,
     targets,
@@ -192,6 +237,14 @@ def _lower_graph(
         () if relation_aggregate or generic_document_retrieval else targets, start=1
     ):
         if target.reference_id and target.reference_id in reference_nodes:
+            continue
+        # ``entity`` is the schema's intentionally generic semantic target.
+        # For a governed population filter it is explanatory rather than a
+        # second, untyped population: the typed filter below supplies the
+        # canonical resource and must create the scan.  This is the shape the
+        # semantic planner emits for "people with surname …" LIST/COUNT
+        # requests.  Do not generalize arbitrary entity targets to Person.
+        if target.target_type == "entity" and _governed_population_filter(typed_filters):
             continue
         if target.target_type == "event":
             node = EventSetNode(node_id=f"event_set_{ordinal}")
@@ -349,7 +402,16 @@ def _lower_graph(
         elif len(roots) != 1:
             raise ValueError("structured analytics require one canonical population")
         if structured_operation == "count":
-            node = CountNode(node_id="count_1", inputs=(roots[0],), output_type="scalar")
+            # A governed population count is a count of canonical identities,
+            # never of presentation rows.  The semantic schema permits only a
+            # typed Person filter for this lowering path, so the identity field
+            # is both stable and vocabulary-declared.
+            node = CountNode(
+                node_id="count_1",
+                inputs=(roots[0],),
+                output_type="scalar",
+                distinct_fields=({"resource": "person", "field": "entity_id"},),
+            )
             nodes.append(node)
             roots = [node.node_id]
         elif structured_operation in {"group", "rank"}:
@@ -378,7 +440,10 @@ def _lower_graph(
         operator
         for operator, is_typed in (
             ("filter", bool(typed_filters)),
-            ("aggregate", bool(relation_aggregate or group_by)),
+            # ``count`` is itself the complete typed aggregate contract.  A
+            # provider's generic aggregate surface hint therefore needs no
+            # separate group or relation aggregate argument.
+            ("aggregate", bool(relation_aggregate or group_by or structured_operation == "count")),
             ("order", bool(rank_direction or relation_aggregate)),
         )
         if operator in operator_set and not is_typed
@@ -421,7 +486,7 @@ def _lower_graph(
     # than inventing a summary capability or weakening the coverage gate.
     wants_summary = (
         "summarize" in operator_set or "describe" in operator_set
-    ) and not relation_aggregate
+    ) and not relation_aggregate and structured_operation is None
     if wants_summary:
         if len(roots) != 1:
             raise ValueError("summarize requires one converged logical input")
@@ -513,6 +578,7 @@ def _entity_resource(entity_type: str) -> str:
 
 def _target_resource(target_type: str):
     return {
+        "person": ("person", "entity_set"),
         "relation": ("entity", "entity_set"),
         "event": ("event", "event_set"),
         "document": ("document", "document_set"),
@@ -520,6 +586,11 @@ def _target_resource(target_type: str):
         "claim": ("claim", "record_set"),
         "fact": ("fact", "record_set"),
     }.get(target_type, (None, None))
+
+
+def _governed_population_filter(typed_filters: tuple[SemanticTypedFilter, ...]) -> bool:
+    """Return whether filters provide the complete canonical Person boundary."""
+    return bool(typed_filters) and all(item.target_type == "person" for item in typed_filters)
 
 
 def _coverage(value: str) -> CoverageContract:

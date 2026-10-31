@@ -25,6 +25,9 @@ const layers = [
   ["metadata", "Metadata extraction"],
   ["answer", "Answer generation"],
   ["router", "Query router"],
+  ["semantic_planner_simple", "Semantic Planner / Simple"],
+  ["semantic_planner_standard", "Semantic Planner / Standard"],
+  ["semantic_planner_complex", "Semantic Planner / Complex"],
   ["summary", "Conversation summary"],
   ["query_expansion", "Query expansion"],
   ["graphrag_extraction", "Entity and relationship extraction"],
@@ -37,6 +40,9 @@ const layers = [
 ] as const;
 
 const layerDescriptions: Record<string, string> = {
+  semantic_planner_simple: "Interprets short, simple requests with the strict semantic JSON Schema.",
+  semantic_planner_standard: "Interprets analytical and structured requests with the strict semantic JSON Schema.",
+  semantic_planner_complex: "Interprets ambiguous or long relational requests with the strict semantic JSON Schema.",
   metadata: "Belgeden başlık, tür ve etiket gibi yapılandırılmış bilgileri çıkarır.",
   answer: "Toplanan kanıtları kullanıcıya verilecek son yanıta dönüştürür.",
   router: "Soruyu uygun arama ve cevaplama yoluna yönlendirir.",
@@ -161,7 +167,7 @@ export function OperationalSettingsPage() {
     setApiProvider(provider);
     const next = { ...values };
     for (const [layer] of layers) {
-      if (layer.startsWith("graphrag_")) continue;
+      if (layer.startsWith("graphrag_") || layer.startsWith("semantic_planner_")) continue;
       if (next[`${layer}_provider`] === "ollama") continue;
       next[`${layer}_provider`] = provider;
       next[`${layer}_model`] = modelsFor(provider, layer)[0]?.model ?? "";
@@ -170,7 +176,8 @@ export function OperationalSettingsPage() {
   };
   const assignment = (layer: string, label: string) => {
     const graphRagLayer = layer.startsWith("graphrag_");
-    const provider = (values[`${layer}_provider`] ?? (graphRagLayer ? "openai" : apiProvider)) as ProviderName;
+    const plannerLayer = layer.startsWith("semantic_planner_");
+    const provider = (values[`${layer}_provider`] ?? (graphRagLayer || plannerLayer ? "openai" : apiProvider)) as ProviderName;
     const isLocal = provider === "ollama";
     const compatibleModels = modelsFor(provider, layer);
     const modelOptions = compatibleModels.map((model) => ({
@@ -184,7 +191,7 @@ export function OperationalSettingsPage() {
           <AInfo description={layerDescriptions[layer]} position="right" />
         </div>
         <div className="settings-assignment__fields">
-          <div className="settings-assignment__source" role="radiogroup" aria-label={`${label} model source`}>
+          {!plannerLayer && <div className="settings-assignment__source" role="radiogroup" aria-label={`${label} model source`}>
             <ALabel className="a-label--inline">
               <ARadio checked={isLocal} name={`${layer}-source`} value="local" onChange={() => selectAssignmentProvider(layer, "ollama")} />
               Local
@@ -193,7 +200,8 @@ export function OperationalSettingsPage() {
               <ARadio checked={!isLocal} name={`${layer}-source`} value="api" onChange={() => selectAssignmentProvider(layer, graphRagLayer ? "openai" : apiProvider)} />
               API
             </ALabel>
-          </div>
+          </div>}
+          {plannerLayer && <small>OpenAI Responses strict structured output</small>}
           <ALabel aria-label={`${label} model`}>
             <ASelect
               value={String(values[`${layer}_model`] ?? "")}
@@ -204,7 +212,7 @@ export function OperationalSettingsPage() {
             />
           </ALabel>
         </div>
-        {isLocal && modelOptions.length === 0 && <small>Ollama could not provide a compatible installed model.</small>}
+        {isLocal && !plannerLayer && modelOptions.length === 0 && <small>Ollama could not provide a compatible installed model.</small>}
       </section>
     );
   };

@@ -455,6 +455,23 @@ def recover_stale(session: Session) -> int:
         select(WorkflowRun).where(WorkflowRun.state.in_(("running", "cancelling")))
     ).all()
     for run in stale:
+        if run.state == "cancelling":
+            # A worker may be restarted while an external provider call is still
+            # in flight.  Preserve the user's cancellation rather than reviving
+            # it as retryable work, and release its durable lock immediately.
+            run.state, run.finished_at, run.updated_at = "cancelled", now(), now()
+            event(session, run, "cancelled", reason="worker_restart")
+            lock_type = LOCK_TYPES.get(run.job_type)
+            if lock_type:
+                lock = session.scalar(
+                    select(WorkspaceLock).where(
+                        WorkspaceLock.workflow_run_id == run.id,
+                        WorkspaceLock.lock_type == lock_type,
+                    )
+                )
+                if lock:
+                    session.delete(lock)
+            continue
         run.state, run.recovery_state, run.updated_at = "interrupted", "restart_detected", now()
         event(session, run, "interrupted", reason="worker_restart")
     return len(stale)

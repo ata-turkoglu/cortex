@@ -94,6 +94,7 @@ class QueryDebug(BaseModel):
     usage: dict[str, object]
     plan: dict[str, object] | None = None
     retrieval_queries: list[str] = Field(default_factory=list)
+    completeness: dict[str, object] | None = None
 
 
 def message_read(message: Message) -> MessageRead:
@@ -275,4 +276,5 @@ def debug(  # noqa: B008
         usage=usage,
         plan=metadata.get("query_plan"),
         retrieval_queries=metadata.get("retrieval_queries", []),
+        completeness=json.loads(run.completeness_json) if run.completeness_json else None,
     )

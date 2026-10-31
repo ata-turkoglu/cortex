@@ -5,6 +5,8 @@ import json
 from dataclasses import dataclass
 from uuid import uuid4
 
+import httpx
+
 from ..providers.base import LLMProvider
 from ..providers.openai import OpenAIProvider
 from .extraction import (
@@ -12,6 +14,7 @@ from .extraction import (
     KnowledgeExtractionBundle,
     align_unique_exact_spans,
     retain_exact_assertions,
+    split_composite_person_mentions,
     validate_extraction,
 )
 from .extraction_json import decode_extraction_json
@@ -25,7 +28,10 @@ start_offset, end_offset, source_text, and confidence. Never infer facts or span
 local to this response; relation/event/claim references must use those IDs. Keep temporal
 original_text exactly equal to its source_text. source_text must be copied as one literal,
 contiguous substring of content. Offsets are zero-based Python Unicode string indices. For every
-person mention, emit the governed surname property only when the surname itself is an exact
+person mention, emit one independent person per mention. Split explicit dash-separated people
+and a principal/representative phrase such as `X U.Vekili Av. Y` into separate Person mentions.
+Do not emit a relation unless both endpoint mentions cover its stated endpoints. Emit the governed
+surname property only when the surname itself is an exact
 literal span and the person name is unambiguous. For an asset_property mention, emit only
 label-bound province, district, neighborhood, pafta, ada, parsel, and independent_section values
 whose literal spans are contained in that property mention; never invent or shift a cadastral value.
@@ -136,12 +142,24 @@ class OpenAIKnowledgeExtractor:
         provider: LLMProvider | None = None,
         *,
         provider_name: str = "openai",
+        request_timeout_seconds: float = 180.0,
+        concurrency: int = 2,
+        retry_delay_seconds: float = 1.0,
     ) -> None:
         if not model.strip():
             raise ValueError("knowledge extraction model is required")
+        if request_timeout_seconds <= 0:
+            raise ValueError("knowledge extraction request timeout must be positive")
+        if not 1 <= concurrency <= 4:
+            raise ValueError("knowledge extraction concurrency must be between 1 and 4")
+        if retry_delay_seconds < 0:
+            raise ValueError("knowledge extraction retry delay must not be negative")
         self.model = model
         self.provider = provider or OpenAIProvider()
         self.provider_name = provider_name
+        self.request_timeout_seconds = request_timeout_seconds
+        self.concurrency = concurrency
+        self.retry_delay_seconds = retry_delay_seconds
 
     async def _extract_chunk(
         self, snapshot: CorpusSnapshot, generation_id: str, chunk_id: str, content: str
@@ -158,8 +176,8 @@ class OpenAIKnowledgeExtractor:
                 if validation_error
                 else ""
             )
-            response = (
-                await structured(
+            request = (
+                structured(
                     self.model,
                     instructions,
                     input_text,
@@ -167,8 +185,43 @@ class OpenAIKnowledgeExtractor:
                     json_schema=_EXTRACTION_SCHEMA,
                 )
                 if structured
-                else await self.provider.generate(self.model, instructions, input_text)
+                else self.provider.generate(self.model, instructions, input_text)
             )
+            # The provider client has its own HTTP deadline, but an outer
+            # coroutine deadline prevents a misbehaving transport/provider
+            # implementation from leaving the durable workflow running with
+            # no executor progress.
+            try:
+                response = await asyncio.wait_for(
+                    request, timeout=self.request_timeout_seconds
+                )
+            except TimeoutError as exc:
+                if attempt == 2:
+                    raise RuntimeError(
+                        "knowledge extraction provider timed out "
+                        f"after {self.request_timeout_seconds:g}s for chunk {chunk_id}"
+                    ) from exc
+                await asyncio.sleep(self.retry_delay_seconds * (attempt + 1))
+                continue
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                if status_code != 429 and status_code < 500:
+                    raise RuntimeError(
+                        f"knowledge extraction provider rejected chunk {chunk_id} "
+                        f"with HTTP {status_code}"
+                    ) from exc
+                if attempt == 2:
+                    raise RuntimeError(
+                        f"knowledge extraction provider failed for chunk {chunk_id} "
+                        f"after 3 attempts (HTTP {status_code})"
+                    ) from exc
+                retry_after = exc.response.headers.get("retry-after")
+                try:
+                    delay = max(float(retry_after), self.retry_delay_seconds * (attempt + 1))
+                except (TypeError, ValueError):
+                    delay = self.retry_delay_seconds * (attempt + 1)
+                await asyncio.sleep(delay)
+                continue
             metadata = ExtractionMetadata(
                 extraction_run_id=response.request_id or request_id,
                 provider=self.provider_name,
@@ -177,8 +230,10 @@ class OpenAIKnowledgeExtractor:
                 schema_version="knowledge-extraction-json-v1",
             )
             try:
-                bundle = align_unique_exact_spans(
-                    decode_extraction_json(response.text, metadata), snapshot
+                bundle = split_composite_person_mentions(
+                    align_unique_exact_spans(
+                        decode_extraction_json(response.text, metadata), snapshot
+                    )
                 )
                 validate_extraction(bundle, snapshot, generation_id)
                 return bundle, 0
@@ -199,12 +254,12 @@ class OpenAIKnowledgeExtractor:
         extracted: list[tuple[KnowledgeExtractionBundle, int]] = []
         # Keep provider pressure bounded. Repair attempts can multiply requests,
         # and an unbounded corpus-wide gather causes avoidable upstream timeouts.
-        for offset in range(0, len(chunks), 4):
+        for offset in range(0, len(chunks), self.concurrency):
             extracted.extend(
                 await asyncio.gather(
                     *(
                     self._extract_chunk(snapshot, generation_id, chunk.chunk_id, chunk.content)
-                        for chunk in chunks[offset : offset + 4]
+                        for chunk in chunks[offset : offset + self.concurrency]
                     )
                 )
             )

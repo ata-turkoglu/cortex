@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from io import BytesIO
 
 import pytest
@@ -163,6 +164,21 @@ def test_runner_adds_the_cortex_package_root_for_the_worker_cli(monkeypatch, tmp
 
     assert captured["env"]["PYTHONPATH"].split(os.pathsep)[0].endswith("backend")
     assert captured["errors"] == "replace"
+    assert captured["timeout"] == 600
+
+
+def test_runner_turns_a_cli_timeout_into_a_sanitized_graph_failure(monkeypatch, tmp_path):
+    from app.graphrag.adapter import GraphRAGExecutionError, MicrosoftGraphRAGRunner
+
+    monkeypatch.setattr("app.graphrag.adapter.SecretStore.get", lambda *_: "configured")
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("graphrag", timeout=600)
+
+    monkeypatch.setattr("app.graphrag.adapter.subprocess.run", timeout)
+
+    with pytest.raises(GraphRAGExecutionError, match="configured 600s deadline"):
+        MicrosoftGraphRAGRunner()._run(["index"], tmp_path)
 
 
 def test_runner_handles_missing_subprocess_output(monkeypatch, tmp_path):

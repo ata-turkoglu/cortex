@@ -36,8 +36,12 @@ inspection, and history.
 
 Phase 05 delivery status: SQLite persists opaque workspace-scoped candidate generations, durable
 run context, and every construction checkpoint. The specialized worker snapshots active chunks,
-checkpoints provider extraction per chunk, resumes the same candidate after interruption, and runs
-all model/store calls outside SQLite transactions. Retrieval activation requires only matching
+extracts uncached chunks in a bounded provider-concurrency batch, then checkpoints each validated
+chunk artifact so it can resume the same candidate after interruption. A per-request provider
+deadline bounds stalled calls; failures remain visible on the durable stage rather than silently
+holding the candidate. GraphRAG runs through a separately bounded CLI subprocess; its command
+deadline is a global setting and must expire as a durable stage failure rather than a worker-thread
+interruption. All model/store calls run outside SQLite transactions. Retrieval activation requires only matching
 source/relational, BM25, and dense/Qdrant projections; canonical and GraphRAG failures become
 durable unavailable capability states. BM25 files, Qdrant points, and Microsoft GraphRAG artifacts
 are generation-scoped. Readiness is exposed at

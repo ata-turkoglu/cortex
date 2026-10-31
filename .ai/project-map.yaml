@@ -27,7 +27,10 @@
     "backend/app/graphrag",
     "backend/app/reasoning",
     "backend/app/reasoning/research",
-    "backend/app/reasoning/composition"
+    "backend/app/reasoning/composition",
+    "backend/app/workflows",
+    "frontend",
+    "infrastructure"
   ],
   "modules": [
     {"path": "frontend", "context": "frontend/AGENTS.md", "docs": ["docs/frontend/README.md", "docs/api/contract.md", "docs/architecture/query-answer-pipeline.md", "docs/architecture/system-map-index.md"]},

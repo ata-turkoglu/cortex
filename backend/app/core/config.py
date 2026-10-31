@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     graphrag_model: str = "gpt-5.6-luna"
     graphrag_extraction_provider: Literal["openai", "ollama"] = "openai"
     graphrag_extraction_model: str = "gpt-4.1-mini"
+    # Extraction is workload-bound rather than request-bound.  Keep provider
+    # pressure and a single stalled response bounded so a durable candidate
+    # can fail/retry visibly instead of appearing to run indefinitely.
+    knowledge_extraction_concurrency: int = Field(default=2, ge=1, le=4)
+    knowledge_extraction_request_timeout_seconds: float = Field(
+        default=60.0, gt=0, le=180
+    )
     graphrag_claims_provider: Literal["openai", "ollama"] = "openai"
     graphrag_claims_model: str = "gpt-4.1-mini"
     graphrag_claims_enabled: bool = False
@@ -74,6 +81,7 @@ class Settings(BaseSettings):
     graphrag_drift_max_llm_calls: int = Field(default=16, ge=1, le=100)
     graphrag_query_fallback_to_hybrid: bool = False
     graphrag_query_wait_seconds: int = Field(default=20, ge=1, le=60)
+    graphrag_command_timeout_seconds: int = Field(default=600, ge=60, le=3600)
     workflow_ingestion_concurrency: int = 2
     workflow_dense_reindex_concurrency: int = 1
     workflow_graphrag_reindex_concurrency: int = 1

@@ -69,6 +69,7 @@ FALLBACK_OLLAMA_CATALOG = [
 
 
 Provider = Literal["openai", "anthropic", "ollama"]
+_SEMANTIC_PLANNER_TIERS = ("simple", "standard", "complex")
 
 
 class SettingsUpdate(BaseModel):
@@ -114,6 +115,7 @@ class SettingsUpdate(BaseModel):
     graphrag_drift_max_llm_calls: int | None = Field(default=None, ge=1, le=100)
     graphrag_query_fallback_to_hybrid: bool | None = None
     graphrag_query_wait_seconds: int | None = Field(default=None, ge=1, le=60)
+    graphrag_command_timeout_seconds: int | None = Field(default=None, ge=60, le=3600)
     workflow_ingestion_concurrency: int | None = Field(default=None, ge=1)
     workflow_dense_reindex_concurrency: int | None = Field(default=None, ge=1)
     workflow_graphrag_reindex_concurrency: int | None = Field(default=None, ge=1)
@@ -223,6 +225,33 @@ async def _validate_assignments(patch: dict[str, object]) -> None:
         required = "embeddings" if layer == "embedding" else "chat"
         if not getattr(capability, required):
             raise HTTPException(422, f"{provider}/{model} lacks {required} capability for {layer}")
+
+    # Production Query V2 currently wires only OpenAI's Responses structured-output
+    # adapter for semantic planning. Validate every effective tier assignment on
+    # every save so an unrelated Settings update cannot leave a latent planner
+    # configuration failure behind.
+    for tier in _SEMANTIC_PLANNER_TIERS:
+        layer = f"semantic_planner_{tier}"
+        provider = patch.get(f"{layer}_provider") or getattr(
+            get_settings(), f"{layer}_provider"
+        )
+        model = patch.get(f"{layer}_model") or getattr(get_settings(), f"{layer}_model")
+        label = f"Semantic Planner / {tier.title()}"
+        if provider != "openai":
+            raise HTTPException(
+                422,
+                f"{label} requires the configured OpenAI structured-output provider",
+            )
+        if not OpenAIProvider().configured():
+            raise HTTPException(422, f"{label} requires a configured OpenAI credential")
+        matches = [item for item in capabilities["openai"] if item.model == model]
+        if not matches:
+            raise HTTPException(422, f"{label}: openai/{model} is unavailable")
+        if not matches[0].chat:
+            raise HTTPException(
+                422,
+                f"{label}: openai/{model} lacks chat and strict structured-output support",
+            )
 
 
 @router.get("/settings")

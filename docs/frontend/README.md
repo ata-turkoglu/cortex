@@ -124,3 +124,14 @@ flooding the interface.
 
 Playwright tests in `frontend/e2e` exercise the running Compose frontend through the browser;
 the test suite requires the Chromium browser installed by Playwright.
+
+## Codex sandbox and Vite/esbuild on Windows
+
+When Cortex frontend commands run in a restricted Codex sandbox, Node
+`child_process` launches of `esbuild.exe` can fail with Windows `EPERM`. This
+may be a sandbox process-boundary restriction rather than a Cortex, Vite,
+Node, esbuild, Defender, or filesystem defect. Before changing dependencies or
+source code, run the same checks from a normal Windows host terminal: execute
+`esbuild.exe` directly, compare Node spawning it inside and outside the
+sandbox, then run `corepack pnpm dev` outside the sandbox. If only the sandbox
+fails, classify it as `CODEX_SANDBOX_PROCESS_BOUNDARY`.

@@ -75,7 +75,15 @@ class SemanticTarget(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     target_type: Literal[
-        "entity", "relation", "event", "document", "property", "claim", "fact", "unknown"
+        "entity",
+        "person",
+        "relation",
+        "event",
+        "document",
+        "property",
+        "claim",
+        "fact",
+        "unknown",
     ]
     reference_id: str | None = Field(default=None, min_length=1, max_length=80)
     description: ShortText
@@ -172,6 +180,13 @@ class SemanticRelationAggregate(BaseModel):
     direction: Literal["ascending", "descending"]
 
 
+class SemanticProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    field: Literal["person.surname", "structured_operation"]
+    source: Literal["provider", "governed_query_completion"]
+
+
 class InterpretationCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -212,18 +227,33 @@ class SemanticUnderstanding(BaseModel):
     candidates: tuple[InterpretationCandidate, ...] = Field(default=(), max_length=5)
     ambiguity_reasons: tuple[ShortText, ...] = Field(default=(), max_length=10)
     unresolved_questions: tuple[ShortText, ...] = Field(default=(), max_length=10)
+    semantic_provenance: tuple[SemanticProvenance, ...] = Field(default=(), max_length=10)
     confidence: float = Field(ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_state(self):
         if self.state == "ambiguous" and len(self.candidates) < 2:
             raise ValueError("ambiguous understanding requires at least two candidates")
-        if self.state == "unresolved" and not self.unresolved_questions:
+        grounded_unresolved_retrieval = (
+            self.coverage == "relevant_evidence"
+            and self.structured_operation is None
+            and not self.typed_filters
+            and not self.relations
+            and not self.temporal_constraints
+            and {"describe", "retrieve_evidence"}.issubset(self.operators)
+        )
+        if self.state == "unresolved" and not (
+            self.unresolved_questions or grounded_unresolved_retrieval
+        ):
             raise ValueError("unresolved understanding requires a clarification question")
         if self.state == "resolved" and (self.candidates or self.unresolved_questions):
             raise ValueError("resolved understanding cannot retain candidates or questions")
-        if self.structured_operation in {"list", "count"} and not self.typed_filters:
-            raise ValueError("structured list/count operations require a typed filter")
+        if self.structured_operation in {"list", "count"} and not (
+            self.typed_filters or any(item.target_type == "person" for item in self.targets)
+        ):
+            raise ValueError(
+                "structured list/count operations require a typed filter or Person target"
+            )
         if self.structured_operation in {"group", "rank"} and not (
             self.group_by or self.relation_aggregate
         ):

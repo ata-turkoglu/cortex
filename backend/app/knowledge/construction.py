@@ -101,8 +101,10 @@ def mark_stage_running(
     *,
     input_fingerprint: str,
 ) -> KnowledgeStageState:
-    if generation.state != "building":
-        raise ValueError("only a building generation accepts stage updates")
+    if generation.state != "building" and not (
+        generation.state == "active" and stage in OPTIONAL_CAPABILITY_STAGES
+    ):
+        raise ValueError("only a building generation accepts this stage update")
     state = stage_state(session, generation, stage)
     state.state = "running"
     state.input_fingerprint = input_fingerprint
@@ -130,8 +132,10 @@ def mark_stage_ready(
         ):
             raise ValueError("conflicting replay for completed generation stage")
         return state
-    if generation.state != "building":
-        raise ValueError("only a building generation accepts stage updates")
+    if generation.state != "building" and not (
+        generation.state == "active" and stage in OPTIONAL_CAPABILITY_STAGES
+    ):
+        raise ValueError("only a building generation accepts this stage update")
     state.state = "ready"
     state.input_fingerprint = input_fingerprint
     state.output_fingerprint = output_fingerprint

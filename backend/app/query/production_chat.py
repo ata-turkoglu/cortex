@@ -184,6 +184,7 @@ def _persist_result(
     run.selected_routes_json = json.dumps(["v2", *retrieval_capabilities])
     run.route_confidence = result.prepared.semantic.understanding.confidence
     run.answer_state = result.answer.state
+    run.completeness_json = json.dumps(result.package.completeness.model_dump(mode="json"))
     run.latency_ms = int((time.perf_counter() - started) * 1000)
     run.updated_at = timestamp
     _set_step(session, run.id, "retrieve", "completed")
@@ -207,8 +208,17 @@ def _persist_result(
                 "execution_trace": trace,
                 "query_plan": result.prepared.physical_plan.model_dump(mode="json"),
                 "logical_ir": result.prepared.logical_ir.model_dump(mode="json"),
+                "semantic_provider_output": result.prepared.semantic.generated.text,
+                "semantic_understanding": result.prepared.semantic.understanding.model_dump(
+                    mode="json"
+                ),
+                "semantic_provenance": [
+                    item.model_dump(mode="json")
+                    for item in result.prepared.semantic.understanding.semantic_provenance
+                ],
                 "semantic_state": result.prepared.semantic.understanding.state,
                 "semantic_planner_tier": result.prepared.semantic.selected_tier,
+                "semantic_planner": _semantic_planner_metadata(result.prepared.semantic),
                 "reasoning_package_generation": result.package.generation_id,
                 "retrieval_queries": [run.query_text],
                 "citation_summary": {
@@ -226,6 +236,18 @@ def _persist_result(
     session.add(assistant)
     conversation.updated_at = timestamp
     return assistant
+
+
+def _semantic_planner_metadata(semantic) -> dict[str, str]:
+    """Persist the model assignment that produced a validated semantic plan."""
+    if not semantic.attempts:
+        raise RuntimeError("semantic planner result is missing its provider attempt")
+    attempt = semantic.attempts[-1]
+    return {
+        "tier": semantic.selected_tier,
+        "provider": attempt.provider,
+        "model": attempt.model,
+    }
 
 
 def _persist_failure(
@@ -284,12 +306,11 @@ def _persist_failure(
 
 def _failure_content(error: Exception) -> str:
     """Keep validation failures fail-closed without exposing provider diagnostics."""
+    from .answer import AnswerEngine
+
     if isinstance(error, SemanticPlannerOutputError):
-        return (
-            "I couldn't safely interpret this request. Please rephrase it with the "
-            "people, relationship, and ordering rule stated explicitly."
-        )
-    return "The V2 query could not be completed safely."
+        return AnswerEngine.failure_content("query_not_understood")
+    return AnswerEngine.failure_content("unsupported_operation")
 
 
 def _set_step(session: Session, run_id: str, name: str, state: str) -> None:

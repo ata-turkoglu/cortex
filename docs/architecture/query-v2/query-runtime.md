@@ -76,11 +76,25 @@ may yield multiple candidate interpretations. Output contains no `intent` field 
 roles explicit: event date, document date, mentioned date, range, before/after event, approximate
 date, and partial date.
 
+The Settings UI exposes each planner tier independently. Production currently binds the OpenAI
+Responses structured-output adapter, so each effective tier assignment is checked on save for a
+configured OpenAI credential and an available chat-capable model. Query trace metadata records the
+selected tier, provider, and model separately from answer-generation metadata.
+
 Malformed or semantically invalid output is rejected, safely repaired/replanned within configured
 bounds, or returned as ambiguous/unsupported. Analytic/count-and-order query shapes start at the
 standard planner tier even when short. If all bounded planner repairs fail, production persists an
 `unsupported` response with a sanitized `semantic_planner_output_invalid` reason; provider output
 and validation details are never exposed. Provider prose is never treated as executable IR.
+Explicit exhaustive Person enumeration is represented with a typed `Person` target and
+corpus-required coverage, regardless of wording or language; it is not a special-cased question
+string. Because an unfiltered Person scan has no narrower surname boundary, every unresolved
+Person mention in the active generation is relevant: it must be rendered as `PARTIAL`, never as a
+complete population.
+An unresolved named descriptive request remains valid when it is retrieval-only: it may have no
+clarification question, no canonical structured operation, `relevant_evidence` coverage, and
+`describe` plus `retrieve_evidence` operators. It lowers to zero-input evidence retrieval without
+selecting a canonical identity.
 
 
 The Phase 06 semantic contract is `SemanticUnderstanding` schema version `1.0`. It contains typed
@@ -257,6 +271,12 @@ display-name/alias matches, retains collisions as unresolved, and rejects a brie
 match the active planning generation. Retrieval remains available when the graph infrastructure is
 not configured; graph-dependent plans still fail closed through readiness.
 
+For a grounded descriptive/evidence request with an explicitly named but unresolved identity, IR
+may emit a zero-input `RetrieveEvidence` node and use the original user text as the retrieval query.
+The semantic record remains unresolved and no canonical `ResolveNode`, scan, or candidate selection
+is created. This is not available to exhaustive or structured canonical semantics, which continue
+to fail closed rather than degrading to retrieval.
+
 ## Governed property vocabulary
 
 The active runtime extends its base IR vocabulary only from resolved canonical entity properties
@@ -267,6 +287,23 @@ an explicit, exact-span extraction assertion during knowledge construction, not 
 display name at query time. Conflicting candidate values remain absent from the queryable projection.
 
 ## Canonical structured and graph capabilities
+
+### Query-scoped canonical completeness
+
+Generation canonical health is a construction-quality signal and remains `PARTIAL` whenever
+unresolved or rejected canonical evidence exists. It is not a global structured-query kill switch.
+When the SQLite canonical projection has processed every manifest chunk without failed chunks, the
+runtime advertises governed structured operations and exposes existing governed fields such as
+`person.surname`. After the Logical IR has determined the population and the Structured Engine has
+returned known facts, `CanonicalCompletenessEvaluator` produces typed query completeness:
+`COMPLETE`, `PARTIAL`, or `UNAVAILABLE`.
+
+For a governed Person surname filter, only unresolved Person mentions that explicitly carry that
+surname are relevant. Thus an unresolved `Bay H. Tahsin MERTER` makes a Merter list/count/rank
+partial, while it does not make a Yılmaz list partial. Initial-only evidence such as `A.B.` carries
+no surname scope and is not a global blocker. Partial answers retain deterministic SQLite rows and
+state which dimensions may change; they never mint an unresolved mention into a canonical person or
+use retrieval as an exhaustive fallback. An unresolved traversal root remains unavailable.
 
 The typed runtime supports planning canonical LIST/COUNT/GROUP/RANK/COMPARE, relation traversal,
 property inventory, and exact-date canonical event queries, but none is production accepted. Their

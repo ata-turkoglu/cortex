@@ -25,7 +25,7 @@ workspace-only BM25, or final-answer fallback.
 | --- | --- | --- | --- |
 | `retrieval.grounded` | READY | immutable source manifest; generation-bound dense and/or BM25 projection | exact evidence validated against the manifest |
 | `graphrag.grounded` | PARTIAL | source manifest; generation GraphRAG artifacts | typed findings through the trusted-source bridge |
-| `canonical.exhaustive` | NOT PRODUCTION ACCEPTED | canonical population/projection completeness | structured list/count/group/rank/compare |
+| `canonical.structured` | READY when SQLite projection is operational | generation-bound SQLite canonical projection | structured list/count/group/rank/compare with result completeness |
 | `canonical.graph` | NOT PRODUCTION ACCEPTED | canonical relation/event projection | traversal and canonical event results |
 
 Canonical readiness must not conceptually define all V2 readiness. A canonical capability that is
@@ -47,16 +47,26 @@ production-accepted end to end.
 
 ## Canonical capability boundary
 
-Structured and graph engines use the Neo4j adapter, but canonical Entity/Mention/alias lifecycle,
-identity resolution, properties, relations, and exhaustive population semantics are currently
-blocked. Neo4j must not be documented as fully proven durable canonical authority. Historical V1
-property aggregation is not a current structured-query authority.
+Structured list/count/group/rank/compare reads use the SQLite canonical authority. Generation
+canonical health is separate from exact-result completeness: a `PARTIAL` generation can return a
+`COMPLETE` result for an unaffected governed population, or a `PARTIAL` result with known rows,
+blocker count, affected dimensions, and exact evidence references. Unresolved evidence never
+becomes a synthetic canonical row; retrieval is never an exhaustive fallback. Canonical graph
+operations remain separately unavailable. Historical V1 property aggregation is not a current
+structured-query authority.
 
 ## Final rendering and persistence
 
 Reconciliation creates the sole `ReasoningPackage` consumed by `AnswerEngine`. The runtime persists
-the final content, validated citations, generation trace, and query state. The generic answer
-renderer remains partial; it must not be treated as a raw engine-result bypass.
+the final content, validated citations, generation trace, query-scoped completeness, and query
+state. Chat renders a compact Complete/Partial/Unavailable disclosure with blocker evidence.
+
+The normal answer field is a concise, user-facing synthesis only. Retrieval rows may retain evidence
+text, fusion rank, dense/sparse ranks, scores, chunk identity, and engine provenance for
+reconciliation and Technical Trace, but `AnswerEngine` must never serialize those fields into answer
+prose. It selects a bounded set of claimable citations for normal source cards; full provenance stays
+in persisted technical metadata. Typed fail-closed reasons are rendered centrally as concise Turkish
+messages, with no provider diagnostics or internal reason codes in the answer text.
 
 ## Historical / V1
 

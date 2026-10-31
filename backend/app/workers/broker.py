@@ -98,9 +98,14 @@ def recover_stale_jobs() -> None:
         dispatch_workflow(run_id)
 
 
-@dramatiq.actor(max_retries=3)
+@dramatiq.actor(max_retries=3, time_limit=3_600_000)
 def execute_workflow(run_id: str) -> None:
-    """Execute short durable steps; Dramatiq retry is safe because checkpoints persist."""
+    """Execute durable stages without pre-empting bounded external subcommands.
+
+    Individual providers and GraphRAG CLI commands enforce their own operational
+    deadlines.  This outer limit is deliberately larger so Dramatiq cannot
+    interrupt between a completed external side effect and its durable checkpoint.
+    """
     from ..core.database import SessionLocal
     from ..core.settings_service import load_runtime_settings
 

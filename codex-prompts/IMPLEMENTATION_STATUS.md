@@ -39,8 +39,10 @@ Codex must keep this file updated.
 - Status: `POST /chat` is V2-only and `retrieval.grounded` is production-accepted: immutable
   generation manifests, generation-bound dense/BM25 retrieval, fusion, evidence validation,
   reconciliation, AnswerEngine ownership, and persistence are covered by the uploaded-file
-  acceptance. `graphrag.grounded` is partial/readiness-dependent. `canonical.exhaustive` and
-  `canonical.graph` are **not production accepted**; canonical lifecycle is incomplete.
+  acceptance. `graphrag.grounded` is partial/readiness-dependent. `canonical.exhaustive` is
+  production-accepted for the governed Person LIST/COUNT subset on the isolated canonical
+  acceptance fixture. A generic `entity` target is explanatory only when a complete governed
+  Person typed filter supplies the population; `canonical.graph` remains unaccepted.
 - Next target: complete the adversarial and full-V2 acceptance suite for `canonical.exhaustive`.
   Cortex now owns Ollama 0.32.6 and the `cortex_ollama_models` volume; its persisted
   `bge-m3:latest` embedding health check succeeds at 1024 dimensions without KnowledgeOS.
@@ -49,6 +51,9 @@ Codex must keep this file updated.
   and SQLite canonical stages, but canonical SQLite status is `PARTIAL` (7 mentions, 2 safe
   properties, 2 assertions, 1 rejected assertion). It cannot be activated or used for the final
   HTTP canonical gate; no live workspace was rebuilt or cut over.
+  A separate `merter1` `knowledge_reindex` candidate is running as workflow
+  `cbae7c49-0e85-40a7-a37b-1b2f4f007c49` for candidate generation
+  `e5ac37b5-bfe3-4d8f-81a0-2d2d2350bec2`; it is not activated.
   The SQLite construction/read adapter is implemented (including `0023` surname projection and
   `0024` manifest-chunk accounting), but it is not production accepted and has not been run against
   an existing user generation.
@@ -56,6 +61,11 @@ Codex must keep this file updated.
 - Last updated: 2026-08-26
 
 ## Stabilization correction
+
+- Stabilization repair (2026-08-26): canonical extraction now applies an outer bounded coroutine
+  deadline to each provider request. A stalled transport cannot leave `entity_mention` durably
+  running without executor progress; the normal workflow failure/retry lifecycle preserves the
+  already-written per-chunk extraction artifacts.
 
 Earlier Phase 13â€“15 entries recorded implementation milestones too broadly. The acceptance suite
 uses no-op canonical and GraphRAG construction stages, so it proves V2 retrieval/citation behavior,

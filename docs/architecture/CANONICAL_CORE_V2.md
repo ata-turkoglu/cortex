@@ -9,10 +9,11 @@
 
 ## Scope and decisions
 
-The first capability is an exhaustive answer to: “Merter soyadlı kişileri listele,
-her biri için belgelerde geçen taşınmaz sayısını belirt ve en fazla taşınmaz kaydı
-olan kişiden en aza doğru sırala.” The count is a distinct count of safe, document-supported
-canonical Properties; it is not a statement of current legal ownership.
+The first capabilities are exhaustive Person enumeration for the explicitly bounded active corpus,
+and the surname-filtered answer: “Merter soyadlı kişileri listele, her biri için belgelerde geçen
+taşınmaz sayısını belirt ve en fazla taşınmaz kaydı olan kişiden en aza doğru sırala.” The count is
+a distinct count of safe, document-supported canonical Properties; it is not a statement of current
+legal ownership.
 
 The existing capability separation is preserved: `retrieval.grounded` and
 `graphrag.grounded` stay independent; `canonical.exhaustive` and `canonical.graph`
@@ -46,6 +47,7 @@ mixes identity, evidence, lifecycle, and read projection, so it must not be the 
 | Alias | Derived accepted mentions | read in G | indirect | yes |
 | Property | `canonical_properties` | no | yes | no |
 | Ownership assertion | `ownership_assertions` | yes | yes | generation projection |
+| Rejected countable assertion blocker | `rejected_assertion_blockers` | yes | yes | no |
 | Generation membership/status | SQLite projection/status tables | yes | yes | yes |
 | Neo4j nodes/edges | Neo4j | yes | no | yes |
 | Qdrant/BM25/GraphRAG | Existing generation artifacts | yes | artifact | yes |
@@ -90,6 +92,14 @@ ownership_assertions
   UNIQUE(workspace_id,generation_id,person_mention_id,property_mention_id,relation_type)
   INDEX(workspace_id,generation_id,person_id,property_id)
 
+rejected_assertion_blockers
+  id PK, workspace_id, generation_id, blocker/entity/relation types,
+  potentially_countable, affected_dimension, normalized_subject_surname,
+  document/version/logical-document/chunk IDs, exact span/text/hash, reason,
+  scope_hints_json, created_at
+  UNIQUE(workspace_id,generation_id,chunk_id,span_start,span_end,reason)
+  INDEX(workspace_id,generation_id,normalized_subject_surname)
+
 generation_canonical_memberships
   workspace_id,generation_id,canonical_entity_id PK, entity_type,
   membership_basis_mention_id,created_at
@@ -124,7 +134,31 @@ Same name, surname, document/chunk co-occurrence, shared property, GraphRAG simi
 similarity are never sufficient to link. `LINK` needs one unique candidate and a versioned,
 deterministic evidence rule. One-token, initial, surname-only, malformed-OCR, and ambiguous mentions
 are `UNRESOLVED`. Accepted mention surface forms derive aliases with their mention/decision IDs as
-basis. No alias scoring, merge, split, supersession, or lifecycle API is introduced.
+basis. No alias scoring or automatic merge, split, or supersession rule is introduced.
+
+As a bounded duplicate-suppression rule, independently created `NEW` Person identities with the
+same normalized full name may be remapped only when that exact form is corroborated by accepted
+mentions in at least two distinct document versions in the same generation. The durable decision
+ledger records this as a `LINK` with its deterministic basis before membership is rebuilt. Repeated
+same-name mentions in only one document version remain separate identity candidates: they may be
+display-grouped for an inventory, but are never automatically merged or counted as a single
+canonical identity.
+
+Before identity resolution, a candidate Person span must be a bounded name-shaped source span. Spans
+containing digits, possessive/legal-clause text, property identifiers, or a multi-person dash list
+are not promoted as one canonical Person. Safe dash-separated lists are split into independent exact
+spans; every other unsafe span remains `UNRESOLVED`. This is an extraction-quality gate, not a
+query-specific name list or a query-time repair rule.
+
+Any Person mention may be reviewed through the separate append-only
+`human_identity_curation_decisions` authority, including an automatically created candidate that
+must be linked to an existing identity after evidence review. A decision is keyed to exact workspace,
+document/version, logical document, chunk, offsets, entity type, and source-text hash; normalized
+name similarity is never a key. `LINK_TO_EXISTING` requires an explicitly selected existing opaque
+Person ID, while `KEEP_UNRESOLVED` remains fail-closed for exhaustive readiness. Supersession retires
+the prior row without deleting it. A later generation consumes only a matching active exact-evidence
+decision and records its human adjudication ID in the ordinary `LINK` decision basis; no broad alias
+or automatic resolver rule is created.
 
 Production extraction may carry `identity_candidates` only on a Person mention: stable SQLite
 canonical Person IDs plus non-empty `candidate_provenance`. Construction validates each candidate in
@@ -164,6 +198,13 @@ countable property safely resolved or causing PARTIAL; membership equal to all a
 including zero-property people; non-conflicting governed surname values; and projection counts/
 fingerprint matching durable rows. This is independent of retrieval capability readiness.
 
+Rejected countable assertions remain rejected: their blocker record does not create a Property,
+OwnershipAssertion, or identity link. Future construction records exact scope/provenance so a
+surname-constrained ownership ranking can be `PARTIAL` only for its affected
+`property_count`/ranking dimensions and expose the exact evidence/reason. Older generations have
+only `rejected_assertion_count`; that legacy uncertainty applies conservatively only to an ownership
+relation-aggregate ranking, never to unrelated lists or counts.
+
 `canonical.graph` is READY only if exhaustive is READY and Neo4j has an exact-version projection
 with matching workspace/generation/membership/property/assertion/evidence fingerprint. It should
 remain unavailable in the first milestone; an internal SQL relation is not general graph traversal.
@@ -194,6 +235,10 @@ Implemented after migrations `0022`/`0023`: manifest-backed production construct
 safe Property/ownership construction, governed persisted surname projection, and injection of the
 SQLite reader into the production structured engine. Migration `0024` persists per-manifest-chunk
 accounting. No existing user generation was rebuilt or made canonical-ready.
+
+Migration `0027_rejected_assertion_blockers` adds durable scope-aware provenance for newly rejected
+potentially-countable ownership assertions. It is additive and does not alter active-generation
+canonical rows; legacy aggregate counts retain the compatibility behavior above.
 
 Acceptance is intentionally incomplete: only focused manifest-backed construction/read tests have
 passed. Same-name/ambiguous identity adversaries, workspace/generation isolation, retry/failure,

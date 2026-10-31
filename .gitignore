@@ -57,23 +57,15 @@ backend/evaluation/results/
 .idea/
 *.log
 
-# Generated API and reports
+# Generated API, reports, and runtime uploads
 frontend/src/api/generated/
 reports/licenses/
 frontend/src/api/generated/*.tmp
-/codex-prompts/
 /uploaded_files/
 
-# Local-only validation and unpublished test work
+# Local-only validation and evaluation artifacts
 /.tmp/
 /.validation-pytest/
-/backend/app/evaluation/
 /backend/evaluation/
-/backend/tests/
 /backend/.tmp-pytest-*/
-!/backend/app/evaluation/
-!/backend/app/evaluation/*.py
-/frontend/src/**/*.test.tsx
-/frontend/src/**/*.test.ts
-/docs/architecture/evaluation.md
-!/docs/architecture/evaluation.md
+# Source tests, app evaluation code, Codex prompts, and architecture docs are tracked.

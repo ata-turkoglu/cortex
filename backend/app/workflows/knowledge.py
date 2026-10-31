@@ -281,6 +281,32 @@ def complete(session: Session, run_id: str) -> None:
         session.delete(lock)
 
 
+def activate_retrieval_projection(session: Session, run_id: str) -> bool:
+    """Activate a verified retrieval projection before optional capabilities finish.
+
+    GraphRAG and canonical capability stages remain generation-bound, but must
+    not hold grounded BM25/dense retrieval hostage once its immutable manifest
+    and both required projections agree.
+    """
+    run = session.get(WorkflowRun, run_id)
+    context = (
+        session.query(KnowledgeReindexRunContext).filter_by(workflow_run_id=run_id).one_or_none()
+    )
+    if not run or context is None:
+        return False
+    generation = session.get(KnowledgeGeneration, context.generation_id)
+    if generation is None or not generation.source_manifest_uri:
+        return False
+    from ..core.config import get_settings
+    from ..knowledge.construction import validate_manifest_projection_agreement
+
+    if not validate_manifest_projection_agreement(
+        session, generation, get_settings().data_path
+    ):
+        raise RuntimeError("knowledge generation manifest/projection agreement failed")
+    return activate_if_ready(session, generation)
+
+
 def execute(run_id: str, session_factory, executor) -> None:
     """Run each external adapter between short durable SQLite transactions."""
     session = session_factory()
@@ -318,6 +344,8 @@ def execute(run_id: str, session_factory, executor) -> None:
         session = session_factory()
         try:
             complete_stage(session, run_id, stage, result)
+            if stage == "dense_qdrant":
+                activate_retrieval_projection(session, run_id)
             session.commit()
         finally:
             session.close()

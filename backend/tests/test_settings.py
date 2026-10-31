@@ -1,6 +1,9 @@
+import asyncio
 import json
 from datetime import UTC, datetime
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -9,6 +12,7 @@ from app.core.config import get_settings
 from app.core.settings_service import load_runtime_settings, save_settings
 from app.main import app
 from app.models import GlobalSettings
+from app.providers.base import ModelCapability
 
 
 def test_provider_status_never_returns_secret(monkeypatch):
@@ -59,3 +63,34 @@ def test_global_settings_persist_and_apply_to_runtime():
             assert load_runtime_settings(session)["workflow_retention_days"] == 14
     finally:
         get_settings().workflow_retention_days = original
+
+
+def test_semantic_planner_tiers_require_available_openai_chat_models(monkeypatch):
+    async def capabilities():
+        return {
+            "openai": [ModelCapability("openai", "planner-model", chat=True)],
+            "anthropic": [],
+            "ollama": [],
+        }
+
+    monkeypatch.setattr("app.api.settings._capabilities", capabilities)
+    monkeypatch.setattr("app.api.settings.OpenAIProvider.configured", lambda _self: True)
+    original = {
+        f"semantic_planner_{tier}_{field}": getattr(
+            get_settings(), f"semantic_planner_{tier}_{field}"
+        )
+        for tier in ("simple", "standard", "complex")
+        for field in ("provider", "model")
+    }
+    try:
+        for tier in ("simple", "standard", "complex"):
+            setattr(get_settings(), f"semantic_planner_{tier}_provider", "openai")
+            setattr(get_settings(), f"semantic_planner_{tier}_model", "planner-model")
+        from app.api.settings import _validate_assignments
+
+        asyncio.run(_validate_assignments({}))
+        with pytest.raises(HTTPException, match="Semantic Planner / Standard"):
+            asyncio.run(_validate_assignments({"semantic_planner_standard_model": "invalid"}))
+    finally:
+        for field, value in original.items():
+            setattr(get_settings(), field, value)

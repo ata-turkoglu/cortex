@@ -82,6 +82,13 @@ split are explicit POST commands. Every mutation requires a user reason; merge/s
 evidence IDs, split must partition every active mention exactly once, and alias removal creates a
 tombstone rather than deleting history. These endpoints operate only on the Neo4j canonical layer;
 they do not promote GraphRAG extracted artifacts automatically.
+
+The separate SQLite identity-review endpoints are under `/identity-curation`. The unresolved queue
+is prioritised to population-affecting evidence, but a reviewed decision may target any exact
+workspace-scoped Person mention with an automatic decision. `LINK_TO_EXISTING` requires an explicit
+opaque canonical Person ID; `KEEP_UNRESOLVED` has no target. Both actions are append-only,
+evidence-location keyed, and take effect when a fresh candidate generation processes the same
+evidence; they never create a name-based global alias rule or mutate the active generation in place.
 The readiness response lists active, building, failed, and superseded generations with their
 workflow run, source fingerprint, failure summary, and all mandatory stage fingerprints/metrics.
 
@@ -98,6 +105,9 @@ capabilities. Changing chunking or embedding settings marks every workspace inde
 `reindex_required` and its GraphRAG projection as `stale`.
 Query V2 adds global simple, standard, and complex semantic-planner provider/model assignments,
 a bounded repair count, an escalation switch, and a confidence threshold. These settings configure the active V2 semantic planner; they do not introduce a V1 fallback.
+Each planner tier is validated independently on save. The current production adapter requires a
+configured OpenAI model listed as chat-capable because it uses the Responses strict JSON-Schema
+contract; unsupported provider/model pairs are rejected with a tier-specific `422` response.
 GET /api/v1/workspaces/{workspace_id}/knowledge/cutover returns the workspace's sole live runtime
 version/generation pointer, source/evaluation/curation fingerprints, activation time, and bounded
 immutable attempt history. POST /api/v1/workspaces/{workspace_id}/knowledge/cutover accepts only a

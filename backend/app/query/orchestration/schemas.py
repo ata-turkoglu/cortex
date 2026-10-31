@@ -133,6 +133,68 @@ class EngineFailure(BaseModel):
     retryable: bool = False
 
 
+class CompletenessEvidenceRef(BaseModel):
+    """Inspectable evidence that can change a scoped canonical result."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    evidence_id: str = Field(min_length=1, max_length=128)
+    kind: Literal["unresolved_person", "rejected_assertion"]
+    raw_text: str = Field(min_length=1, max_length=10_000)
+    document_id: str = Field(min_length=1, max_length=128)
+    document_version_id: str = Field(min_length=1, max_length=128)
+    logical_document_id: str | None = Field(default=None, max_length=128)
+    chunk_id: str = Field(min_length=1, max_length=128)
+    start_offset: int = Field(ge=0)
+    end_offset: int = Field(gt=0)
+    reason: str | None = Field(default=None, max_length=2_000)
+
+
+class QueryCompleteness(BaseModel):
+    """Completeness of this exact structured query, independent of build health."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["COMPLETE", "PARTIAL", "UNAVAILABLE"]
+    scope: str = Field(min_length=1, max_length=1_000)
+    reasons: tuple[str, ...] = Field(default=(), max_length=100)
+    relevant_unresolved_count: int = Field(default=0, ge=0)
+    relevant_rejected_assertion_count: int = Field(default=0, ge=0)
+    affected_dimensions: tuple[
+        Literal[
+            "population", "count", "ranking", "group_membership", "property_count", "comparison"
+        ],
+        ...,
+    ] = ()
+    evidence_refs: tuple[CompletenessEvidenceRef, ...] = Field(default=(), max_length=10_000)
+    known_count: int | None = Field(default=None, ge=0)
+    min_count: int | None = Field(default=None, ge=0)
+    max_count: int | None = Field(default=None, ge=0)
+    additional_population_possible: bool = False
+
+    @model_validator(mode="after")
+    def truthful_status(self):
+        if self.status == "COMPLETE" and (
+            self.relevant_unresolved_count
+            or self.relevant_rejected_assertion_count
+            or self.additional_population_possible
+        ):
+            raise ValueError("complete query results cannot retain relevant blockers")
+        if (
+            self.min_count is not None
+            and self.known_count is not None
+            and self.min_count != self.known_count
+        ):
+            raise ValueError("minimum count must equal the known canonical count")
+        if (
+            self.max_count is not None
+            and self.min_count is not None
+            and self.max_count < self.min_count
+        ):
+            raise ValueError("maximum count cannot be below the known count")
+        return self
+
+
 class CompletenessReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -147,6 +209,7 @@ class CompletenessReport(BaseModel):
     not_safely_enumerable: bool = False
     ready_projections: tuple[Identifier, ...] = ()
     missing_projections: tuple[Identifier, ...] = ()
+    query: QueryCompleteness | None = None
 
     @model_validator(mode="after")
     def truthful_complete_state(self):
@@ -345,6 +408,13 @@ class ReasoningPackage(BaseModel):
     provenance: tuple[ProvenanceLink, ...] = ()
     completeness: CompletenessReport
     confidence: float = Field(ge=0, le=1)
+    failure_reason: Literal[
+        "identity_unresolved",
+        "identity_ambiguous",
+        "insufficient_evidence",
+        "unsupported_operation",
+        "query_not_understood",
+    ] | None = None
     ambiguities: tuple[ResultAmbiguity, ...] = ()
     conflicts: tuple[ResultConflict, ...] = ()
     failures: tuple[EngineFailure, ...] = ()

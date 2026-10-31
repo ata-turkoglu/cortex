@@ -10,6 +10,7 @@ from qdrant_client import QdrantClient
 from ..core.config import Settings, get_settings
 from ..core.qdrant import get_qdrant_client
 from ..graphrag.adapter import GraphRAGAdapter
+from ..knowledge.canonical_completeness import CanonicalCompletenessEvaluator
 from ..knowledge.canonical_reader import SQLiteCanonicalReader
 from ..knowledge.graph import Neo4jConfigurationError, Neo4jGraphAdapter
 from ..providers.base import EmbeddingProvider
@@ -160,6 +161,15 @@ class V2QueryServiceFactory:
             finally:
                 reader.close()
 
+        def completeness_evaluator(request_scope, logical_ir, known_count):
+            reader = canonical_reader(request_scope)
+            try:
+                return CanonicalCompletenessEvaluator(
+                    reader.session, request_scope.workspace_id
+                ).evaluate(request_scope.generation_id, logical_ir, known_count=known_count)
+            finally:
+                reader.close()
+
         registry = ProductionEngineRegistry(
             {
                 "retrieval": RetrievalProductionEngine(dense, sparse),
@@ -178,6 +188,7 @@ class V2QueryServiceFactory:
             answer_engine=self.answer_engine,
             briefing_loader=briefing_loader,
             property_vocabulary_loader=property_vocabulary_loader,
+            completeness_evaluator=completeness_evaluator,
         )
 
     def _graphrag_adapter(self, scope: GenerationScope) -> GraphRAGAdapter:

@@ -13,8 +13,14 @@ from ..core.settings_service import load_runtime_settings
 from ..core.workspaces import WorkspaceContext
 from ..knowledge.entities import IdentityOperation
 from ..knowledge.graph import Neo4jGraphAdapter
+from ..knowledge.identity_curation import HumanIdentityCurationStore, is_population_affecting_person
 from ..knowledge.pipeline import snapshot_active_corpus
 from ..models import (
+    CanonicalEntityRecord,
+    Chunk,
+    EntityMentionRecord,
+    HumanIdentityCurationDecisionRecord,
+    IdentityDecisionRecord,
     KnowledgeGeneration,
     KnowledgeReindexRunContext,
     KnowledgeStageState,
@@ -144,6 +150,65 @@ class QueryCutoverActivationRead(BaseModel):
     runtime_before: str
     runtime_after: str
     failures: list[str]
+
+
+class IdentityCurationItemRead(BaseModel):
+    mention_id: str
+    raw_mention: str
+    document_id: str
+    document_version_id: str
+    chunk_id: str
+    span_start: int
+    span_end: int
+    source_excerpt: str
+    automatic_reason: str
+    population_affecting: bool
+    curation_state: str | None
+    target_canonical_entity_id: str | None
+
+
+class IdentityCurationDecisionRequest(BaseModel):
+    action: str = Field(pattern="^(LINK_TO_EXISTING|KEEP_UNRESOLVED)$")
+    canonical_entity_id: str | None = None
+    reason: str = Field(min_length=1, max_length=2000)
+    actor: str = Field(default="local_curator", min_length=1, max_length=128)
+
+
+class IdentityCurationDecisionRead(BaseModel):
+    decision_id: str
+    mention_id: str
+    action: str
+    canonical_entity_id: str | None
+    actor: str
+    reason: str
+    previous_decision_id: str | None
+    active: bool
+    created_at: datetime
+
+
+class CanonicalPersonSuggestionRead(BaseModel):
+    canonical_entity_id: str
+    preferred_name: str
+    mention_count: int
+    document_count: int
+    sample_mentions: list[str]
+
+
+class CanonicalPersonCurationDetailRead(CanonicalPersonSuggestionRead):
+    mentions: list["EntityCurationEvidenceRead"]
+    decisions: list[IdentityCurationDecisionRead]
+
+
+class EntityCurationEvidenceRead(BaseModel):
+    mention_id: str
+    raw_mention: str
+    document_id: str
+    document_version_id: str
+    chunk_id: str
+    span_start: int
+    span_end: int
+    decision: str
+    decision_basis: str
 
 
 @router.get("/cutover", response_model=QueryCutoverStatusRead)
@@ -290,6 +355,201 @@ def generation_readiness(
             )
         )
     return result
+
+
+def _curation_read(row: HumanIdentityCurationDecisionRecord) -> IdentityCurationDecisionRead:
+    return IdentityCurationDecisionRead(
+        decision_id=row.id,
+        mention_id=row.mention_id,
+        action=row.action,
+        canonical_entity_id=row.canonical_entity_id,
+        actor=row.actor,
+        reason=row.reason,
+        previous_decision_id=row.previous_decision_id,
+        active=row.active,
+        created_at=row.created_at,
+    )
+
+
+@router.get("/identity-curation/unresolved", response_model=list[IdentityCurationItemRead])
+def unresolved_identity_curation_items(
+    workspace_id: str, generation_id: str | None = None, session: Session = Depends(get_session)
+):
+    """Queue only unresolved, population-affecting exact Person evidence."""
+    WorkspaceContext.load(session, workspace_id)
+    statement = (
+        select(EntityMentionRecord, IdentityDecisionRecord, Chunk)
+        .join(IdentityDecisionRecord, IdentityDecisionRecord.mention_id == EntityMentionRecord.id)
+        .join(Chunk, Chunk.id == EntityMentionRecord.chunk_id)
+        .where(
+            EntityMentionRecord.workspace_id == workspace_id,
+            EntityMentionRecord.entity_type == "person",
+            IdentityDecisionRecord.decision == "UNRESOLVED",
+        )
+        .order_by(EntityMentionRecord.created_at)
+    )
+    if generation_id:
+        statement = statement.where(EntityMentionRecord.generation_id == generation_id)
+    result = []
+    store = HumanIdentityCurationStore(session, workspace_id)
+    for mention, decision, chunk in session.execute(statement):
+        if not is_population_affecting_person(mention):
+            continue
+        curated = store.active_for_mention(mention)
+        start = max(0, mention.span_start - 160)
+        end = min(len(chunk.content), mention.span_end + 160)
+        basis = json.loads(decision.decision_basis_json).get("reason", "unresolved")
+        result.append(
+            IdentityCurationItemRead(
+                mention_id=mention.id,
+                raw_mention=mention.surface_text,
+                document_id=mention.document_id,
+                document_version_id=mention.document_version_id,
+                chunk_id=mention.chunk_id,
+                span_start=mention.span_start,
+                span_end=mention.span_end,
+                source_excerpt=chunk.content[start:end],
+                automatic_reason=basis,
+                population_affecting=True,
+                curation_state=curated.action if curated else None,
+                target_canonical_entity_id=curated.canonical_entity_id if curated else None,
+            )
+        )
+    return result
+
+
+@router.get("/identity-curation/candidates", response_model=list[CanonicalPersonSuggestionRead])
+def search_identity_curation_candidates(
+    workspace_id: str, q: str, limit: int = 20, session: Session = Depends(get_session)
+):
+    WorkspaceContext.load(session, workspace_id)
+    if not q.strip() or not 1 <= limit <= 100:
+        raise HTTPException(422, "a non-empty query and valid limit are required")
+    needle = f"%{q.strip()}%"
+    rows = session.scalars(
+        select(CanonicalEntityRecord)
+        .where(
+            CanonicalEntityRecord.workspace_id == workspace_id,
+            CanonicalEntityRecord.entity_type == "person",
+            CanonicalEntityRecord.preferred_name.ilike(needle),
+        )
+        .order_by(CanonicalEntityRecord.preferred_name, CanonicalEntityRecord.id)
+        .limit(limit)
+    ).all()
+    return [_candidate_summary(session, workspace_id, row) for row in rows]
+
+
+def _candidate_summary(
+    session: Session, workspace_id: str, entity: CanonicalEntityRecord
+) -> CanonicalPersonSuggestionRead:
+    evidence = session.execute(
+        select(EntityMentionRecord)
+        .join(IdentityDecisionRecord, IdentityDecisionRecord.mention_id == EntityMentionRecord.id)
+        .where(
+            IdentityDecisionRecord.workspace_id == workspace_id,
+            IdentityDecisionRecord.canonical_entity_id == entity.id,
+        )
+        .order_by(EntityMentionRecord.created_at)
+    ).scalars().all()
+    return CanonicalPersonSuggestionRead(
+        canonical_entity_id=entity.id,
+        preferred_name=entity.preferred_name,
+        mention_count=len(evidence),
+        document_count=len({item.document_id for item in evidence}),
+        sample_mentions=list(dict.fromkeys(item.surface_text for item in evidence))[:3],
+    )
+
+
+@router.get(
+    "/identity-curation/candidates/{entity_id}", response_model=CanonicalPersonCurationDetailRead
+)
+def identity_curation_candidate_detail(
+    workspace_id: str, entity_id: str, session: Session = Depends(get_session)
+):
+    WorkspaceContext.load(session, workspace_id)
+    entity = session.get(CanonicalEntityRecord, entity_id)
+    if entity is None or entity.workspace_id != workspace_id or entity.entity_type != "person":
+        raise HTTPException(404, "canonical Person not found in workspace")
+    rows = session.execute(
+        select(EntityMentionRecord, IdentityDecisionRecord)
+        .join(IdentityDecisionRecord, IdentityDecisionRecord.mention_id == EntityMentionRecord.id)
+        .where(
+            IdentityDecisionRecord.workspace_id == workspace_id,
+            IdentityDecisionRecord.canonical_entity_id == entity.id,
+        )
+        .order_by(EntityMentionRecord.created_at)
+    ).all()
+    return CanonicalPersonCurationDetailRead(
+        **_candidate_summary(session, workspace_id, entity).model_dump(),
+        mentions=[
+            EntityCurationEvidenceRead(
+                mention_id=mention.id,
+                raw_mention=mention.surface_text,
+                document_id=mention.document_id,
+                document_version_id=mention.document_version_id,
+                chunk_id=mention.chunk_id,
+                span_start=mention.span_start,
+                span_end=mention.span_end,
+                decision=decision.decision,
+                decision_basis=json.loads(decision.decision_basis_json).get("reason", ""),
+            )
+            for mention, decision in rows
+        ],
+        decisions=[],
+    )
+
+
+@router.post(
+    "/identity-curation/items/{mention_id}", response_model=IdentityCurationDecisionRead
+)
+def submit_identity_curation_decision(
+    workspace_id: str,
+    mention_id: str,
+    payload: IdentityCurationDecisionRequest,
+    session: Session = Depends(get_session),
+):
+    WorkspaceContext.load(session, workspace_id)
+    mention = session.get(EntityMentionRecord, mention_id)
+    if (
+        mention is None
+        or mention.workspace_id != workspace_id
+        or mention.entity_type != "person"
+    ):
+        raise HTTPException(404, "Person mention not found in workspace")
+    automatic = session.scalar(
+        select(IdentityDecisionRecord).where(
+            IdentityDecisionRecord.workspace_id == workspace_id,
+            IdentityDecisionRecord.mention_id == mention.id,
+        )
+    )
+    if automatic is None:
+        raise HTTPException(409, "Person mention has no automatic identity decision")
+    try:
+        row = HumanIdentityCurationStore(session, workspace_id).decide(
+            mention,
+            action=payload.action,
+            canonical_entity_id=payload.canonical_entity_id,
+            reason=payload.reason,
+            actor=payload.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _curation_read(row)
+
+
+@router.get(
+    "/identity-curation/items/{mention_id}/history",
+    response_model=list[IdentityCurationDecisionRead],
+)
+def identity_curation_history(
+    workspace_id: str, mention_id: str, session: Session = Depends(get_session)
+):
+    WorkspaceContext.load(session, workspace_id)
+    mention = session.get(EntityMentionRecord, mention_id)
+    if mention is None or mention.workspace_id != workspace_id:
+        raise HTTPException(404, "mention not found in workspace")
+    store = HumanIdentityCurationStore(session, workspace_id)
+    return [_curation_read(row) for row in store.history(mention_id)]
 
 
 def _operation_read(operation: IdentityOperation) -> IdentityOperationRead:

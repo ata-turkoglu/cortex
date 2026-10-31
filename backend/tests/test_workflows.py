@@ -107,6 +107,27 @@ def test_cancellation_and_restart_recovery_are_visible():
     assert run.state == "queued"
 
 
+def test_restart_finishes_a_cancellation_and_releases_its_lock():
+    session, workspace_id = session_with_workspace()
+    run = create_run(session, workspace_id, "knowledge_reindex")
+    run.state = "running"
+    session.add(
+        WorkspaceLock(
+            id=str(uuid4()),
+            workspace_id=workspace_id,
+            lock_type="index",
+            workflow_run_id=run.id,
+            acquired_at=datetime.now(UTC),
+        )
+    )
+    request_cancel(session, run)
+
+    assert recover_stale(session) == 1
+    assert run.state == "cancelled"
+    assert run.finished_at is not None
+    assert session.query(WorkspaceLock).filter_by(workflow_run_id=run.id).count() == 0
+
+
 def test_queued_workflow_cancels_without_a_worker_claiming_it():
     session, workspace_id = session_with_workspace()
     run = create_run(session, workspace_id, "ingestion")

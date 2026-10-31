@@ -73,6 +73,8 @@ class V2QueryService:
         property_vocabulary_loader: (
             Callable[[GenerationScope], dict[str, frozenset[str]]] | None
         ) = None,
+        completeness_evaluator: Callable[[GenerationScope, object, int | None], object]
+        | None = None,
     ) -> None:
         self.preparation = preparation
         self.scope_resolver = scope_resolver
@@ -82,6 +84,7 @@ class V2QueryService:
         self.answer_engine = answer_engine or AnswerEngine()
         self.briefing_loader = briefing_loader
         self.property_vocabulary_loader = property_vocabulary_loader
+        self.completeness_evaluator = completeness_evaluator
 
     async def execute(
         self,
@@ -96,9 +99,7 @@ class V2QueryService:
         if briefing is None and self.briefing_loader is not None:
             briefing = self.briefing_loader(scope)
         if self.property_vocabulary_loader is not None:
-            vocabulary = vocabulary.with_governed_properties(
-                self.property_vocabulary_loader(scope)
-            )
+            vocabulary = vocabulary.with_governed_properties(self.property_vocabulary_loader(scope))
         prepared = await self.preparation.prepare(query, context, vocabulary, readiness, briefing)
         if scope.workspace_id != prepared.physical_plan.workspace_id:
             raise ValueError("GENERATION_SCOPE_WORKSPACE_MISMATCH")
@@ -118,6 +119,8 @@ class V2QueryService:
             tuple(result for result in execution.results if result.step_id in result_steps),
             sources,
         )
+        package = self._apply_query_completeness(package, scope, prepared.logical_ir)
+        package = _with_failure_reason(package)
         answer = self.answer_engine.render(package)
         return V2QueryServiceResult(
             answer=answer,
@@ -161,6 +164,7 @@ class V2QueryService:
             issues=tuple(
                 f"capability_unavailable:{issue}" for issue in prepared.physical_plan.issues
             ),
+            failure_reason=_failure_reason(prepared),
         )
         answer = self.answer_engine.render(package)
         return V2QueryServiceResult(
@@ -196,6 +200,7 @@ class V2QueryService:
             answer_engine=self.answer_engine,
             briefing_loader=self.briefing_loader,
             property_vocabulary_loader=self.property_vocabulary_loader,
+            completeness_evaluator=self.completeness_evaluator,
         )
         return await bound.execute(
             session,
@@ -205,6 +210,23 @@ class V2QueryService:
             inputs.readiness,
             inputs.workspace_briefing,
         )
+
+    def _apply_query_completeness(self, package, scope, logical_ir):
+        if self.completeness_evaluator is None:
+            return package
+        query = self.completeness_evaluator(scope, logical_ir, _known_count(package))
+        completeness = package.completeness.model_copy(update={"query": query})
+        if query.status == "COMPLETE":
+            return package.model_copy(update={"completeness": completeness})
+        if query.status == "UNAVAILABLE":
+            return package.model_copy(
+                update={
+                    "state": "unsupported",
+                    "completeness": completeness,
+                    "issues": package.issues + tuple(query.reasons),
+                }
+            )
+        return package.model_copy(update={"state": "partial", "completeness": completeness})
 
     def _execute_bound(
         self, prepared: PreparedQuery, scope: GenerationScope, vector, query: str, sources
@@ -242,6 +264,41 @@ def _reconciliation_contract(plan, scope: GenerationScope, logical_ir):
         boundary=(logical_ir.coverage.population_boundary if exhaustive else None),
         expected_steps=steps,
     )
+
+
+def _known_count(package) -> int | None:
+    """Return only a directly represented canonical count; never estimate one."""
+    if package.aggregates:
+        value = package.aggregates[0].value
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    if package.structured_rows:
+        return len(package.structured_rows)
+    return 0 if package.completeness.confirmed_count == 0 else None
+
+
+def _failure_reason(prepared: PreparedQuery) -> str:
+    """Classify known safe-stop causes without exposing planner/provider prose."""
+    understanding = prepared.semantic.understanding
+    entity_states = {entity.resolution for entity in understanding.entities}
+    if "ambiguous" in entity_states or understanding.state == "ambiguous":
+        return "identity_ambiguous"
+    if "unresolved" in entity_states and (
+        understanding.structured_operation is not None
+        or understanding.relations
+        or understanding.typed_filters
+    ):
+        return "identity_unresolved"
+    if prepared.physical_plan.state == "unresolved":
+        return "query_not_understood"
+    return "unsupported_operation"
+
+
+def _with_failure_reason(package: ReasoningPackage) -> ReasoningPackage:
+    """Make every fail-closed result carry a typed renderer reason."""
+    if package.state != "unsupported" or package.failure_reason is not None:
+        return package
+    return package.model_copy(update={"failure_reason": "insufficient_evidence"})
 
 
 def _final_result_steps(plan, logical_ir) -> frozenset[str]:

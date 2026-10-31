@@ -19,6 +19,7 @@ from ..models import (
     GenerationCanonicalMembershipRecord,
     IdentityDecisionRecord,
     OwnershipAssertionRecord,
+    RejectedAssertionBlockerRecord,
 )
 from .entities import canonical_person_display_name, normalize_mention, normalize_person_identity
 
@@ -47,6 +48,24 @@ def _now() -> datetime:
 
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _surname_from_person_mention(value: str) -> str | None:
+    """A scope hint only; it never resolves or promotes the Person mention."""
+    tokens = [item.strip(". ,;:()[]") for item in value.split() if item.strip(". ,;:()[]")]
+    while tokens and normalize_mention(tokens[0]) in {
+        "bay",
+        "bayan",
+        "av",
+        "dr",
+        "prof",
+        "sayin",
+    }:
+        tokens.pop(0)
+    if not tokens or len(tokens[-1]) < 2:
+        return None
+    surname = normalize_mention(tokens[-1])
+    return surname if surname and any(character.isalpha() for character in surname) else None
 
 
 class CanonicalCoreStore:
@@ -268,6 +287,70 @@ class CanonicalCoreStore:
         self.session.flush()
         return row
 
+    def persist_rejected_ownership_blocker(
+        self,
+        *,
+        generation_id: str,
+        person_mention: EntityMentionRecord,
+        span_start: int,
+        span_end: int,
+        source_text: str,
+        reason: str,
+    ) -> RejectedAssertionBlockerRecord:
+        """Persist rejected evidence without creating identity, property, or ownership truth."""
+        if (
+            person_mention.generation_id != generation_id
+            or len(source_text) != span_end - span_start
+        ):
+            raise ValueError("rejected ownership blocker crosses its exact generation evidence")
+        existing = self.session.scalar(
+            select(RejectedAssertionBlockerRecord).where(
+                RejectedAssertionBlockerRecord.workspace_id == self.workspace_id,
+                RejectedAssertionBlockerRecord.generation_id == generation_id,
+                RejectedAssertionBlockerRecord.chunk_id == person_mention.chunk_id,
+                RejectedAssertionBlockerRecord.span_start == span_start,
+                RejectedAssertionBlockerRecord.span_end == span_end,
+                RejectedAssertionBlockerRecord.reason == reason,
+            )
+        )
+        if existing:
+            if existing.source_text_hash != _hash(source_text):
+                raise ValueError("conflicting replay for rejected ownership blocker")
+            return existing
+        surname = _surname_from_person_mention(person_mention.surface_text)
+        row = RejectedAssertionBlockerRecord(
+            id=new_uuid7(),
+            workspace_id=self.workspace_id,
+            generation_id=generation_id,
+            blocker_type="rejected_assertion",
+            entity_type="person",
+            relation_type="owns",
+            potentially_countable=True,
+            affected_dimension="property_count",
+            normalized_subject_surname=surname,
+            document_id=person_mention.document_id,
+            document_version_id=person_mention.document_version_id,
+            logical_document_id=person_mention.logical_document_id,
+            chunk_id=person_mention.chunk_id,
+            span_start=span_start,
+            span_end=span_end,
+            source_text=source_text,
+            source_text_hash=_hash(source_text),
+            reason=reason,
+            scope_hints_json=json.dumps(
+                {
+                    "subject_entity_type": "person",
+                    "subject_surname": surname,
+                    "relation_type": "owns",
+                    "affected_dimension": "property_count",
+                }
+            ),
+            created_at=_now(),
+        )
+        self.session.add(row)
+        self.session.flush()
+        return row
+
     def record_chunk(
         self, generation_id: str, chunk_id: str, content_hash: str, *, failed: str | None = None
     ) -> None:
@@ -368,9 +451,25 @@ class CanonicalCoreStore:
         target = None
         decision = "UNRESOLVED"
         basis = "insufficient identity evidence"
+        # A matching human record is keyed to this exact source evidence, not
+        # normalized text. It is therefore a distinct authority from the
+        # automatic resolver and cannot teach a future name heuristic.
+        from .identity_curation import HumanIdentityCurationStore
+
+        curation = HumanIdentityCurationStore(self.session, self.workspace_id)
+        curated = curation.active_for_mention(mention)
+        if curated is not None:
+            if curated.action == "LINK_TO_EXISTING":
+                target = self.session.get(CanonicalEntityRecord, curated.canonical_entity_id)
+                if target is None or target.workspace_id != self.workspace_id:
+                    raise ValueError("curated identity target is no longer a workspace Person")
+                decision = "LINK"
+                basis = f"explicit human curation decision {curated.id}"
+            else:
+                basis = f"explicit human keep-unresolved decision {curated.id}"
         if candidate_ids and not candidate_provenance:
             raise ValueError("identity candidate provenance is required")
-        if normalized:
+        if normalized and curated is None:
             # A link requires a caller-provided unique candidate that exists in SQLite;
             # similarity and same-name discovery never supply it implicitly.
             if len(candidates) == 1:
@@ -453,6 +552,54 @@ class CanonicalCoreStore:
             )
         self.session.flush()
         return len(accepted)
+
+    def consolidate_exact_person_identities(self, generation_id: str) -> dict[str, str]:
+        """Link exact-name identities only after cross-document corroboration.
+
+        Extraction frequently sees the same full name in multiple chunks.  A
+        mention is not a person: separate NEW decisions must not inflate a
+        generation population.  Conversely, a same-name occurrence in just one
+        document version may still be a homonym, so it remains separate until
+        exact normalized identity is corroborated by a second version.
+        """
+        rows = self.session.execute(
+            select(IdentityDecisionRecord, EntityMentionRecord, CanonicalEntityRecord)
+            .join(EntityMentionRecord, IdentityDecisionRecord.mention_id == EntityMentionRecord.id)
+            .join(
+                CanonicalEntityRecord,
+                IdentityDecisionRecord.canonical_entity_id == CanonicalEntityRecord.id,
+            )
+            .where(
+                IdentityDecisionRecord.workspace_id == self.workspace_id,
+                EntityMentionRecord.generation_id == generation_id,
+                IdentityDecisionRecord.decision.in_(("NEW", "LINK")),
+                CanonicalEntityRecord.entity_type == "person",
+            )
+        ).all()
+        groups: dict[
+            str, list[tuple[IdentityDecisionRecord, EntityMentionRecord, CanonicalEntityRecord]]
+        ] = {}
+        for decision, mention, entity in rows:
+            key = entity.normalized_preferred_name
+            if key:
+                groups.setdefault(key, []).append((decision, mention, entity))
+        remapped: dict[str, str] = {}
+        for entries in groups.values():
+            if len({mention.document_version_id for _, mention, _ in entries}) < 2:
+                continue
+            target_id = min(entity.id for _, _, entity in entries)
+            for decision, _, entity in entries:
+                if entity.id == target_id:
+                    continue
+                decision.canonical_entity_id = target_id
+                decision.decision = "LINK"
+                decision.decision_basis_json = json.dumps(
+                    {"reason": "exact normalized identity corroborated across document versions"},
+                    sort_keys=True,
+                )
+                remapped[decision.mention_id] = target_id
+        self.session.flush()
+        return remapped
 
     def record_status(
         self,

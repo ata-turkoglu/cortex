@@ -18,23 +18,41 @@ def normalize_mention(value: str) -> str:
 
 
 _PERSON_TITLES = frozenset({
-    "av", "av.", "dr", "dr.", "prof", "prof.", "bay", "bayan", "sayın", "sayin",
+    "av", "av.", "dr", "dr.", "prof", "prof.", "bay", "bayan", "bey", "hanım", "hanim",
+    "sayın", "sayin",
 })
 _PERSON_CONTEXT_PREFIXES = frozenset({"varisleri", "varisi", "mirasçıları", "mirascilari"})
+
+
+_PERSON_NAME_TOKEN = re.compile(r"^[^\W\d_]+(?:-[^\W\d_]+)*$", re.UNICODE)
 
 
 def normalize_person_identity(value: str) -> str | None:
     """Return a comparison-only person identity, preserving the original mention elsewhere."""
     value = unicodedata.normalize("NFKC", value).strip()
+    # A canonical Person is a name, not a legal clause, property description,
+    # identifier, or possessive phrase. These source spans remain auditable but
+    # cannot safely become automatic canonical identities.
+    if any(character.isdigit() or character in "'â€™" for character in value):
+        return None
     value = re.sub(r"\([^)]*\)", " ", value)
     value = re.sub(r"[\[\],;:]+", " ", value)
     tokens = [token.strip(". ") for token in value.split()]
     while tokens and normalize_mention(tokens[0]) in _PERSON_TITLES | _PERSON_CONTEXT_PREFIXES:
         tokens.pop(0)
+    # Turkish courtesy titles can appear after a given name (for example,
+    # ``Ali Bey``). They do not make a one-token reference identifiable.
+    while tokens and normalize_mention(tokens[-1]) in _PERSON_TITLES:
+        tokens.pop()
     tokens = [token for token in tokens if token]
     # A one-token surname, title, initial, or OCR fragment is not enough evidence
     # to create an extracted canonical person.
-    if len(tokens) < 2 or any(len(token) == 1 for token in tokens):
+    if (
+        not 2 <= len(tokens) <= 5
+        or any(len(token) == 1 for token in tokens)
+        or any(not _PERSON_NAME_TOKEN.fullmatch(token) for token in tokens)
+        or any(not (token.isupper() or token[0].isupper()) for token in tokens)
+    ):
         return None
     return normalize_mention(" ".join(tokens))
 
@@ -48,6 +66,8 @@ def canonical_person_display_name(value: str) -> str | None:
     tokens = [token.strip(". ") for token in re.sub(r"[\[\],;:]+", " ", value).split()]
     while tokens and normalize_mention(tokens[0]) in _PERSON_TITLES | _PERSON_CONTEXT_PREFIXES:
         tokens.pop(0)
+    while tokens and normalize_mention(tokens[-1]) in _PERSON_TITLES:
+        tokens.pop()
     return " ".join(token for token in tokens if token) or None
 
 

@@ -169,7 +169,15 @@ def _readiness(
             CanonicalGenerationStatusRecord.projection_version == "minimal-core-v1",
         )
     )
-    canonical_ready = bool(canonical_status and canonical_status.status == "READY")
+    # Generation health remains PARTIAL when evidence is unresolved, but a
+    # fully processed SQLite projection is still safe to query for known facts.
+    # Query-scoped completeness is evaluated after the IR and result are known.
+    canonical_ready = bool(
+        canonical_status
+        and canonical_status.status in {"READY", "PARTIAL"}
+        and canonical_status.processed_chunk_count == canonical_status.manifest_chunk_count
+        and canonical_status.failed_chunk_count == 0
+    )
     graphrag_ready = states.get("graphrag") is not None and states["graphrag"].state == "ready"
     canonical_capabilities = CAPABILITY_FAMILIES["canonical.exhaustive"]
     canonical_entries = tuple(
@@ -184,7 +192,8 @@ def _readiness(
                 None
                 if canonical_ready
                 else (
-                    f"canonical exhaustive status is {canonical_status.status.lower()}"
+                    "canonical SQLite projection is not operational: "
+                    f"{canonical_status.status.lower()}"
                     if canonical_status
                     else "SQLite canonical completeness is not ready for this generation"
                 )

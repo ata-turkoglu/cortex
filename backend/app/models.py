@@ -218,6 +218,54 @@ class IdentityDecisionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class HumanIdentityCurationDecisionRecord(Base):
+    """Append-only human adjudication keyed to one exact source mention identity."""
+
+    __tablename__ = "human_identity_curation_decisions"
+    __table_args__ = (
+        Index(
+            "ix_human_identity_curation_exact_active",
+            "workspace_id",
+            "document_version_id",
+            "chunk_id",
+            "span_start",
+            "span_end",
+            "source_text_hash",
+            "active",
+        ),
+        CheckConstraint(
+            "action IN ('LINK_TO_EXISTING', 'KEEP_UNRESOLVED')",
+            name="ck_human_identity_curation_action",
+        ),
+        CheckConstraint(
+            "(action = 'LINK_TO_EXISTING' AND canonical_entity_id IS NOT NULL) OR "
+            "(action = 'KEEP_UNRESOLVED' AND canonical_entity_id IS NULL)",
+            name="ck_human_identity_curation_target",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    mention_id: Mapped[str] = mapped_column(ForeignKey("entity_mentions.id"), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    logical_document_id: Mapped[str | None] = mapped_column(String(72))
+    chunk_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    span_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    span_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    canonical_entity_id: Mapped[str | None] = mapped_column(ForeignKey("canonical_entities.id"))
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_reference_json: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_decision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("human_identity_curation_decisions.id")
+    )
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class CanonicalPropertyRecord(Base):
     __tablename__ = "canonical_properties"
     __table_args__ = (UniqueConstraint("workspace_id", "identity_key"),)
@@ -280,6 +328,45 @@ class OwnershipAssertionRecord(Base):
     share_denominator: Mapped[int | None] = mapped_column(Integer)
     recorded_date: Mapped[str | None] = mapped_column(String(32))
     assertion_rule_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class RejectedAssertionBlockerRecord(Base):
+    """Auditable non-canonical evidence that can limit a scoped query result."""
+
+    __tablename__ = "rejected_assertion_blockers"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "generation_id", "chunk_id", "span_start", "span_end", "reason"
+        ),
+        Index(
+            "ix_rejected_assertion_blockers_scope",
+            "workspace_id",
+            "generation_id",
+            "normalized_subject_surname",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    generation_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_generations.id"), nullable=False
+    )
+    blocker_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    relation_type: Mapped[str | None] = mapped_column(String(64))
+    potentially_countable: Mapped[bool] = mapped_column(nullable=False, default=False)
+    affected_dimension: Mapped[str | None] = mapped_column(String(64))
+    normalized_subject_surname: Mapped[str | None] = mapped_column(String(255))
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_version_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    logical_document_id: Mapped[str | None] = mapped_column(String(72))
+    chunk_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    span_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    span_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_hints_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
@@ -602,6 +689,7 @@ class QueryRun(Base):
     route_reason: Mapped[str | None] = mapped_column(Text)
     route_confidence: Mapped[float | None] = mapped_column()
     answer_state: Mapped[str | None] = mapped_column(String(32))
+    completeness_json: Mapped[str | None] = mapped_column(Text)
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

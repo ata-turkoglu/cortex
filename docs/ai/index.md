@@ -24,7 +24,9 @@ select the smallest matching path in `.ai/project-map.yaml` and read its scoped 
 | V2 research/composition | `backend/app/reasoning/AGENTS.md` | choose `research` or `composition` child context |
 
 Production V2 capability status: `retrieval.grounded` is ready; `graphrag.grounded` is partial and
-readiness-dependent; `canonical.exhaustive` and `canonical.graph` are not production accepted.
+readiness-dependent; SQLite `canonical.structured` is queryable when its projection is operational
+and exposes query-scoped `COMPLETE`/`PARTIAL`/`UNAVAILABLE` metadata; `canonical.graph` is not
+production accepted.
 Historical V1 discovery notes and compatibility code must not be used as the primary query path.
 
 Never scan runtime data, package caches, virtual environments, generated API clients,

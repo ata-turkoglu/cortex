@@ -32,6 +32,14 @@ projection are ready. It is independent of `canonical.exhaustive` and `canonical
 never claims corpus completeness and cannot replace a canonical list/count/group/rank/compare,
 relation traversal, or property inventory.
 
+A grounded descriptive request that names a person or other entity may use its literal mention as
+the dense/BM25 retrieval query when exact canonical identity resolution is absent or collides. It
+does not synthesize an ID, choose a candidate, or make the canonical request resolved: the semantic
+identity uncertainty remains durable while V2 retrieves and validates generation-bound evidence.
+This exception is limited to unstructured descriptive/evidence work. Typed filters, relations,
+temporals, LIST/COUNT/GROUP/RANK/COMPARE, and every exhaustive request remain on the canonical
+path and fail closed when that path is unavailable.
+
 ## Phase 6 implementation boundary
 
 `app/retrieval/qdrant.py` is the only Qdrant adapter. It always creates a

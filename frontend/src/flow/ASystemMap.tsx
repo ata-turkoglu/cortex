@@ -332,12 +332,12 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-governed-vocabulary",
-    label: "Governed Vocabulary (canonical blocked)",
+    label: "Governed Vocabulary (SQLite canonical)",
     boundary: "backend/app/query/ir/validation.py · backend/app/query/runtime_inputs.py",
     documentation: "docs/architecture/query-v2/query-runtime.md",
     context: "backend/app/query/ir/AGENTS.md · CLAUDE.md",
     description:
-      "Validates entity-type-specific, generation-bound typed filters only when the canonical capability is separately ready.",
+      "Validates entity-type-specific, generation-bound typed filters when the SQLite canonical projection is operational, independent of global canonical health.",
     guarantee:
       "An undeclared field or entity/property combination fails closed; it cannot use arbitrary Neo4j properties or retrieval as an exhaustive substitute.",
     kind: "safety",
@@ -384,27 +384,27 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   },
   {
     id: "v2-query-structured",
-    label: "canonical.exhaustive (not accepted)",
+    label: "Canonical Structured Engine",
     boundary: "backend/app/engines/structured/",
     documentation: "docs/architecture/query-v2/structured-graph-engines.md",
     context: "backend/app/engines/structured/AGENTS.md · CLAUDE.md",
     description:
-      "Structured Engine would load a canonical population for LIST/COUNT/GROUP/RANK/COMPARE, but this capability is not production accepted.",
+      "Loads known SQLite canonical populations for LIST/COUNT/GROUP/RANK/COMPARE when the generation projection is operational.",
     guarantee:
-      "Unavailable population completeness fails closed. Retrieval top-k cannot substitute for exhaustive semantics.",
+      "Query-scoped completeness exposes COMPLETE, PARTIAL, or UNAVAILABLE; retrieval top-k cannot substitute for exhaustive semantics.",
     kind: "retrieval",
     variant: "query",
   },
   {
     id: "v2-query-list-count",
-    label: "Canonical structured operations (blocked)",
+    label: "Query-Scoped Completeness",
     boundary: "backend/app/engines/structured/engine.py · backend/app/query/planning/planner.py",
     documentation: "docs/architecture/query-v2/structured-graph-engines.md",
     context: "backend/app/engines/structured/AGENTS.md · backend/app/query/planning/AGENTS.md",
     description:
-      "Represents canonical filters, relations, and aggregates that remain blocked pending canonical acceptance.",
+      "Classifies final structured results against governed population blockers after deterministic SQLite execution.",
     guarantee:
-      "Retrieval top-k, evidence, citation, and answer-rendering cardinality never determine exhaustive COUNT.",
+      "Known canonical rows remain valid; unresolved evidence changes completeness metadata, never the canonical population.",
     kind: "processor",
     variant: "query",
   },
