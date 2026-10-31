@@ -27,8 +27,8 @@ marker. Root → backend → parent → child navigation is recorded in `.ai/pro
 
 | Concern | Current V2 owner | Historical / compatibility note |
 | --- | --- | --- |
-| Production query runtime, planning, reconciliation, answer persistence | `app/query/` | `app/chat/` is retained only where historical evaluation/worker compatibility still references it |
-| Structured canonical execution | `app/engines/structured/` | `app/aggregation/property.py` is Historical / V1 and is not a V2 structured authority |
+| Production query runtime, planning, reconciliation, answer persistence | `app/query/` | The V1 `app/chat/` orchestration has been removed |
+| Structured canonical execution | `app/engines/structured/` | The V1 `app/aggregation/property.py` has been removed |
 | Dense/BM25/fusion/reranking | `app/retrieval/` | Existing package remains the V2 Retrieval Engine adapter; do not create `engines/retrieval/` |
 | Microsoft GraphRAG adapter and artifacts | `app/graphrag/` | Existing package remains the V2 GraphRAG adapter; do not create `engines/graphrag/` |
 | Durable jobs and checkpoints | `app/workflows/` | Reused by query/research/composition; workflow persistence is not copied |

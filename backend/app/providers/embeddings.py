@@ -43,10 +43,33 @@ async def adaptive_embed(
     *,
     batch_size: int,
     min_batch_size: int = 1,
+    concurrency: int = 1,
 ) -> list[list[float]]:
-    """Retry a failed batch at smaller sizes without reordering multilingual input."""
+    """Embed in order, with up to ``concurrency`` batches in flight at once.
+
+    Each batch independently retries at smaller sizes, and results are joined in input
+    order, so multilingual input is never reordered.
+    """
     if batch_size < 1 or min_batch_size < 1 or min_batch_size > batch_size:
         raise ValueError("invalid embedding batch limits")
+    if concurrency < 1:
+        raise ValueError("embedding concurrency must be positive")
+    slices = [texts[start : start + batch_size] for start in range(0, len(texts), batch_size)]
+    vectors: list[list[float]] = []
+    for wave in range(0, len(slices), concurrency):
+        for result in await asyncio.gather(
+            *(
+                _adaptive_embed_slice(provider, item, batch_size, min_batch_size)
+                for item in slices[wave : wave + concurrency]
+            )
+        ):
+            vectors.extend(result)
+    return vectors
+
+
+async def _adaptive_embed_slice(
+    provider: EmbeddingProvider, texts: list[str], batch_size: int, min_batch_size: int
+) -> list[list[float]]:
     vectors: list[list[float]] = []
     position = 0
     current_batch_size = batch_size
@@ -145,7 +168,11 @@ class OllamaEmbeddingAdapter:
         ) as client:
             response = await client.post(
                 self.base_url + "/api/embed",
-                json={"model": self.configuration.model, "input": texts},
+                json={
+                    "model": self.configuration.model,
+                    "input": texts,
+                    "keep_alive": get_settings().embedding_keep_alive,
+                },
             )
             if response.status_code == 404:
                 # The Windows host relay can reject async connections while its
@@ -176,7 +203,12 @@ def _native_ollama_embeddings(
     endpoint = base_url.replace("localhost", "127.0.0.1")
     with httpx.Client(timeout=timeout, trust_env=False) as client:
         response = client.post(
-            endpoint + "/api/embed", json={"model": model, "input": texts}
+            endpoint + "/api/embed",
+            json={
+                "model": model,
+                "input": texts,
+                "keep_alive": get_settings().embedding_keep_alive,
+            },
         )
         response.raise_for_status()
     return response.json().get("embeddings", [])

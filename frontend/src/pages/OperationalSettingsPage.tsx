@@ -21,21 +21,19 @@ import {
 } from "../components/ui";
 
 const apiProviders: ProviderName[] = ["openai", "anthropic"];
+const openAiOnlyLayer = (layer: string) =>
+  layer.startsWith("semantic_planner_") || layer === "summary" || layer === "answer";
 const layers = [
   ["metadata", "Metadata extraction"],
-  ["answer", "Answer generation"],
-  ["router", "Query router"],
   ["semantic_planner_simple", "Semantic Planner / Simple"],
   ["semantic_planner_standard", "Semantic Planner / Standard"],
   ["semantic_planner_complex", "Semantic Planner / Complex"],
+  ["answer", "Answer synthesis"],
   ["summary", "Conversation summary"],
-  ["query_expansion", "Query expansion"],
   ["graphrag_extraction", "Entity and relationship extraction"],
-  ["graphrag_claims", "Claim extraction"],
   ["graphrag_community", "Community report generation"],
-  ["graphrag_local", "GraphRAG Local Search"],
-  ["graphrag_global", "GraphRAG Global Search"],
-  ["graphrag_drift", "GraphRAG DRIFT Search"],
+  ["graphrag_global", "GraphRAG Global selection"],
+  ["graphrag_drift", "GraphRAG DRIFT selection"],
   ["embedding", "Embeddings"],
 ] as const;
 
@@ -44,16 +42,12 @@ const layerDescriptions: Record<string, string> = {
   semantic_planner_standard: "Interprets analytical and structured requests with the strict semantic JSON Schema.",
   semantic_planner_complex: "Interprets ambiguous or long relational requests with the strict semantic JSON Schema.",
   metadata: "Belgeden başlık, tür ve etiket gibi yapılandırılmış bilgileri çıkarır.",
-  answer: "Toplanan kanıtları kullanıcıya verilecek son yanıta dönüştürür.",
-  router: "Soruyu uygun arama ve cevaplama yoluna yönlendirir.",
+  answer: "Açıkken belge araması cevaplarını yalnızca doğrulanmış kanıttan, her cümlesi kaynağa bağlı olarak yazar; doğrulanamayan cevap deterministik metne döner.",
   summary: "Uzun konuşmaları sonraki mesajlar için kısa bağlama dönüştürür.",
-  query_expansion: "Arama kapsamını artırmak için alternatif sorgular üretir.",
   graphrag_extraction: "Microsoft GraphRAG'ın tek extract_graph adımıyla varlıkları ve aralarındaki ilişkileri çıkarır.",
-  graphrag_claims: "Etkinleştirildiğinde metindeki doğrulanabilir iddia ve olguları çıkarır.",
   graphrag_community: "Bulunan toplulukları, graf çapında sorguların kullanacağı özet ve raporlara dönüştürür.",
-  graphrag_local: "Bir varlık veya dar bir konu etrafındaki graf bağlamını kullanarak cevap üretir.",
-  graphrag_global: "Topluluk raporlarından belge ve tema çapında sentez üretir.",
-  graphrag_drift: "Odaklı bir soruyu çok aşamalı takip eden grafik araştırmasıyla yanıtlar.",
+  graphrag_global: "Akıllı arama açıkken, soruyla ilgili topluluk raporlarını seçmek için özetleri puanlar.",
+  graphrag_drift: "Akıllı arama açıkken, soruya en yakın topluluk raporlarını bulmak için tek bir ön çağrı yapar.",
   embedding: "Metni, anlam tabanlı aramada kullanılan sayısal vektörlere dönüştürür.",
 };
 
@@ -84,7 +78,17 @@ export function OperationalSettingsPage() {
     void apiClient
       .getSettings()
       .then((data) => {
-        setValues(data.settings);
+        // Conversation summaries and answer synthesis run only through OpenAI; normalize a
+        // legacy assignment so a save never re-submits a provider the backend cannot run.
+        const loaded = { ...data.settings };
+        for (const layer of ["summary", "answer"]) {
+          const provider = loaded[`${layer}_provider`];
+          if (provider && provider !== "openai") {
+            loaded[`${layer}_provider`] = "openai";
+            loaded[`${layer}_model`] = "";
+          }
+        }
+        setValues(loaded);
         setSavedEmbedding({ provider: data.settings.embedding_provider, model: data.settings.embedding_model });
         const configuredProvider = layers
           .map(([layer]) => data.settings[`${layer}_provider`])
@@ -167,7 +171,7 @@ export function OperationalSettingsPage() {
     setApiProvider(provider);
     const next = { ...values };
     for (const [layer] of layers) {
-      if (layer.startsWith("graphrag_") || layer.startsWith("semantic_planner_")) continue;
+      if (layer.startsWith("graphrag_") || openAiOnlyLayer(layer)) continue;
       if (next[`${layer}_provider`] === "ollama") continue;
       next[`${layer}_provider`] = provider;
       next[`${layer}_model`] = modelsFor(provider, layer)[0]?.model ?? "";
@@ -177,7 +181,8 @@ export function OperationalSettingsPage() {
   const assignment = (layer: string, label: string) => {
     const graphRagLayer = layer.startsWith("graphrag_");
     const plannerLayer = layer.startsWith("semantic_planner_");
-    const provider = (values[`${layer}_provider`] ?? (graphRagLayer || plannerLayer ? "openai" : apiProvider)) as ProviderName;
+    const openAiOnly = openAiOnlyLayer(layer);
+    const provider = (values[`${layer}_provider`] ?? (graphRagLayer || openAiOnly ? "openai" : apiProvider)) as ProviderName;
     const isLocal = provider === "ollama";
     const compatibleModels = modelsFor(provider, layer);
     const modelOptions = compatibleModels.map((model) => ({
@@ -191,7 +196,7 @@ export function OperationalSettingsPage() {
           <AInfo description={layerDescriptions[layer]} position="right" />
         </div>
         <div className="settings-assignment__fields">
-          {!plannerLayer && <div className="settings-assignment__source" role="radiogroup" aria-label={`${label} model source`}>
+          {!openAiOnly && <div className="settings-assignment__source" role="radiogroup" aria-label={`${label} model source`}>
             <ALabel className="a-label--inline">
               <ARadio checked={isLocal} name={`${layer}-source`} value="local" onChange={() => selectAssignmentProvider(layer, "ollama")} />
               Local
@@ -202,6 +207,7 @@ export function OperationalSettingsPage() {
             </ALabel>
           </div>}
           {plannerLayer && <small>OpenAI Responses strict structured output</small>}
+          {openAiOnly && !plannerLayer && <small>OpenAI</small>}
           <ALabel aria-label={`${label} model`}>
             <ASelect
               value={String(values[`${layer}_model`] ?? "")}
@@ -212,7 +218,7 @@ export function OperationalSettingsPage() {
             />
           </ALabel>
         </div>
-        {isLocal && !plannerLayer && modelOptions.length === 0 && <small>Ollama could not provide a compatible installed model.</small>}
+        {isLocal && !openAiOnly && modelOptions.length === 0 && <small>Ollama could not provide a compatible installed model.</small>}
       </section>
     );
   };
@@ -291,10 +297,6 @@ export function OperationalSettingsPage() {
               {field("graphrag_pending_document_threshold", "GraphRAG pending threshold")}
               {field("workflow_retention_days", "Workflow retention days")}
               {field("conversation_memory_window_messages", "Conversation memory messages")}
-              <ALabel>
-                Answer style
-                <ASelect value={String(values.answer_style ?? "balanced")} options={["concise", "balanced", "detailed"]} onChange={(event) => set("answer_style", event.value)} />
-              </ALabel>
             </div>
           </section>
           <section>
@@ -344,20 +346,33 @@ export function OperationalSettingsPage() {
           <div className="settings-model-assignments">
             {layers.map(([layer, label]) => assignment(layer, label))}
             <section className="settings-assignment">
-              <strong>Claim extraction</strong>
               <ALabel className="a-label--inline">
-                <ACheckbox checked={Boolean(values.graphrag_claims_enabled)} onChange={(event) => set("graphrag_claims_enabled", Boolean(event.checked))} />
-                Enabled (disabled by default; claims are optional)
+                <ACheckbox checked={Boolean(values.answer_synthesis_enabled)} onChange={(event) => set("answer_synthesis_enabled", Boolean(event.checked))} />
+                Enable grounded answer synthesis (OpenAI; off by default)
+              </ALabel>
+              <ALabel>
+                Answer style
+                <ASelect value={String(values.answer_style ?? "balanced")} options={["concise", "balanced", "detailed"]} onChange={(event) => set("answer_style", event.value)} />
               </ALabel>
             </section>
             <section className="settings-assignment">
-              <strong>DRIFT safety limits</strong>
+              <strong>Smart GraphRAG search</strong>
+              <ALabel className="a-label--inline">
+                <ACheckbox checked={Boolean(values.graphrag_smart_search_enabled)} onChange={(event) => set("graphrag_smart_search_enabled", Boolean(event.checked))} />
+                Enabled (off by default)
+              </ALabel>
+              <small>
+                Only GraphRAG's selection step runs; its written answer is never generated. Local uses
+                embeddings only (no model calls). Global rates community summaries with the Global
+                model. DRIFT makes one call with the DRIFT model. Repeated questions reuse cached
+                selections, and spend is recorded in cost controls.
+              </small>
+            </section>
+            <section className="settings-assignment">
+              <strong>DRIFT selection</strong>
               <div className="mt-3 grid grid-cols-2 gap-4">
-                {field("graphrag_drift_n_depth", "Maximum depth")}
-                {field("graphrag_drift_k_followups", "Follow-ups per depth")}
+                {field("graphrag_drift_k_followups", "Community reports selected")}
                 {field("graphrag_drift_primer_folds", "Primer folds")}
-                {field("graphrag_drift_concurrency", "Query concurrency")}
-                {field("graphrag_drift_max_llm_calls", "Maximum LLM calls")}
               </div>
             </section>
           </div>

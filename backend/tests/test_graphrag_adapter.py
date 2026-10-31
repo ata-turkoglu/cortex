@@ -10,8 +10,6 @@ from app.graphrag import cli
 from app.graphrag.adapter import GraphRAGAdapter, GraphRoute
 from app.graphrag.cli import normalize_arrow_values
 from app.graphrag.input import GraphRAGInputMaterializer
-from app.graphrag.llamaindex import GraphRAGQueryEngine
-from app.retrieval.schemas import AnswerState
 
 
 def test_graphrag_cli_normalizes_nested_arrow_arrays_before_writing_parquet():
@@ -33,7 +31,7 @@ def test_graphrag_cli_preloads_torch_on_windows(monkeypatch):
     assert cli.preload_torch_on_windows() is sentinel
 
 
-def test_graphrag_routes_remain_distinct_and_networkx_is_rebuildable(tmp_path):
+def test_networkx_is_rebuildable_from_graphrag_artifacts(tmp_path):
     root = tmp_path / "workspace" / "graphrag"
     root.mkdir(parents=True)
     (root / "entities.json").write_text(
@@ -51,9 +49,6 @@ def test_graphrag_routes_remain_distinct_and_networkx_is_rebuildable(tmp_path):
         encoding="utf-8",
     )
     adapter = GraphRAGAdapter("workspace-a", root)
-    assert adapter.query(GraphRoute.LOCAL, "Ankara").evidence[0].source == "graphrag:local"
-    assert adapter.query(GraphRoute.GLOBAL, "Türkiye").evidence[0].source == "graphrag:global"
-    assert adapter.query(GraphRoute.DRIFT, "Türkiye").evidence[0].source == "graphrag:drift"
     assert adapter.rebuild_networkx().number_of_edges() == 1
     assert (root / "networkx.graphml").exists()
 
@@ -82,14 +77,16 @@ def test_v2_graphrag_findings_require_artifact_workspace_and_generation(tmp_path
     ) == ()
 
 
-def test_missing_graph_is_an_explicit_fallback(tmp_path):
-    adapter = GraphRAGAdapter("workspace-a", tmp_path / "missing")
-    result = adapter.query(GraphRoute.LOCAL, "anything")
-    assert result.state is AnswerState.UNSUPPORTED
-    assert result.fallback_reason == "graph_not_indexed"
+def test_graphrag_prose_answers_have_no_code_path():
+    """V2 never admits GraphRAG's written answer, so nothing may be able to produce one."""
+    from app.graphrag.adapter import GraphRAGCommandRunner, MicrosoftGraphRAGRunner
+
+    assert not hasattr(GraphRAGAdapter, "query")
+    assert not hasattr(MicrosoftGraphRAGRunner, "query")
+    assert not hasattr(GraphRAGCommandRunner, "query")
 
 
-def test_graph_adapter_delegates_index_and_distinct_routes_to_upstream_runner(tmp_path):
+def test_graph_adapter_delegates_index_to_upstream_runner(tmp_path):
     calls = []
 
     class Runner:
@@ -102,29 +99,12 @@ def test_graph_adapter_delegates_index_and_distinct_routes_to_upstream_runner(tm
         def index(self, root, config, method):
             calls.append(("index", root, config, method))
 
-        def query(self, root, config, route, query):
-            calls.append(("query", root, config, route, query))
-            return f"{route.value}: {query}"
-
     root = tmp_path / "workspace" / "graphrag"
     adapter = GraphRAGAdapter("workspace-a", root, runner=Runner())
     config = adapter.initialize()
     adapter.index("fast")
-    (root / "output" / "artifacts.parquet").touch()
-    local = adapter.query(GraphRoute.LOCAL, "Ankara")
-    global_result = adapter.query(GraphRoute.GLOBAL, "Türkiye")
-    drift = adapter.query(GraphRoute.DRIFT, "Neden?")
-    assert calls[0][0] == "initialize"
-    assert calls[1][0] == "index"
-    assert calls[1][2] == config
-    assert [call[3] for call in calls[2:]] == [
-        GraphRoute.LOCAL,
-        GraphRoute.GLOBAL,
-        GraphRoute.DRIFT,
-    ]
-    assert local.evidence[0].content == "local: Ankara"
-    assert global_result.evidence[0].content == "global: Türkiye"
-    assert drift.evidence[0].content == "drift: Neden?"
+    assert [call[0] for call in calls] == ["initialize", "index"]
+    assert calls[1][2:] == (config, "fast")
 
 
 def test_runner_keeps_the_actionable_tail_of_a_graphrag_failure(monkeypatch, tmp_path):
@@ -290,40 +270,6 @@ def test_graph_adapter_reads_native_parquet_outputs_without_rewriting_them(tmp_p
     assert artifacts[0].attributes["title"] == "Ankara"
 
 
-def test_llamaindex_query_engines_keep_graphrag_routes_and_evidence_distinct(tmp_path):
-    root = tmp_path / "workspace" / "graphrag"
-    root.mkdir(parents=True)
-    (root / "entities.json").write_text(
-        json.dumps([{"id": "a", "text": "Ankara", "attributes": {"title": "Başkent"}}]),
-        encoding="utf-8",
-    )
-    adapter = GraphRAGAdapter("workspace-a", root)
-    response = GraphRAGQueryEngine(adapter=adapter, route=GraphRoute.LOCAL).query("Ankara")
-    assert response.metadata == {"route": "local", "answer_state": "grounded"}
-    assert response.source_nodes[0].node.metadata["workspace_id"] == "workspace-a"
-
-
-def test_failed_upstream_query_is_an_explicit_stale_graph_fallback(tmp_path):
-    from app.graphrag.adapter import GraphRAGExecutionError
-
-    class FailingRunner:
-        def index(self, root, config, method):
-            pass
-
-        def query(self, root, config, route, query):
-            raise GraphRAGExecutionError("provider unavailable")
-
-    root = tmp_path / "workspace" / "graphrag"
-    output = root / "output"
-    output.mkdir(parents=True)
-    (output / "create_final_entities.parquet").touch()
-    result = GraphRAGAdapter(
-        "workspace-a", root, config_path=root / "settings.yaml", runner=FailingRunner()
-    ).query(GraphRoute.LOCAL, "Ankara")
-    assert result.state is AnswerState.UNSUPPORTED
-    assert result.fallback_reason == "graph_stale"
-
-
 def test_graphrag_input_materializer_copies_only_active_workspace_documents(tmp_path):
     from datetime import UTC, datetime
     from uuid import uuid4
@@ -408,3 +354,131 @@ def test_graphrag_input_materializer_copies_only_active_workspace_documents(tmp_
     materialized = (manifest.input_root / "active-version.md").read_text(encoding="utf-8")
     assert materialized == source.read_text(encoding="utf-8")
     assert not (manifest.input_root / "foreign-version.md").exists()
+
+
+def _write_native_output(root, chunk_text):
+    import pandas as pd
+
+    output = root / "output"
+    output.mkdir(parents=True)
+    pd.DataFrame(
+        [{"id": "doc-1", "title": "chunk-a.md", "text": chunk_text}]
+    ).to_parquet(output / "documents.parquet")
+    pd.DataFrame(
+        [{"id": "unit-1", "text": chunk_text, "document_ids": ["doc-1"]}]
+    ).to_parquet(output / "text_units.parquet")
+    pd.DataFrame(
+        [
+            {
+                "id": "entity-1",
+                "title": "ALI MERTER",
+                "description": "Ali Merter Moda tapusunun sahibidir",
+                "text_unit_ids": ["unit-1"],
+            }
+        ]
+    ).to_parquet(output / "entities.parquet")
+    pd.DataFrame([{"community": 0, "text_unit_ids": ["unit-1"]}]).to_parquet(
+        output / "communities.parquet"
+    )
+    pd.DataFrame(
+        [{"id": "report-1", "community": 0, "full_content": "Moda tapusu Merter ailesine aittir"}]
+    ).to_parquet(output / "community_reports.parquet")
+
+
+def _trusted(content):
+    from app.query.orchestration import TrustedSource
+
+    return TrustedSource(
+        workspace_id="workspace-a",
+        document_id="document-a",
+        document_version_id="version-a",
+        logical_document_id="logical-a",
+        chunk_id="chunk-a",
+        content=content,
+        generation_id="generation-a",
+        citation_label="Moda tapusu",
+    )
+
+
+@pytest.mark.parametrize(
+    ("route", "query", "artifact"),
+    [(GraphRoute.LOCAL, "Merter tapusunun", "entity-1"), (GraphRoute.GLOBAL, "Moda", "report-1")],
+)
+def test_native_graphrag_artifacts_trace_to_their_cortex_chunk(tmp_path, route, query, artifact):
+    import hashlib
+
+    content = "Ali Merter Moda tapusunu aldı."
+    root = tmp_path / "graphrag"
+    _write_native_output(root, content)
+    adapter = GraphRAGAdapter("workspace-a", root)
+
+    assert adapter.query_findings(route, query, "generation-a") == ()
+    findings = adapter.query_findings(
+        route, query, "generation-a", sources={"chunk-a": _trusted(content)}
+    )
+
+    assert [item.artifact_id for item in findings] == [artifact]
+    assert findings[0].source.chunk_id == "chunk-a"
+    assert findings[0].source.document_version_id == "version-a"
+    assert findings[0].source.content_hash == hashlib.sha256(content.encode()).hexdigest()
+
+    from types import SimpleNamespace
+
+    from app.query.orchestration.graphrag_bridge import bridge_graphrag
+    from app.query.scope import GenerationScope
+
+    context = SimpleNamespace(
+        scope=GenerationScope("workspace-a", "generation-a", "hash"),
+        trusted_sources=(_trusted(content),),
+        step=SimpleNamespace(
+            step_id="graphrag", engine="graphrag", capability=f"graphrag.{route.value}"
+        ),
+    )
+    bridged = bridge_graphrag(context, findings)
+    assert bridged is not None
+
+
+def test_native_graphrag_findings_from_different_indexed_text_fail_the_bridge(tmp_path):
+    from app.query.orchestration.graphrag_bridge import (
+        GraphRAGBridgeIntegrityError,
+        bridge_graphrag,
+    )
+
+    root = tmp_path / "graphrag"
+    _write_native_output(root, "Eski ve farklı indekslenmiş metin.")
+    source = _trusted("Ali Merter Moda tapusunu aldı.")
+    findings = GraphRAGAdapter("workspace-a", root).query_findings(
+        GraphRoute.LOCAL, "Merter", "generation-a", sources={"chunk-a": source}
+    )
+    assert findings
+    from types import SimpleNamespace
+
+    from app.query.scope import GenerationScope
+
+    context = SimpleNamespace(
+        scope=GenerationScope("workspace-a", "generation-a", "hash"),
+        trusted_sources=(source,),
+        step=SimpleNamespace(step_id="graphrag", capability="graphrag.local"),
+    )
+    with pytest.raises(GraphRAGBridgeIntegrityError):
+        bridge_graphrag(context, findings)
+
+
+def test_generated_index_config_skips_work_v2_never_reads(tmp_path):
+    root = tmp_path / "graphrag"
+    root.mkdir()
+    config = root / "settings.yaml"
+    config.write_text(
+        yaml.safe_dump({"models": {"default_embedding_model": {"type": "openai_embedding"}}}),
+        encoding="utf-8",
+    )
+    GraphRAGAdapter("workspace-a", root, config_path=config)._configure_generated_settings()
+    generated = yaml.safe_load(config.read_text(encoding="utf-8"))
+
+    assert generated["extract_claims"]["enabled"] is False
+    assert generated["embed_text"]["names"] == ["entity.description", "community.full_content"]
+    assert generated["local_search"]["chat_model_id"] == "cortex_graphrag_extraction"
+    assert "cortex_graphrag_local" not in generated["models"]
+    assert "cortex_graphrag_claims" not in generated["models"]
+    assert set(generated["drift_search"]) >= {"drift_k_followups", "primer_folds"}
+    assert "n_depth" not in generated["drift_search"]

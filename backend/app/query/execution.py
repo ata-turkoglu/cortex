@@ -98,6 +98,8 @@ class EngineExecutionContext:
     trusted_sources: tuple[Any, ...]
     dense_limit: int
     sparse_limit: int
+    # Maximum fused retrieval candidates; ``None`` keeps every manifest-bound candidate.
+    fusion_limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -160,12 +162,13 @@ class RetrievalProductionEngine:
         )()
         from .orchestration.retrieval_bridge import bridge_retrieval
 
+        source_count = len(context.trusted_sources)
         bridge = bridge_retrieval(
             plan,
             raw,
             context.scope,
             context.trusted_sources,
-            limit=max(1, len(context.trusted_sources)),
+            limit=max(1, min(context.fusion_limit or source_count, source_count)),
         )
         result = bridge.engine_result.model_copy(
             update={
@@ -252,6 +255,7 @@ class V2PlanExecutor:
         trusted_sources: tuple[Any, ...],
         dense_limit: int = 30,
         sparse_limit: int = 30,
+        fusion_limit: int | None = None,
     ) -> V2PlanExecution:
         if plan.state != "ready" or plan.graph is None:
             raise ValueError("V2 executor requires a ready physical execution plan")
@@ -289,6 +293,7 @@ class V2PlanExecutor:
                     trusted_sources,
                     dense_limit,
                     sparse_limit,
+                    fusion_limit,
                 )
                 output = self.registry.engine_for(step.engine).execute(context)
                 values[step.step_id] = output.value

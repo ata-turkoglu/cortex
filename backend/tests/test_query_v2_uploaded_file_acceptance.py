@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import importlib.util
 import json
 
 from fastapi.testclient import TestClient
@@ -20,6 +21,7 @@ from app.main import app
 from app.models import Base, KnowledgeGeneration, Message, QueryRun
 from app.providers.base import GeneratedText
 from app.providers.embeddings import EmbeddingConfiguration
+from app.query.answer_synthesis import AnswerSynthesizer
 from app.query.conversation_service import create_conversation
 from app.query.cutover import CutoverEvaluation, CutoverPreflight, attempt_cutover
 from app.query.production import V2QueryServiceFactory
@@ -231,6 +233,50 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
     assert repeated.answer.citations == grounded.answer.citations
     assert "zephyr-741" in grounded.answer.content
 
+    class GroundedAnswerProvider:
+        async def generate_structured(self, model, instructions, input_text, **_schema):
+            evidence = json.loads(input_text)["evidence"]
+            match = next(item for item in evidence if "zephyr-741" in item["text"])
+            return GeneratedText(
+                json.dumps(
+                    {
+                        "insufficient": False,
+                        "sentences": [
+                            {
+                                "text": "Doğrulanmış tapu kaydı zephyr-741 işaretini taşıyor.",
+                                "evidence_ids": [match["evidence_id"]],
+                            }
+                        ],
+                    }
+                ),
+                input_tokens=50,
+                output_tokens=10,
+            )
+
+    factory.answer_synthesizer = AnswerSynthesizer(
+        GroundedAnswerProvider(),
+        provider_name="openai",
+        model="gpt-5.6-luna",
+        style="balanced",
+        evidence_limit=10,
+    )
+    synthesized = asyncio.run(
+        factory.build(inputs).execute_inputs(
+            session, "Describe the deed with zephyr-741 evidence", inputs
+        )
+    )
+    factory.answer_synthesizer = None
+    assert synthesized.answer.metadata["answer_synthesis"] == "synthesized"
+    assert synthesized.answer.state == "grounded"
+    assert synthesized.answer.content.endswith("[1]")
+    assert [item["chunk_id"] for item in synthesized.answer.citations] == [
+        next(
+            item.chunk_id
+            for item in synthesized.package.citations
+            if "zephyr-741" in item.source_text
+        )
+    ]
+
     sources = {
         item.chunk_id: item
         for item in load_generation_manifest(session, workspace["id"], generation_id, tmp_path)
@@ -287,15 +333,10 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
     assert unsupported.trace.sparse_result_count == 0
     session.close()
 
-    legacy_calls = {"ask": 0, "hybrid": 0, "workspace_dense": 0, "legacy_bm25": 0}
-
-    def forbidden_ask(*args, **kwargs):
-        legacy_calls["ask"] += 1
-        raise AssertionError("V1 ask is reachable")
-
-    def forbidden_hybrid(*args, **kwargs):
-        legacy_calls["hybrid"] += 1
-        raise AssertionError("HybridRetrievalRuntime is reachable")
+    # The V1 chat orchestration and workspace hybrid runtime were removed; keep it that way.
+    for retired in ("app.chat", "app.aggregation", "app.retrieval.runtime"):
+        assert importlib.util.find_spec(retired) is None, retired
+    legacy_calls = {"workspace_dense": 0, "legacy_bm25": 0}
 
     def forbidden_workspace_dense(*args, **kwargs):
         legacy_calls["workspace_dense"] += 1
@@ -309,8 +350,6 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
             raise AssertionError("legacy workspace BM25 is reachable")
         return original_bm25_load(workspace_id, storage_path)
 
-    monkeypatch.setattr("app.chat.service.ask", forbidden_ask)
-    monkeypatch.setattr("app.retrieval.runtime.HybridRetrievalRuntime.search", forbidden_hybrid)
     monkeypatch.setattr(
         "app.retrieval.qdrant.WorkspaceQdrantStore.search", forbidden_workspace_dense
     )
@@ -402,9 +441,4 @@ def test_real_uploaded_file_reaches_grounded_v2_and_stays_generation_isolated(
     assert {item.state for item in query_runs} == {"completed", "failed"}
     assert {item.answer_state for item in query_runs} == {"grounded", "unsupported"}
     persisted.close()
-    assert legacy_calls == {
-        "ask": 0,
-        "hybrid": 0,
-        "workspace_dense": 0,
-        "legacy_bm25": 0,
-    }
+    assert legacy_calls == {"workspace_dense": 0, "legacy_bm25": 0}

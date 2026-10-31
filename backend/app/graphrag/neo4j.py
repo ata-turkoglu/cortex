@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..knowledge.graph import GraphNode, GraphRelationship, GraphSyncResult, Neo4jGraphAdapter
-from ..retrieval.schemas import AnswerState, Evidence
-from .adapter import GraphArtifact, GraphRAGAdapter, GraphRoute
+from .adapter import GraphArtifact, GraphRAGAdapter
 
 
 class ExtractedGraphStore(Protocol):
@@ -21,29 +20,6 @@ class ExtractedGraphStore(Protocol):
         nodes: tuple[GraphNode, ...],
         relationships: tuple[GraphRelationship, ...],
     ) -> GraphSyncResult: ...
-
-
-@dataclass(frozen=True)
-class GraphRAGFinding:
-    workspace_id: str
-    route: GraphRoute
-    text: str
-    source: str
-    confidence: float
-    provenance: dict[str, object]
-
-
-@dataclass(frozen=True)
-class GraphRAGEngineOutput:
-    """Phase 03 precursor to the common Phase 09 EngineResult contract."""
-
-    workspace_id: str
-    route: GraphRoute
-    findings: tuple[GraphRAGFinding, ...]
-    evidence: tuple[Evidence, ...]
-    state: AnswerState
-    fallback_reason: str | None
-    final_answer_authored: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,34 +109,6 @@ class Neo4jBackedGraphRAGAdapter:
         )
         return GraphRAGNeo4jSyncResult(result, skipped)
 
-    def query_findings(
-        self, route: GraphRoute, query: str, limit: int = 10
-    ) -> GraphRAGEngineOutput:
-        result = self.graphrag.query(route, query, limit)
-        findings = tuple(
-            GraphRAGFinding(
-                workspace_id=item.workspace_id,
-                route=route,
-                text=item.content,
-                source=item.source,
-                confidence=item.score,
-                provenance={
-                    "document_id": item.document_id,
-                    "document_version_id": item.document_version_id,
-                    "chunk_id": item.chunk_id,
-                    "metadata": item.metadata,
-                },
-            )
-            for item in result.evidence
-        )
-        return GraphRAGEngineOutput(
-            workspace_id=self.graphrag.workspace_id,
-            route=route,
-            findings=findings,
-            evidence=result.evidence,
-            state=result.state,
-            fallback_reason=result.fallback_reason,
-        )
 
 
 def sync_graph_to_neo4j(

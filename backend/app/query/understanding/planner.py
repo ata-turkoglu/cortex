@@ -61,6 +61,8 @@ class PlannerAttempt:
     model: str
     repaired: bool
     state: str | None
+    # The provider response, kept so every billed call can be recorded as usage.
+    generated: GeneratedText | None = None
 
 
 @dataclass(frozen=True)
@@ -76,7 +78,10 @@ class SemanticPlannerResult:
 
 
 class SemanticPlannerOutputError(RuntimeError):
-    pass
+    def __init__(self, message: str, attempts: tuple[PlannerAttempt, ...] = ()) -> None:
+        super().__init__(message)
+        # Failed attempts were still billed; callers record their usage.
+        self.attempts = attempts
 
 
 class GovernedSemanticConflict(ValueError):
@@ -243,10 +248,11 @@ class SemanticPlannerAdapter:
                             assignment.model,
                             repair_index > 0,
                             None,
+                            generated,
                         )
                     )
                     if isinstance(error, GovernedSemanticConflict):
-                        raise SemanticPlannerOutputError(str(error)) from error
+                        raise SemanticPlannerOutputError(str(error), tuple(attempts)) from error
                     instructions = _repair_instructions(tier, error)
                     continue
                 attempts.append(
@@ -256,6 +262,7 @@ class SemanticPlannerAdapter:
                         assignment.model,
                         repair_index > 0,
                         understanding.state,
+                        generated,
                     )
                 )
                 last_result = (understanding, generated, tier)
@@ -279,7 +286,9 @@ class SemanticPlannerAdapter:
                 generated=generated,
             )
         detail = str(last_error).splitlines()[0] if last_error else "empty planner result"
-        raise SemanticPlannerOutputError(f"semantic planner output was invalid: {detail}")
+        raise SemanticPlannerOutputError(
+            f"semantic planner output was invalid: {detail}", tuple(attempts)
+        )
 
     def _needs_escalation(self, understanding: SemanticUnderstanding) -> bool:
         return self.escalation_enabled and (

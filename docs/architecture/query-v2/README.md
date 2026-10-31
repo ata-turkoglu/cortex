@@ -24,6 +24,8 @@ V1 and V2 do not become long-lived parallel query runtimes.
   deterministic canonical-population and Cortex-adapter graph execution boundaries.
 - [`reasoning-composition.md`](reasoning-composition.md) defines Phase 11 durable multi-query
   research, cross-source reasoning, grounded section drafting, and internal provenance.
+- [`answer-synthesis-proposal.md`](answer-synthesis-proposal.md) defines the opt-in grounded LLM
+  answer synthesis inside the Answer Engine (default off).
 - [`knowledge-construction.md`](knowledge-construction.md) defines the canonical knowledge model,
   Neo4j boundary, indexing stages, provenance, and generation readiness.
 - [`repository-boundaries.md`](repository-boundaries.md) maps first-class subsystem ownership to

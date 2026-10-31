@@ -173,6 +173,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw error;
   }
 }
+export interface BudgetPeriod {
+  spent_usd: string;
+  budget_usd: number;
+  percent: number | null;
+  state: "ok" | "warning" | "exceeded" | "unbounded";
+  unpriced_calls: number;
+}
+export interface BudgetStatus {
+  currency: string;
+  warning_percent: number;
+  enforcement: "warn_only";
+  daily: BudgetPeriod;
+  monthly: BudgetPeriod;
+}
 export const apiClient = {
   listWorkspaces: () => request<Workspace[]>("/workspaces"),
   createWorkspace: (name: string, slug: string, description?: string) => request<Workspace>("/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, slug, description: description || null }) }),
@@ -227,6 +241,7 @@ export const apiClient = {
   getSettings: () => request<{ settings: Record<string, unknown>; global_only: boolean }>("/settings"),
   updateSettings: (settings: Record<string, unknown>) => request<{ settings: Record<string, unknown>; reindex_required: boolean }>("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) }),
   providerStatus: () => request<ProviderStatus>("/settings/providers"),
+  budgetStatus: () => request<BudgetStatus>("/settings/budgets"),
   validateProvider: (provider: ProviderName, apiKey?: string) =>
     request<{ provider: string; status: string }>(`/settings/providers/${provider}/validate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(apiKey ? { api_key: apiKey } : {}) }),
   pullOllamaModel: (model: string) => request<OllamaPullOperation>("/settings/ollama/models/pull", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) }),

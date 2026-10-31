@@ -33,7 +33,7 @@ real implementation boundary, canonical architecture document, and nearest scope
 | GraphRAG | `backend/app/graphrag/` | `graphrag-boundary.md` | `backend/app/graphrag/AGENTS.md` |
 | Final-root Reconciliation | `backend/app/query/orchestration/` | `query-v2/result-evidence-layer.md` | `backend/app/query/orchestration/AGENTS.md` |
 | Reasoning & Composition | `backend/app/reasoning/` | `query-v2/reasoning-composition.md` | reasoning/research/composition scoped contexts |
-| Answer | `backend/app/chat/execution.py` | `query-answer-pipeline.md` | `backend/AGENTS.md` |
+| Answer | `backend/app/query/answer.py` | `query-answer-pipeline.md` | `backend/AGENTS.md` |
 
 Execution Planning is the explicit parent of Structured Query, Knowledge Graph, Retrieval, and
 GraphRAG work. For semantic structured work, only results that implement final logical IR roots

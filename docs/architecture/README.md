@@ -13,8 +13,8 @@ canonical authority/readiness design for the first exhaustive Person/property ca
 not represent implemented or production-accepted canonical functionality.
 
 Query Architecture V2 under [`query-v2/`](query-v2/README.md) is the active production runtime.
-`POST /chat` enters `backend/app/query/production_chat.py`; it does not call the historical V1
-orchestration in `backend/app/chat/`. `/system-map` is the current V2 topology and must show the
+`POST /chat` enters `backend/app/query/production_chat.py`; the historical V1 orchestration has
+been removed. `/system-map` is the current V2 topology and must show the
 separate readiness of `retrieval.grounded`, `graphrag.grounded`, `canonical.exhaustive`, and
 `canonical.graph`.
 

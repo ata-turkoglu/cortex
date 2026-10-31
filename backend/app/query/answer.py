@@ -7,6 +7,7 @@ testable, and cannot hold a SQLite transaction across provider work.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -45,8 +46,8 @@ class AnswerEngine:
         }
     )
 
-    def render(self, package: ReasoningPackage) -> AnswerDraft:
-        content, evidence_ids = self._content_and_evidence(package)
+    def render(self, package: ReasoningPackage, *, query: str | None = None) -> AnswerDraft:
+        content, evidence_ids = self._content_and_evidence(package, query)
         presentations = build_canonical_person_presentations(package.structured_rows)
         citations = tuple(
             {
@@ -83,12 +84,14 @@ class AnswerEngine:
             },
         )
 
-    def _content_and_evidence(self, package: ReasoningPackage) -> tuple[str, frozenset[str]]:
+    def _content_and_evidence(
+        self, package: ReasoningPackage, query: str | None
+    ) -> tuple[str, frozenset[str]]:
         if package.state == "ambiguous":
             return self._clarification(package), frozenset()
         if package.state == "unsupported":
             return self._unsupported(package), frozenset()
-        content, evidence_ids = self._grounded(package)
+        content, evidence_ids = self._grounded(package, query)
         return content, frozenset(evidence_ids)
 
     @staticmethod
@@ -144,15 +147,17 @@ class AnswerEngine:
         return AnswerEngine._unsupported(package)
 
     @staticmethod
-    def _grounded(package: ReasoningPackage) -> tuple[str, tuple[str, ...]]:
+    def _grounded(
+        package: ReasoningPackage, query: str | None = None
+    ) -> tuple[str, tuple[str, ...]]:
         query_completeness = package.completeness.query
+        if AnswerEngine._is_retrieval_only(package):
+            return AnswerEngine._retrieval_summary(package, query)
         if query_completeness and query_completeness.status == "PARTIAL":
             return (
                 AnswerEngine._partial_structured(package),
                 AnswerEngine._visible_evidence_ids(package),
             )
-        if AnswerEngine._is_retrieval_only(package):
-            return AnswerEngine._retrieval_summary(package)
         values: list[str] = []
         # An exhaustive structured result is already a bounded, deterministic answer
         # set selected by the physical plan.  Truncating it here would silently turn
@@ -169,8 +174,7 @@ class AnswerEngine:
             if ranked_people:
                 lines = [
                     f"{index}. {AnswerEngine._person_label(item, presentations)} — "
-                    f"{int(item.values['property_count'])} property record"
-                    f"{'s' if int(item.values['property_count']) != 1 else ''}"
+                    f"{int(item.values['property_count'])} taşınmaz kaydı"
                     for index, item in enumerate(ranked_people, start=1)
                 ]
                 return (
@@ -223,7 +227,7 @@ class AnswerEngine:
         for finding in package.graphrag_findings:
             if len(values) == 3:
                 break
-            values.append(f"GraphRAG {finding.mode} finding: {finding.text}")
+            values.append(f"GraphRAG bulgusu ({finding.mode}): {finding.text}")
         if package.aggregates:
             remaining = max(0, 3 - len(values))
             values.extend(
@@ -248,20 +252,28 @@ class AnswerEngine:
 
     @staticmethod
     def _is_retrieval_only(package: ReasoningPackage) -> bool:
-        return bool(package.citations) and bool(package.structured_rows) and not any(
-            set(item.values) - AnswerEngine._INTERNAL_VALUE_KEYS for item in package.structured_rows
-        ) and not (
-            package.entities
-            or package.events
-            or package.aggregates
-            or package.graphrag_findings
-            or package.claims
+        return (
+            bool(package.citations)
+            and bool(package.structured_rows)
+            and not any(
+                set(item.values) - AnswerEngine._INTERNAL_VALUE_KEYS
+                for item in package.structured_rows
+            )
+            and not (
+                package.entities
+                or package.events
+                or package.aggregates
+                or package.graphrag_findings
+                or package.claims
+            )
         )
 
     @staticmethod
-    def _retrieval_summary(package: ReasoningPackage) -> tuple[str, tuple[str, ...]]:
+    def _retrieval_summary(
+        package: ReasoningPackage, query: str | None = None
+    ) -> tuple[str, tuple[str, ...]]:
         citations = package.citations[: AnswerEngine._MAX_VISIBLE_CITATIONS]
-        snippets = [AnswerEngine._safe_excerpt(item.source_text) for item in citations]
+        snippets = [AnswerEngine._safe_excerpt(item.source_text, query) for item in citations]
         snippets = [item for item in snippets if item]
         if not snippets:
             return (
@@ -276,18 +288,25 @@ class AnswerEngine:
         )
 
     @staticmethod
-    def _safe_excerpt(source_text: str) -> str | None:
-        """Return a short source-derived sentence, never serialized runtime metadata."""
+    def _safe_excerpt(source_text: str, query: str | None = None) -> str | None:
+        """Return the source sentence most related to the query, never runtime metadata."""
         normalized = " ".join(source_text.split())
         if not normalized or any(
             token in normalized.lower() for token in AnswerEngine._INTERNAL_VALUE_KEYS
         ):
             return None
-        for boundary in (". ", "! ", "? "):
-            if boundary in normalized:
-                normalized = normalized.split(boundary, 1)[0] + boundary.strip()
-                break
+        sentences = [item for item in re.split(r"(?<=[.!?])\s+", normalized) if item]
+        if sentences:
+            terms = AnswerEngine._terms(query or "")
+            # max() keeps the earliest sentence on ties, so no query means the first one.
+            normalized = max(
+                sentences, key=lambda sentence: len(terms & AnswerEngine._terms(sentence))
+            )
         return normalized[:280].rstrip(" ,;:") + ("…" if len(normalized) > 280 else "")
+
+    @staticmethod
+    def _terms(text: str) -> set[str]:
+        return {token for token in re.findall(r"\w[\w-]*", text.casefold()) if len(token) > 2}
 
     @staticmethod
     def _visible_evidence_ids(package: ReasoningPackage) -> tuple[str, ...]:
@@ -299,7 +318,8 @@ class AnswerEngine:
     def _partial_structured(package: ReasoningPackage) -> str:
         """State known facts plainly without converting a partial result to exactness."""
         query = package.completeness.query
-        assert query is not None
+        if query is None:
+            raise ValueError("partial structured answers require query-scoped completeness")
         if package.aggregates and isinstance(package.aggregates[0].value, int):
             content = (
                 f"Kanonik kayıtlarda kesin olarak {package.aggregates[0].value} kişi bulunuyor."
@@ -324,9 +344,7 @@ class AnswerEngine:
                     content = (
                         AnswerEngine._person_inventory_heading(len(people), len(groups))
                         + "\n\n"
-                        + "\n".join(
-                            AnswerEngine._person_group_line(group) for group in groups
-                        )
+                        + "\n".join(AnswerEngine._person_group_line(group) for group in groups)
                     )
                 else:
                     content = "Kanonik kayıtlardaki bilinen yapılandırılmış sonuç aşağıdadır."

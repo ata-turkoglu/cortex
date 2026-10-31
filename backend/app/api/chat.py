@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -27,6 +29,7 @@ from ..query.conversation_service import (
 from ..query.production_chat import execute_v2_chat
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 def get_session():
@@ -173,15 +176,18 @@ def messages(  # noqa: B008
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageRead)
-async def query(  # noqa: B008
+def query(  # noqa: B008
     workspace_id: str,
     conversation_id: str,
     payload: AskRequest,
     session: Session = Depends(get_session),  # noqa: B008
 ):
+    # A sync endpoint runs in FastAPI's threadpool. V2 mixes provider awaits with
+    # synchronous SQLite, Qdrant, and BM25 work, so it gets a private event loop there
+    # instead of blocking the server loop for every other request.
     try:
-        _, answer, _ = await execute_v2_chat(
-            session, workspace_id, conversation_id, payload.content, payload.mode
+        _, answer, _ = asyncio.run(
+            execute_v2_chat(session, workspace_id, conversation_id, payload.content, payload.mode)
         )
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
@@ -194,7 +200,12 @@ async def query(  # noqa: B008
 
         summarize_conversation.send(conversation_id)
     except Exception:
-        pass
+        # Summaries are best-effort; the answer is already persisted.
+        logger.warning(
+            "Conversation summary was not enqueued for conversation_id=%s",
+            conversation_id,
+            exc_info=True,
+        )
     return message_read(answer)
 
 

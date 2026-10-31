@@ -12,6 +12,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..accounting import NormalizedUsage, persist_usage, usage_from_generated
 from ..core.config import get_settings
 from ..core.embedding_runtime import build_production_embedder
 from ..models import (
@@ -22,7 +23,11 @@ from ..models import (
     QueryStepRun,
 )
 from ..workflows.queries import create_query_run
-from .context import ContextCanonicalResultSet, save_conversation_context
+from .context import (
+    ContextCanonicalResultSet,
+    ContextRevisionConflict,
+    save_conversation_context,
+)
 from .conversation_service import (
     DEFAULT_CONVERSATION_TITLE,
     conversation_title_from_query,
@@ -74,7 +79,11 @@ async def execute_v2_chat(
         result = await selected_factory.build(inputs).execute_inputs(
             session, content.strip(), inputs
         )
+        assistant = _persist_result(session, conversation_id, run_id, result, started)
+        session.flush()
     except Exception as error:
+        # Persistence failures take the same path, so a committed user turn never
+        # leaves its QueryRun stuck in "running" without an assistant message.
         logger.exception(
             "Query V2 execution failed for run_id=%s workspace_id=%s error=%s",
             run_id,
@@ -93,21 +102,26 @@ async def execute_v2_chat(
         )
         session.commit()
         return session.get(Message, user_id), assistant, session.get(QueryRun, run_id)
-    assistant = _persist_result(session, conversation_id, run_id, result, started)
-    session.flush()
     final_entity_result = _final_entity_result(result, assistant.id)
-    save_conversation_context(
-        session,
-        workspace_id,
-        conversation_id,
-        evolve_context_state(
-            inputs.conversation_context,
-            result.prepared.semantic.understanding,
-            source_message_id=assistant.id,
-            final_entity_result=final_entity_result,
-        ),
-        expected_revision=inputs.conversation_context.revision,
-    )
+    try:
+        save_conversation_context(
+            session,
+            workspace_id,
+            conversation_id,
+            evolve_context_state(
+                inputs.conversation_context,
+                result.prepared.semantic.understanding,
+                source_message_id=assistant.id,
+                final_entity_result=final_entity_result,
+            ),
+            expected_revision=inputs.conversation_context.revision,
+        )
+    except ContextRevisionConflict:
+        # A concurrent turn already advanced the context. The validated answer stays
+        # persisted; only this turn's referent update is dropped instead of overwriting.
+        logger.warning(
+            "Query V2 context update skipped after revision conflict for run_id=%s", run_id
+        )
     session.commit()
     return session.get(Message, user_id), assistant, session.get(QueryRun, run_id)
 
@@ -189,6 +203,20 @@ def _persist_result(
     run.updated_at = timestamp
     _set_step(session, run.id, "retrieve", "completed")
     _set_step(session, run.id, "synthesize", "completed")
+    _record_planner_usage(session, run.workspace_id, run.id, result.prepared.semantic.attempts)
+    _record_graphrag_usage(session, run.workspace_id, run.id, result.package.traces)
+    for index, attempt in enumerate(result.synthesis.attempts if result.synthesis else ()):
+        persist_usage(
+            session,
+            workspace_id=run.workspace_id,
+            stage="answer_synthesis",
+            provider=attempt.provider,
+            model=attempt.model,
+            usage=usage_from_generated(attempt.generated),
+            idempotency_key=f"{run.id}:answer_synthesis:{index}",
+            query_run_id=run.id,
+            provider_request_id=attempt.generated.request_id,
+        )
     assistant = Message(
         id=str(uuid4()),
         workspace_id=run.workspace_id,
@@ -220,7 +248,7 @@ def _persist_result(
                 "semantic_planner_tier": result.prepared.semantic.selected_tier,
                 "semantic_planner": _semantic_planner_metadata(result.prepared.semantic),
                 "reasoning_package_generation": result.package.generation_id,
-                "retrieval_queries": [run.query_text],
+                "retrieval_queries": [result.trace.retrieval_query or run.query_text],
                 "citation_summary": {
                     "cited_evidence_count": len(citations),
                     "user_visible_source_count": len(citations),
@@ -271,6 +299,7 @@ def _persist_failure(
     run.updated_at = timestamp
     _set_step(session, run.id, "retrieve", "failed")
     _set_step(session, run.id, "synthesize", "failed")
+    _record_planner_usage(session, workspace_id, run.id, getattr(error, "attempts", ()))
     assistant = Message(
         id=str(uuid4()),
         workspace_id=workspace_id,
@@ -311,6 +340,52 @@ def _failure_content(error: Exception) -> str:
     if isinstance(error, SemanticPlannerOutputError):
         return AnswerEngine.failure_content("query_not_understood")
     return AnswerEngine.failure_content("unsupported_operation")
+
+
+def _record_planner_usage(session: Session, workspace_id: str, run_id: str, attempts) -> None:
+    """Record every billed planner call, including failed and repaired attempts."""
+    for index, attempt in enumerate(attempts):
+        if attempt.generated is None or attempt.provider == "deterministic":
+            continue
+        persist_usage(
+            session,
+            workspace_id=workspace_id,
+            stage="semantic_planner",
+            provider=attempt.provider,
+            model=attempt.model,
+            usage=usage_from_generated(attempt.generated),
+            idempotency_key=f"{run_id}:semantic_planner:{index}",
+            query_run_id=run_id,
+            provider_request_id=attempt.generated.request_id,
+        )
+
+
+def _record_graphrag_usage(session: Session, workspace_id: str, run_id: str, traces) -> None:
+    """Record GraphRAG smart-selection calls; GraphRAG counts tokens with its tokenizer."""
+    settings = get_settings()
+    for trace in traces:
+        calls = trace.counters.get("graphrag_llm_calls", 0)
+        if trace.engine != "graphrag" or not calls:
+            continue
+        route = trace.capability.removeprefix("graphrag.")
+        prompt = trace.counters.get("graphrag_prompt_tokens", 0)
+        output = trace.counters.get("graphrag_output_tokens", 0)
+        persist_usage(
+            session,
+            workspace_id=workspace_id,
+            stage="graphrag_search",
+            provider=getattr(settings, f"graphrag_{route}_provider", "openai"),
+            model=getattr(settings, f"graphrag_{route}_model", "unknown"),
+            usage=NormalizedUsage(
+                input_tokens=prompt,
+                output_tokens=output,
+                total_tokens=prompt + output,
+                source="estimated",
+                raw={"llm_calls": calls},
+            ),
+            idempotency_key=f"{run_id}:graphrag_search:{trace.step_id}",
+            query_run_id=run_id,
+        )
 
 
 def _set_step(session: Session, run_id: str, name: str, state: str) -> None:

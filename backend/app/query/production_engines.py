@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from time import perf_counter
 
+from app.core.config import get_settings
 from app.engines.graph import GraphValue, KnowledgeGraphEngine
 from app.engines.structured import StructuredQueryEngine, StructuredValue, load_canonical_population
 from app.graphrag.adapter import GraphRAGAdapter, GraphRoute
@@ -144,9 +145,31 @@ class GraphRAGProductionEngine:
             raise ValueError(f"GRAPHRAG_MODE_UNSUPPORTED:{context.step.capability}") from error
         adapter = self.adapter_factory(context.scope)
         candidates = adapter.query_findings(
-            mode, context.query_text or "", context.scope.generation_id
+            mode,
+            context.query_text or "",
+            context.scope.generation_id,
+            sources={source.chunk_id: source for source in context.trusted_sources},
+            smart=get_settings().graphrag_smart_search_enabled,
         )
-        return bridge_graphrag(context, candidates)
+        output = bridge_graphrag(context, candidates)
+        usage = getattr(adapter, "last_search_usage", None)
+        if usage is None:
+            return output
+        # Selection usage travels in the trace so the chat transaction can record it.
+        trace = output.result.trace.model_copy(
+            update={
+                "counters": {
+                    **output.result.trace.counters,
+                    "graphrag_smart_selection": 1,
+                    "graphrag_llm_calls": usage.llm_calls,
+                    "graphrag_prompt_tokens": usage.prompt_tokens,
+                    "graphrag_output_tokens": usage.output_tokens,
+                }
+            }
+        )
+        return EngineExecutionOutput(
+            output.value, output.result.model_copy(update={"trace": trace})
+        )
 
 
 def _source_scan_result(context: EngineExecutionContext) -> EngineResult:

@@ -30,15 +30,9 @@ acceptance into an activation-ready result.
 
 ## Historical V1 benchmark
 
-The former synthetic golden runner is retained only for historical comparison and is never the V2
-production acceptance gate:
-
-```powershell
-.\.venv\Scripts\python.exe -m app.evaluation --historical-v1 --suite evaluation/golden.json
-```
-
-Its route, document, fact, evidence, answerability, cost, and latency schema remains useful for
-reviewing prior V1 behavior. It must not be used to establish V2 production readiness.
+The former synthetic V1 golden runner (`--historical-v1`) was removed together with the V1 chat
+orchestration it exercised. `python -m app.evaluation` runs only the V2 production acceptance
+contract above.
 
 Private verified document packs may be added under `backend/evaluation/local/` using the versioned
 schema when source documents and human labels are supplied. They complement—but do not replace—the

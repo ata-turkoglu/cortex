@@ -51,7 +51,7 @@ class FixtureGraphRAG:
         self.candidate = candidate
         self.calls = []
 
-    def query_findings(self, mode, query, generation_id, limit=10):
+    def query_findings(self, mode, query, generation_id, limit=10, sources=None, smart=False):
         self.calls.append((mode, query, generation_id))
         return (self.candidate,)
 

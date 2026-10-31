@@ -52,9 +52,9 @@ change marks the workspace `reindex_required`; only a successful full replacemen
 mark the new fingerprint ready. `app/providers/embeddings.py` owns the stable title/heading/content template,
 so Unicode—including Turkish text—is passed through unchanged.
 
-The production V2 sparse adapter reads only `knowledge-candidates/<generation>/bm25`. The older
-workspace-owned `bm25_chunks` format and `HybridRetrievalRuntime` remain Historical / V1
-compatibility paths; they are not reached by production V2 chat.
+The production V2 sparse adapter reads only `knowledge-candidates/<generation>/bm25`. The V1
+`HybridRetrievalRuntime` has been removed; the older workspace-owned `bm25_chunks` format is
+Historical and is not reached by production V2 chat.
 
 ## Ingestion indexing contract
 
@@ -81,6 +81,12 @@ but it is not an exhaustive corpus inventory.
 An incompatible embedding configuration creates one idempotent `dense_reindex` workflow request.
 The new configuration cannot become active until that full replacement workflow marks its dense
 index ready, so old vectors cannot silently serve a changed model or formatting policy.
+
+Indexing embeds `embedding_batch_size` texts per request with up to `embedding_concurrency`
+requests in flight; each request retries at smaller sizes independently and vectors are joined in
+input order. Ollama embedding requests pass `embedding_keep_alive` so the model stays loaded between
+batches. V2 query retrieval reads `dense_top_k` dense and `bm25_top_k` sparse candidates and keeps
+at most `fusion_candidate_limit` fused, manifest-bound results.
 
 Phase 10 coverage verifies configuration-fingerprint isolation, dimension rejection, adaptive
 batch recovery, and Turkish plus cross-lingual retrieval smoke cases against the workspace-safe

@@ -94,3 +94,55 @@ def test_semantic_planner_tiers_require_available_openai_chat_models(monkeypatch
     finally:
         for field, value in original.items():
             setattr(get_settings(), field, value)
+
+
+def test_conversation_summary_assignment_rejects_unimplemented_providers(monkeypatch):
+    async def capabilities():
+        return {
+            "openai": [],
+            "anthropic": [],
+            "ollama": [ModelCapability("ollama", "local-chat", chat=True)],
+        }
+
+    monkeypatch.setattr("app.api.settings._capabilities", capabilities)
+    from app.api.settings import _validate_assignments
+
+    with pytest.raises(HTTPException, match="Conversation summary currently supports only OpenAI"):
+        asyncio.run(
+            _validate_assignments({"summary_provider": "ollama", "summary_model": "local-chat"})
+        )
+
+
+def test_answer_synthesis_is_off_by_default_and_openai_only(monkeypatch):
+    from app.core.config import Settings
+    from app.query.production import V2QueryServiceFactory
+
+    assert Settings().answer_synthesis_enabled is False
+    factory = V2QueryServiceFactory.__new__(V2QueryServiceFactory)
+    factory.settings = Settings()
+    assert factory._configured_synthesizer() is None
+    factory.settings = Settings(answer_synthesis_enabled=True, answer_provider="ollama")
+    assert factory._configured_synthesizer() is None
+    factory.settings = Settings(answer_synthesis_enabled=True, answer_provider="openai")
+    assert factory._configured_synthesizer() is not None
+
+    async def capabilities():
+        return {
+            "openai": [],
+            "anthropic": [],
+            "ollama": [ModelCapability("ollama", "local-chat", chat=True)],
+        }
+
+    monkeypatch.setattr("app.api.settings._capabilities", capabilities)
+    from app.api.settings import _validate_assignments
+
+    with pytest.raises(HTTPException, match="Answer synthesis currently supports only OpenAI"):
+        asyncio.run(
+            _validate_assignments(
+                {
+                    "answer_synthesis_enabled": True,
+                    "answer_provider": "ollama",
+                    "answer_model": "local-chat",
+                }
+            )
+        )

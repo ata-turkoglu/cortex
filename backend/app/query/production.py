@@ -17,9 +17,11 @@ from ..providers.base import EmbeddingProvider
 from ..providers.embeddings import (
     EmbeddingConfiguration,
 )
+from ..providers.openai import OpenAIProvider
 from ..retrieval.qdrant import WorkspaceQdrantStore
 from ..retrieval.sparse import GenerationBM25Store
 from .answer import AnswerEngine
+from .answer_synthesis import AnswerSynthesizer
 from .briefing import build_workspace_briefing
 from .execution import (
     ProductionEngineRegistry,
@@ -70,6 +72,7 @@ class V2QueryServiceFactory:
         answer_engine: AnswerEngine | None = None,
         graphrag_adapter_factory: GraphRAGAdapterFactory | None = None,
         canonical_session=None,
+        answer_synthesizer: AnswerSynthesizer | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.data_root = (data_root or self.settings.data_path).resolve()
@@ -101,6 +104,7 @@ class V2QueryServiceFactory:
         self.answer_engine = answer_engine or AnswerEngine()
         self.graphrag_adapter_factory = graphrag_adapter_factory or self._graphrag_adapter
         self.canonical_session = canonical_session
+        self.answer_synthesizer = answer_synthesizer or self._configured_synthesizer()
 
     def build(self, inputs: V2RuntimeInputs) -> V2QueryService:
         """Build a service whose retrieval stores are bound to ``inputs``."""
@@ -189,6 +193,19 @@ class V2QueryServiceFactory:
             briefing_loader=briefing_loader,
             property_vocabulary_loader=property_vocabulary_loader,
             completeness_evaluator=completeness_evaluator,
+            answer_synthesizer=self.answer_synthesizer,
+        )
+
+    def _configured_synthesizer(self) -> AnswerSynthesizer | None:
+        """Grounded synthesis is opt-in and implemented only for OpenAI structured output."""
+        if not self.settings.answer_synthesis_enabled or self.settings.answer_provider != "openai":
+            return None
+        return AnswerSynthesizer(
+            OpenAIProvider(),
+            provider_name="openai",
+            model=self.settings.answer_model,
+            style=self.settings.answer_style,
+            evidence_limit=self.settings.final_evidence_top_k,
         )
 
     def _graphrag_adapter(self, scope: GenerationScope) -> GraphRAGAdapter:

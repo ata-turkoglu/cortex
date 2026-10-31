@@ -11,13 +11,19 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..accounting import budget_status as usage_budget_status
 from ..core.config import get_settings
 from ..core.embedding_runtime import (
     build_production_embedder,
     load_production_embedding_configuration,
 )
 from ..core.secrets import SecretStore, SecretStoreUnavailable
-from ..core.settings_service import PERSISTED_FIELDS, load_runtime_settings, save_settings
+from ..core.settings_service import (
+    PERSISTED_FIELDS,
+    RuntimeEmbeddingConfigurationError,
+    load_runtime_settings,
+    save_settings,
+)
 from ..models import ProviderConnection, SetupState, WorkflowRun
 from ..providers.anthropic import AnthropicProvider
 from ..providers.catalog import DEFAULT_MODELS
@@ -82,60 +88,38 @@ class SettingsUpdate(BaseModel):
     embedding_batch_size: int | None = Field(default=None, ge=1)
     embedding_timeout_seconds: int | None = Field(default=None, ge=1)
     embedding_keep_alive: str | None = Field(default=None, min_length=1)
-    embedding_concurrency: int | None = Field(default=None, ge=1)
+    embedding_concurrency: int | None = Field(default=None, ge=1, le=8)
     dense_top_k: int | None = Field(default=None, ge=1)
     bm25_top_k: int | None = Field(default=None, ge=1)
     fusion_candidate_limit: int | None = Field(default=None, ge=1)
     reranker_input_limit: int | None = Field(default=None, ge=1)
     final_evidence_top_k: int | None = Field(default=None, ge=1)
-    document_lookup_final_evidence_top_k: int | None = Field(default=None, ge=1)
-    router_confidence_threshold: float | None = Field(default=None, ge=0, le=1)
-    router_multi_route_threshold: float | None = Field(default=None, ge=0, le=1)
     graphrag_pending_document_threshold: int | None = Field(default=None, ge=1)
     graphrag_update_mode: Literal["manual", "threshold"] | None = None
-    graphrag_provider: Literal["openai", "ollama"] | None = None
-    graphrag_model: str | None = Field(default=None, min_length=1)
     graphrag_extraction_provider: Literal["openai", "ollama"] | None = None
     graphrag_extraction_model: str | None = Field(default=None, min_length=1)
-    graphrag_claims_provider: Literal["openai", "ollama"] | None = None
-    graphrag_claims_model: str | None = Field(default=None, min_length=1)
-    graphrag_claims_enabled: bool | None = None
     graphrag_community_provider: Literal["openai", "ollama"] | None = None
     graphrag_community_model: str | None = Field(default=None, min_length=1)
-    graphrag_local_provider: Literal["openai", "ollama"] | None = None
-    graphrag_local_model: str | None = Field(default=None, min_length=1)
     graphrag_global_provider: Literal["openai", "ollama"] | None = None
     graphrag_global_model: str | None = Field(default=None, min_length=1)
     graphrag_drift_provider: Literal["openai", "ollama"] | None = None
     graphrag_drift_model: str | None = Field(default=None, min_length=1)
-    graphrag_drift_n_depth: int | None = Field(default=None, ge=1, le=5)
     graphrag_drift_k_followups: int | None = Field(default=None, ge=1, le=20)
     graphrag_drift_primer_folds: int | None = Field(default=None, ge=1, le=10)
-    graphrag_drift_concurrency: int | None = Field(default=None, ge=1, le=16)
-    graphrag_drift_max_llm_calls: int | None = Field(default=None, ge=1, le=100)
-    graphrag_query_fallback_to_hybrid: bool | None = None
-    graphrag_query_wait_seconds: int | None = Field(default=None, ge=1, le=60)
+    graphrag_smart_search_enabled: bool | None = None
     graphrag_command_timeout_seconds: int | None = Field(default=None, ge=60, le=3600)
     workflow_ingestion_concurrency: int | None = Field(default=None, ge=1)
     workflow_dense_reindex_concurrency: int | None = Field(default=None, ge=1)
     workflow_graphrag_reindex_concurrency: int | None = Field(default=None, ge=1)
     workflow_deletion_concurrency: int | None = Field(default=None, ge=1)
     workflow_retention_days: int | None = Field(default=None, ge=1)
-    workflow_retry_limit: int | None = Field(default=None, ge=0)
-    workflow_retry_backoff_seconds: int | None = Field(default=None, ge=0)
-    workflow_timeout_seconds: int | None = Field(default=None, ge=1)
-    default_page_size: int | None = Field(default=None, ge=1, le=500)
-    health_check_interval_seconds: int | None = Field(default=None, ge=1)
-    sse_reconnect_interval_seconds: int | None = Field(default=None, ge=1)
     conversation_memory_window_messages: int | None = Field(default=None, ge=1)
     answer_style: Literal["concise", "balanced", "detailed"] | None = None
-    grounding_required: bool | None = None
+    answer_synthesis_enabled: bool | None = None
     metadata_provider: Provider | None = None
     metadata_model: str | None = None
     answer_provider: Provider | None = None
     answer_model: str | None = None
-    router_provider: Provider | None = None
-    router_model: str | None = None
     semantic_planner_simple_provider: Provider | None = None
     semantic_planner_simple_model: str | None = Field(default=None, min_length=1)
     semantic_planner_standard_provider: Provider | None = None
@@ -147,8 +131,6 @@ class SettingsUpdate(BaseModel):
     semantic_planner_confidence_threshold: float | None = Field(default=None, ge=0, le=1)
     summary_provider: Provider | None = None
     summary_model: str | None = None
-    query_expansion_provider: Provider | None = None
-    query_expansion_model: str | None = None
     daily_soft_budget_usd: float | None = Field(default=None, ge=0)
     monthly_soft_budget_usd: float | None = Field(default=None, ge=0)
     budget_warning_percent: int | None = Field(default=None, ge=1, le=100)
@@ -200,19 +182,12 @@ async def _validate_assignments(patch: dict[str, object]) -> None:
         "embedding",
         "metadata",
         "answer",
-        "router",
         "summary",
-        "query_expansion",
-        "graphrag",
         "graphrag_extraction",
-        "graphrag_claims",
         "graphrag_community",
-        "graphrag_local",
         "graphrag_global",
         "graphrag_drift",
     ):
-        if layer == "graphrag_claims" and patch.get("graphrag_claims_enabled") is False:
-            continue
         provider, model = patch.get(f"{layer}_provider"), patch.get(f"{layer}_model")
         if not provider and not model:
             continue
@@ -225,6 +200,20 @@ async def _validate_assignments(patch: dict[str, object]) -> None:
         required = "embeddings" if layer == "embedding" else "chat"
         if not getattr(capability, required):
             raise HTTPException(422, f"{provider}/{model} lacks {required} capability for {layer}")
+
+    # Grounded answer synthesis is implemented only for OpenAI structured output.
+    synthesis_enabled = patch.get("answer_synthesis_enabled")
+    if synthesis_enabled is None:
+        synthesis_enabled = get_settings().answer_synthesis_enabled
+    answer_provider = patch.get("answer_provider") or get_settings().answer_provider
+    if synthesis_enabled and answer_provider != "openai":
+        raise HTTPException(422, "Answer synthesis currently supports only OpenAI")
+
+    # The conversation-summary worker implements only the OpenAI text adapter and skips
+    # any other assignment, so reject one that would silently disable summaries.
+    summary_provider = patch.get("summary_provider")
+    if summary_provider and summary_provider != "openai":
+        raise HTTPException(422, "Conversation summary currently supports only OpenAI")
 
     # Production Query V2 currently wires only OpenAI's Responses structured-output
     # adapter for semantic planning. Validate every effective tier assignment on
@@ -432,16 +421,18 @@ async def provider_status():
 
 
 @router.get("/settings/budgets")
-async def budget_status():
+def budget_status(session: Annotated[Session, Depends(get_session)]):
+    try:
+        load_runtime_settings(session)
+    except RuntimeEmbeddingConfigurationError:
+        pass  # First-run installs report defaults until settings are persisted.
     settings = get_settings()
-    return {
-        "daily_soft_budget_usd": settings.daily_soft_budget_usd,
-        "monthly_soft_budget_usd": settings.monthly_soft_budget_usd,
-        "warning_percent": settings.budget_warning_percent,
-        "enforcement": "pause-queued-cost-incurring-work",
-        "query_expansion_enabled": settings.query_expansion_enabled,
-        "automatic_quality_escalation_enabled": settings.automatic_quality_escalation_enabled,
-    }
+    return usage_budget_status(
+        session,
+        daily_budget_usd=settings.daily_soft_budget_usd,
+        monthly_budget_usd=settings.monthly_soft_budget_usd,
+        warning_percent=settings.budget_warning_percent,
+    )
 
 
 @router.get("/settings/ollama/models")

@@ -315,33 +315,8 @@ def reconcile_orphans() -> None:
 
 
 @dramatiq.actor(max_retries=1)
-def execute_query_synthesis(query_run_id: str) -> None:
-    from ..chat.execution import synthesize_with_openai
-    from ..core.database import SessionLocal
-
-    synthesize_with_openai(query_run_id, SessionLocal)
-
-
-@dramatiq.actor(max_retries=0)
-def execute_graphrag_query(query_run_id: str) -> None:
-    """The worker-only GraphRAG query entrypoint."""
-    from ..core.database import SessionLocal
-    from ..workflows.graphrag_query import execute
-
-    session = SessionLocal()
-    try:
-        execute(session, query_run_id)
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
-@dramatiq.actor(max_retries=1)
 def summarize_conversation(conversation_id: str) -> None:
-    from ..chat.execution import summarize_conversation_with_openai
     from ..core.database import SessionLocal
+    from ..query.conversation_summary import summarize_conversation_with_openai
 
     summarize_conversation_with_openai(conversation_id, SessionLocal)

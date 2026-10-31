@@ -186,8 +186,6 @@ def execute(run_id: str, run_with_lock_retry) -> bool:
                 ("description_summarization", "graphrag_extraction"),
                 ("community_report_generation", "graphrag_community"),
             ]
-            if active.graphrag_claims_enabled:
-                stages.append(("claim_extraction", "graphrag_claims"))
             for stage, layer in stages:
                 record_stage_usage(
                     session,

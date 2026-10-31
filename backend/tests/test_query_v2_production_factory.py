@@ -17,6 +17,7 @@ from app.models import Base, Conversation, Message, QueryRun, QueryRuntimeActiva
 from app.providers.base import GeneratedText
 from app.providers.embeddings import EmbeddingConfiguration
 from app.query.answer import AnswerEngine
+from app.query.context import ContextRevisionConflict
 from app.query.execution import V2DenseAdapter, V2PlanExecutor, V2SparseAdapter
 from app.query.production import V2QueryServiceFactory
 from app.query.runtime import QueryV2PreparationService
@@ -374,8 +375,14 @@ def test_factory_registers_generation_bound_multi_engine_dispatch(tmp_path):
         assert service.executor.registry.engine_for(engine)
 
 
-def test_exhaustive_sqlite_v2_path_retains_zeroes_and_uses_no_fallbacks(tmp_path, monkeypatch):
-    """Production V2 path: SQLite canonical authority works without Neo4j or retrieval."""
+@pytest.mark.parametrize("context_conflict", [False, True])
+def test_exhaustive_sqlite_v2_path_retains_zeroes_and_uses_no_fallbacks(
+    tmp_path, monkeypatch, context_conflict
+):
+    """Production V2 path: SQLite canonical authority works without Neo4j or retrieval.
+
+    A concurrent context revision must not discard the already validated answer.
+    """
     session = _session("workspace")
     client = QdrantClient(":memory:")
     contents = [
@@ -480,6 +487,12 @@ def test_exhaustive_sqlite_v2_path_retains_zeroes_and_uses_no_fallbacks(tmp_path
     )
     from app.query.production_chat import execute_v2_chat
 
+    if context_conflict:
+
+        def conflicting_save(*_args, **_kwargs):
+            raise ContextRevisionConflict("context revision changed")
+
+        monkeypatch.setattr("app.query.production_chat.save_conversation_context", conflicting_save)
     _, assistant, run = asyncio.run(
         execute_v2_chat(
             session,
@@ -501,9 +514,9 @@ def test_exhaustive_sqlite_v2_path_retains_zeroes_and_uses_no_fallbacks(tmp_path
         "logical_ir": metadata["logical_ir"],
         "query_plan": metadata["query_plan"],
     }
-    assert "1. Ali Merter — 2 property records" in assistant.content
-    assert "2. Ayse Merter — 1 property record" in assistant.content
-    assert "3. Zeynep Merter — 0 property records" in assistant.content
+    assert "1. Ali Merter — 2 taşınmaz kaydı" in assistant.content
+    assert "2. Ayse Merter — 1 taşınmaz kaydı" in assistant.content
+    assert "3. Zeynep Merter — 0 taşınmaz kaydı" in assistant.content
     plan_steps = metadata["query_plan"]["graph"]["steps"]
     assert [step["engine"] for step in plan_steps] == [
         "structured",

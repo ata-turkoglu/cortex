@@ -2,8 +2,8 @@
 
 Read this file before changing Cortex. The binding product decisions are in
 `codex-prompts/MASTER_PROMPT.md` and `codex-prompts/docs/DECISIONS.md`; do not silently
-deviate from them. Production chat is V2-only under `backend/app/query/`; `backend/app/chat/`
-is historical/compatibility code unless a current call site proves otherwise. Use
+deviate from them. Production chat is V2-only under `backend/app/query/`; the V1 chat orchestration
+(`backend/app/chat/`, `backend/app/aggregation/`) has been removed. Use
 `.ai/project-map.yaml` and `docs/ai/index.md` to find the smallest relevant module before
 searching files.
 

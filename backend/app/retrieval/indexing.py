@@ -94,6 +94,7 @@ def rebuild_active_workspace(session: Session, workspace_id: str) -> IndexingSum
                 texts,
                 batch_size=settings.embedding_batch_size,
                 min_batch_size=settings.embedding_min_batch_size,
+                concurrency=settings.embedding_concurrency,
             )
         )
         if texts

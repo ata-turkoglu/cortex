@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 from dataclasses import replace
 from pathlib import Path
 
+from ..accounting import persist_usage, usage_from_generated
 from ..core.config import Settings, get_settings
 from ..core.embedding_runtime import build_production_embedder
 from ..core.qdrant import get_qdrant_client
@@ -52,6 +54,8 @@ from .source_manifest import (
     write_generation_manifest,
 )
 from .workflow_executor import KnowledgeWorkflowExecutor
+
+logger = logging.getLogger(__name__)
 
 
 def _fingerprint(stage: str, generation_id: str, material: object) -> str:
@@ -354,12 +358,16 @@ class ProductionKnowledgeExecutor:
                 batch_size = getattr(self.extractor, "concurrency", len(missing_chunks))
                 for offset in range(0, len(missing_chunks), batch_size):
                     batch = missing_chunks[offset : offset + batch_size]
-                    result = self.extractor.extract(
-                        CorpusSnapshot(
-                            snapshot.workspace_id, snapshot.fingerprint, tuple(batch)
-                        ),
-                        generation_id,
-                    )
+                    try:
+                        result = self.extractor.extract(
+                            CorpusSnapshot(
+                                snapshot.workspace_id, snapshot.fingerprint, tuple(batch)
+                            ),
+                            generation_id,
+                        )
+                    finally:
+                        # Failed batches were billed too; record before re-raising.
+                        self._record_extraction_usage(generation_id)
                     if len(result.bundles) != len(batch):
                         raise RuntimeError("knowledge extractor returned an incomplete chunk batch")
                     rejected_assertion_count += result.rejected_assertion_count
@@ -399,6 +407,40 @@ class ProductionKnowledgeExecutor:
             _fingerprint("entity_mention", generation_id, metrics),
             metrics,
         )
+
+    def _record_extraction_usage(self, generation_id: str) -> None:
+        """Persist provider usage in a short transaction after the network calls finish."""
+        drain = getattr(self.extractor, "drain_provider_calls", None)
+        if drain is None or self.session_factory is None:
+            return
+        calls = drain()
+        if not calls:
+            return
+        session = self.session_factory()
+        try:
+            for call in calls:
+                persist_usage(
+                    session,
+                    workspace_id=self.workspace_id,
+                    stage="knowledge_extraction",
+                    provider=self.extractor.provider_name,
+                    model=self.extractor.model,
+                    usage=usage_from_generated(call.generated),
+                    idempotency_key=(
+                        f"knowledge_extraction:{generation_id}:{call.request_id}:{call.attempt}"
+                    ),
+                    provider_request_id=call.generated.request_id,
+                )
+            session.commit()
+        except Exception:
+            # Accounting must not discard checkpointed extraction work.
+            session.rollback()
+            logger.exception(
+                "Knowledge extraction usage was not recorded for generation_id=%s",
+                generation_id,
+            )
+        finally:
+            session.close()
 
     def identity_resolution(self, snapshot: CorpusSnapshot, generation_id: str) -> StageResult:
         if self.session_factory is None:
@@ -857,6 +899,7 @@ class ProductionKnowledgeExecutor:
                     texts,
                     batch_size=self.settings.embedding_batch_size,
                     min_batch_size=self.settings.embedding_min_batch_size,
+                    concurrency=self.settings.embedding_concurrency,
                 )
             )
             if texts

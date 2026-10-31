@@ -216,6 +216,7 @@ def test_workspace_and_generation_membership_and_ownership_are_isolated():
     second_generation = primary_reader.query_canonical_population("generation-2", "person")
     foreign_generation = other_reader.query_canonical_population("other-generation", "person")
     first_names = [item.display_name for item in first_generation.entities]
-    assert first_names == ["Ali Merter", "Zeynep Merter"]
+    # Population order follows opaque canonical IDs, not display names.
+    assert sorted(first_names) == ["Ali Merter", "Zeynep Merter"]
     assert [item.display_name for item in second_generation.entities] == ["Ali Merter"]
     assert [item.display_name for item in foreign_generation.entities] == ["Ali Merter"]

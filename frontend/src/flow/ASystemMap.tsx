@@ -443,7 +443,7 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
     documentation: "docs/architecture/graphrag-boundary.md",
     context: "backend/app/graphrag/AGENTS.md · CLAUDE.md",
     description:
-      "GraphRAG Local, Global, and DRIFT use normalized generation artifacts and the trusted-source bridge before EngineResult reconciliation.",
+      "GraphRAG Local (entities) and Global/DRIFT (community reports) trace native generation artifacts to their Cortex chunks through text units, then pass the trusted-source bridge before EngineResult reconciliation. Opt-in smart search runs only GraphRAG's selection step.",
     guarantee:
       "PARTIAL / readiness-dependent: GraphRAG is not canonical truth; invalid source references fail closed and AnswerEngine remains the sole final renderer.",
     kind: "retrieval",
@@ -479,13 +479,13 @@ const QUERY_V2_SUBSYSTEMS: SystemMapSubsystem[] = [
   {
     id: "v2-query-answer",
     label: "AnswerEngine",
-    boundary: "backend/app/query/answer.py",
+    boundary: "backend/app/query/answer.py · backend/app/query/answer_synthesis.py",
     documentation: "docs/architecture/query-answer-pipeline.md",
     context: "backend/AGENTS.md",
     description:
-      "Renders the grounded, partial, or unsupported user-facing answer from the validated evidence or composition artifact.",
+      "Renders the grounded, partial, or unsupported user-facing answer from the validated evidence or composition artifact. Opt-in grounded synthesis may rewrite eligible retrieval answers.",
     guarantee:
-      "Only a validated ReasoningPackage can produce grounded citations; unsupported answers contain zero citations.",
+      "Only a validated ReasoningPackage can produce grounded citations; unsupported answers contain zero citations. Every synthesized sentence cites supplied evidence or the deterministic answer is kept.",
     kind: "delivery",
     variant: "delivery",
   },
@@ -1441,8 +1441,6 @@ function modelLabel(
 ) {
   if (id === "embedding") return providerModel(settings, "embedding");
   if (id === "metadata") return providerModel(settings, "metadata");
-  if (id === "answer") return providerModel(settings, "answer");
-  if (id === "router") return providerModel(settings, "router");
   return fallback;
 }
 function providerModel(settings: Record<string, unknown>, layer: string) {

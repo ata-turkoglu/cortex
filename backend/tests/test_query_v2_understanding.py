@@ -401,3 +401,23 @@ def test_ambiguity_and_unresolved_states_are_explicit_and_drive_tier_selection()
     )
     == "standard"
     )
+
+
+def test_failed_planner_attempts_keep_their_billed_responses():
+    from app.query.understanding.planner import SemanticPlannerOutputError
+
+    provider = FakeStructuredProvider(["not-json", "still-not-json"])
+    models = {
+        tier: PlannerModel("fake", f"{tier}-model") for tier in ("simple", "standard", "complex")
+    }
+    planner = SemanticPlannerAdapter(
+        models=models, providers={"fake": provider}, repair_attempts=1, escalation_enabled=False
+    )
+
+    with pytest.raises(SemanticPlannerOutputError) as raised:
+        asyncio.run(planner.plan("Who is Hasan?", _context()))
+
+    assert [attempt.generated.text for attempt in raised.value.attempts] == [
+        "not-json",
+        "still-not-json",
+    ]

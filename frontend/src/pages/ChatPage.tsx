@@ -11,7 +11,6 @@ import { AButton, ADialog, AInfoPanel, ALabel, ASelect, ATextarea, useConfirmati
 import { useWorkspace } from "../app/workspace";
 import { AIcon } from "../icons/AIcon";
 
-type Mode = "automatic" | "document_search" | "deep_analysis";
 type Source = { content: string; document_title: string; version_number: number };
 
 const suggestions = [
@@ -31,7 +30,6 @@ export function ChatPage() {
   const [active, setActive] = useState<Conversation>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [content, setContent] = useState("");
-  const [mode, setMode] = useState<Mode>("automatic");
   const [debug, setDebug] = useState<QueryDebug>();
   const [source, setSource] = useState<Source>();
   const [error, setError] = useState("");
@@ -96,7 +94,7 @@ export function ChatPage() {
     setContent("");
     setPendingMessage(optimisticMessage);
     try {
-      const answer = await apiClient.ask(workspaceId, active.id, question, mode);
+      const answer = await apiClient.ask(workspaceId, active.id, question, "automatic");
       const title = conversationTitleFromQuestion(question);
       setConversations((items) => items.map((item) => (
         item.id === active.id && item.title === "New conversation" ? { ...item, title } : item
@@ -155,7 +153,6 @@ export function ChatPage() {
           )}
         </div>
         {active && <div className="cortex-chat__composer-wrap">
-          <div className="cortex-chat__composer-toolbar"><ASelect value={mode} options={[{ label: "Otomatik", value: "automatic" }, { label: "Belge arama", value: "document_search" }, { label: "Derin analiz", value: "deep_analysis" }]} onChange={(event) => setMode(event.value as Mode)} /></div>
           <div className="cortex-chat__composer"><ATextarea value={content} onChange={(event) => setContent(event.target.value)} onKeyDown={onComposerKeyDown} rows={3} placeholder="Belgeleriniz hakkında bir soru sorun…" autoResize /><AButton icon="send" aria-label="Gönder" disabled={!content.trim() || sending} onClick={submit} /></div>
           <p>Göndermek için Enter, yeni satır için Shift + Enter kullanın.</p>
         </div>}

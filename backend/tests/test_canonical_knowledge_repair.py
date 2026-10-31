@@ -116,7 +116,7 @@ def test_ranked_person_rows_render_without_internal_identifiers():
         confidence=1,
     )
     content = AnswerEngine().render(package).content
-    assert "Rauf Merter — 2 property records" in content
+    assert "Rauf Merter — 2 taşınmaz kaydı" in content
     assert "entity_id" not in content
     assert "entity_type" not in content
 

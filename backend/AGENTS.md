@@ -13,7 +13,7 @@ For Query Architecture V2, enter the smallest owning boundary before reading cod
 - `app/reasoning/` — durable research and composition
 
 Production query execution enters through `app/api/chat.py` and `app/query/production_chat.py`.
-`app/retrieval/` and `app/graphrag/` remain active V2 adapter boundaries. `app/chat/` and
-`app/aggregation/` contain historical or compatibility code; do not route production V2 requests
-through them or delete them without proving that workers, evaluation, and persisted compatibility
-do not require them.
+`app/retrieval/` and `app/graphrag/` remain active V2 adapter boundaries. The V1 chat
+orchestration (`app/chat/`, `app/aggregation/`, the workspace hybrid retrieval runtime, and the
+V1 GraphRAG chat worker) has been removed; do not reintroduce a parallel query path. See
+`docs/architecture/V1_CLEANUP_REVIEW.md`.

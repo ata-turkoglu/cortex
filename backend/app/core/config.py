@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     upload_max_bytes: int = 50 * 1024 * 1024
     chunk_token_limit: int = 500
     chunk_overlap_tokens: int = 50
-    allowed_extensions: str = ".md,.txt,.docx,.pdf"
     # Supplied exclusively by the persisted runtime settings row.
     embedding_provider: str | None = None
     embedding_model: str | None = None
@@ -39,21 +38,11 @@ class Settings(BaseSettings):
     fusion_candidate_limit: int = 40
     reranker_input_limit: int = 30
     final_evidence_top_k: int = 10
-    identify_final_evidence_top_k: int = 3
-    describe_final_evidence_top_k: int = 5
-    timeline_final_evidence_top_k: int = 5
-    document_lookup_final_evidence_top_k: int = 50
-    reranker_model: str | None = None
-    reranker_device: str | None = None
-    router_confidence_threshold: float = Field(default=0.6, ge=0, le=1)
-    router_multi_route_threshold: float = Field(default=0.8, ge=0, le=1)
     graphrag_pending_document_threshold: int = 20
     graphrag_update_mode: Literal["manual", "threshold"] = "manual"
     graphrag_max_documents_per_run: int = 500
     graphrag_cost_warning_usd: float = 0.0
     graphrag_use_batch_api: bool = False
-    graphrag_provider: Literal["openai", "ollama"] = "openai"
-    graphrag_model: str = "gpt-5.6-luna"
     graphrag_extraction_provider: Literal["openai", "ollama"] = "openai"
     graphrag_extraction_model: str = "gpt-4.1-mini"
     # Extraction is workload-bound rather than request-bound.  Keep provider
@@ -63,48 +52,28 @@ class Settings(BaseSettings):
     knowledge_extraction_request_timeout_seconds: float = Field(
         default=60.0, gt=0, le=180
     )
-    graphrag_claims_provider: Literal["openai", "ollama"] = "openai"
-    graphrag_claims_model: str = "gpt-4.1-mini"
-    graphrag_claims_enabled: bool = False
     graphrag_community_provider: Literal["openai", "ollama"] = "openai"
     graphrag_community_model: str = "gpt-4.1-mini"
-    graphrag_local_provider: Literal["openai", "ollama"] = "openai"
-    graphrag_local_model: str = "gpt-4.1"
     graphrag_global_provider: Literal["openai", "ollama"] = "openai"
     graphrag_global_model: str = "gpt-4.1"
     graphrag_drift_provider: Literal["openai", "ollama"] = "openai"
     graphrag_drift_model: str = "gpt-4.1"
-    graphrag_drift_n_depth: int = Field(default=2, ge=1, le=5)
     graphrag_drift_k_followups: int = Field(default=5, ge=1, le=20)
     graphrag_drift_primer_folds: int = Field(default=3, ge=1, le=10)
-    graphrag_drift_concurrency: int = Field(default=4, ge=1, le=16)
-    graphrag_drift_max_llm_calls: int = Field(default=16, ge=1, le=100)
-    graphrag_query_fallback_to_hybrid: bool = False
-    graphrag_query_wait_seconds: int = Field(default=20, ge=1, le=60)
+    graphrag_smart_search_enabled: bool = False
     graphrag_command_timeout_seconds: int = Field(default=600, ge=60, le=3600)
     workflow_ingestion_concurrency: int = 2
     workflow_dense_reindex_concurrency: int = 1
     workflow_graphrag_reindex_concurrency: int = 1
     workflow_deletion_concurrency: int = 1
     workflow_retention_days: int = 30
-    workflow_retry_limit: int = 3
-    workflow_retry_backoff_seconds: int = 5
-    workflow_timeout_seconds: int = 900
-    default_page_size: int = 50
-    health_check_interval_seconds: int = 15
-    sse_reconnect_interval_seconds: int = 3
     conversation_memory_window_messages: int = 12
     answer_style: Literal["concise", "balanced", "detailed"] = "balanced"
-    identify_answer_max_words: int = 180
-    describe_answer_max_words: int = 400
-    timeline_answer_max_words: int = 400
-    grounding_required: bool = True
+    answer_synthesis_enabled: bool = False
     metadata_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     metadata_model: str = "gpt-5.6-luna"
     answer_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     answer_model: str = "gpt-5.6-luna"
-    router_provider: Literal["openai", "anthropic", "ollama"] = "openai"
-    router_model: str = "gpt-5.6-luna"
     semantic_planner_simple_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     semantic_planner_simple_model: str = "gpt-5.6-luna"
     semantic_planner_standard_provider: Literal["openai", "anthropic", "ollama"] = "openai"
@@ -116,10 +85,6 @@ class Settings(BaseSettings):
     semantic_planner_confidence_threshold: float = Field(default=0.75, ge=0, le=1)
     summary_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     summary_model: str = "gpt-5.6-luna"
-    query_expansion_provider: Literal["openai", "anthropic", "ollama"] = "openai"
-    query_expansion_model: str = "gpt-5.6-luna"
-    query_expansion_enabled: bool = False
-    automatic_quality_escalation_enabled: bool = False
     daily_soft_budget_usd: float = 0.0
     monthly_soft_budget_usd: float = 0.0
     budget_warning_percent: int = 80

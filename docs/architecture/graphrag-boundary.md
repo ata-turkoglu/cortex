@@ -20,7 +20,23 @@ documents, and resolvable relations into provenance-bearing nodes/edges. Query V
 fixed `knowledge-candidates/<generation>/graphrag` artifact root. Its
 `GraphRAGProductionEngine` invokes `GraphRAGAdapter.query_findings`, then the fail-closed
 `bridge_graphrag` validates workspace, generation, document, version, logical document, chunk,
-and content hash against `TrustedSource` before emitting an `EngineResult`. The Microsoft CLI
+and content hash against `TrustedSource` before emitting an `EngineResult`. Native artifacts carry no
+Cortex identity, so `query_findings` traces them through GraphRAG's own outputs: the production
+stage writes one `<chunk_id>.md` input per Cortex chunk, so an entity's `text_unit_ids` (Local) or
+a report's community `text_unit_ids` (Global/DRIFT) lead to `documents.parquet` titles and thus to
+manifest chunks. The content hash is computed from the text GraphRAG indexed, so a stale or altered
+input fails the bridge.
+
+Smart selection (`app/graphrag/smart_search.py`, opt-in via `graphrag_smart_search_enabled`) runs
+only GraphRAG's context-selection step in-process, in a private event loop, and returns entity or
+report IDs; provenance and validation are unchanged. Cost controls: the answer-writing step is
+skipped, Global rates short community summaries (`dynamic_search_use_summary`, one repeat),
+selections are cached per generation, route, normalized question, and model, and estimated token
+usage is recorded as `graphrag_search`. Local/Global/DRIFT model assignments and DRIFT limits are
+query-time settings and no longer mark the graph for reindexing. GPT-5 family OpenAI models are
+routed through GraphRAG's LiteLLM `chat` provider, because the `openai_chat` provider sends
+`max_tokens`, which those models reject. When the `graphrag` package is not installed (for example
+the API container image), selection stays lexical. The Microsoft CLI
 native answer has no such exact source identity and is never admitted to Query V2. The Cortex-owned
 `Neo4jGraphAdapter` atomically replaces only the current workspace's `ExtractedKnowledge` layer and
 never deletes `CanonicalKnowledge`. Every node and relation carries workspace, layer, generation,
@@ -99,13 +115,13 @@ collections. Batch mode is opt-in and applies only to the non-interactive entity
 community-summarization stages. GraphRAG 2.6 itself exposes embedding batches but no upstream
 OpenAI Batch API executor, so provider-specific Batch submission stays behind this plan boundary.
 
-`GraphRAGQueryEngine` wraps exactly one route as a LlamaIndex `CustomQueryEngine`. It preserves
-the route identity, normalized evidence, workspace metadata, and citation labels as source nodes;
-the Phase 8 router may select these engines but must not flatten them into a basic retriever.
-
-When an upstream GraphRAG query fails after outputs exist, the adapter returns an unsupported
-result with the explicit `graph_stale` fallback reason. This is a safe route-level signal for the
-router to use Hybrid Search; it never presents stale graph output as grounded evidence.
+GraphRAG's written answers have no code path: the CLI `query` command, the adapter's prose
+`query`, the LlamaIndex `GraphRAGQueryEngine` wrapper, and the Neo4j bridge's prose
+`query_findings` were removed, and a test asserts they stay absent. Generated index settings also
+skip work V2 never reads: claim extraction is always disabled (no V2 component reads GraphRAG
+covariates), text-unit vectors are not embedded (they serve only GraphRAG basic search), and local
+search has no model assignment of its own (Local selection uses embeddings only). The DRIFT
+`n_depth` and `concurrency` settings were removed because only the primer step runs.
 
 Microsoft GraphRAG 2.6's upstream vector-store registry exposes LanceDB, Azure AI Search,
 and Cosmos DB; it does not provide a Qdrant store. Cortex therefore does not instantiate the

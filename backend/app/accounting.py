@@ -28,6 +28,23 @@ class NormalizedUsage:
     raw: dict[str, object] | None = None
 
 
+def usage_from_generated(generated) -> NormalizedUsage:
+    """Normalize the usage a provider reported on one ``GeneratedText`` response."""
+    reported = any(
+        value is not None
+        for value in (generated.input_tokens, generated.output_tokens, generated.total_tokens)
+    )
+    return NormalizedUsage(
+        input_tokens=generated.input_tokens,
+        output_tokens=generated.output_tokens,
+        total_tokens=generated.total_tokens,
+        cached_input_tokens=generated.cached_input_tokens,
+        reasoning_tokens=generated.reasoning_tokens,
+        source="provider_reported" if reported else "unavailable",
+        raw=generated.usage_payload,
+    )
+
+
 @dataclass(frozen=True)
 class RateCard:
     provider: str
@@ -293,4 +310,53 @@ def totals(
             }
             for event in events
         ],
+    }
+
+
+def _period_spend(session: Session, since: datetime) -> tuple[Decimal, int]:
+    """Sum priced spend since ``since`` and count calls whose cost is unknown."""
+    events = session.scalars(select(UsageEvent).where(UsageEvent.created_at >= since)).all()
+    spent = sum(
+        (Decimal(event.cost_amount) for event in events if event.cost_amount is not None),
+        Decimal("0"),
+    )
+    return spent, sum(1 for event in events if event.cost_amount is None)
+
+
+def _budget_period(spent: Decimal, budget: float, warning_percent: int) -> dict[str, object]:
+    if budget <= 0:
+        state, percent = "unbounded", None
+    else:
+        ratio = spent / Decimal(str(budget)) * 100
+        percent = float(round(ratio, 1))
+        state = "exceeded" if ratio >= 100 else "warning" if ratio >= warning_percent else "ok"
+    return {"spent_usd": str(spent), "budget_usd": budget, "percent": percent, "state": state}
+
+
+def budget_status(
+    session: Session,
+    *,
+    daily_budget_usd: float,
+    monthly_budget_usd: float,
+    warning_percent: int,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """Report global soft-budget consumption; soft budgets warn and never block work."""
+    current = now or datetime.now(UTC)
+    day_start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = day_start.replace(day=1)
+    daily, daily_unpriced = _period_spend(session, day_start)
+    monthly, monthly_unpriced = _period_spend(session, month_start)
+    return {
+        "currency": "USD",
+        "warning_percent": warning_percent,
+        "enforcement": "warn_only",
+        "daily": {
+            **_budget_period(daily, daily_budget_usd, warning_percent),
+            "unpriced_calls": daily_unpriced,
+        },
+        "monthly": {
+            **_budget_period(monthly, monthly_budget_usd, warning_percent),
+            "unpriced_calls": monthly_unpriced,
+        },
     }

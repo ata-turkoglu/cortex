@@ -76,36 +76,15 @@ fingerprint before specialized worker adapters run.
 Query runs use separate `query_runs` and `query_step_runs` records rather than background
 workflow tables. Phase 8 can therefore persist route, retrieval, and synthesis progress without
 changing the job-monitoring lifecycle.
-Entity-document lookup remains inside those same `route`, `retrieve`, and `synthesize` query
-steps: intent detection occurs during route, unique-document grouping during retrieve, and the
-concise document table during synthesize. It does not add a Processes-page workflow schema.
-
-Chat query runs persist selector decision, confidence, fallback explanation, answer state,
-latency, and token/cost fields. When a GraphRAG route cannot produce normalized
-workspace-scoped evidence, the query falls back to Hybrid Search and records that fallback
-rather than presenting ungrounded output.
-
-GraphRAG fallback is now an explicit global policy and defaults off. Selected native Local,
-Global, and DRIFT routes retain GraphRAG's final answer and bypass the normal synthesis actor.
-
-GraphRAG chat uses the durable query-run record as its worker job protocol. The API commits that
-record before submitting its ID to the existing Redis/Dramatiq worker, then polls bounded shared
-SQLite state for the final result. The worker owns the Microsoft GraphRAG dependency and CLI;
-the API image remains lightweight and dependency-safe.
-
-`app.chat.router` owns the LlamaIndex `QueryEngineTool` catalog and the descriptions for
-Hybrid, GraphRAG Local, Global, and DRIFT paths. It restricts selection to V1-approved route
-sets; until provider execution is configured, the deterministic selector is the non-network
-fallback for this same catalog.
-
-After the API commits the evidence-backed response, `execute_query_synthesis` may run in the
-worker. It reads a short query/evidence snapshot, performs the configured OpenAI Responses API
-call outside a database transaction, and opens a separate short transaction to persist answer
-text and token counters. Redis failure leaves the original grounded response intact.
+Production V2 chat runs inside the API request and persists its query run, steps, generation
+trace, and query-scoped completeness directly (see
+[`query-answer-pipeline.md`](../architecture/query-answer-pipeline.md)). The V1 worker-owned
+GraphRAG chat job, its hybrid fallback policy, and the provider synthesis actor were removed with
+the V1 chat orchestration; no worker owns a chat answer.
 
 The summary worker only runs after the configured conversation-memory window is exceeded. It
 uses the assigned Conversation Summary model and writes the compact summary back to the
-workspace-scoped conversation for subsequent provider synthesis.
+workspace-scoped conversation. Its implementation lives in `app/query/conversation_summary.py`.
 
 Phase 10 regression coverage verifies cancellation, retry, stale-run recovery, stage blocking,
 retention cleanup, deletion repair scheduling, and idempotent orphan reconciliation using the

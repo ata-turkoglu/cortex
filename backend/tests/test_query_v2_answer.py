@@ -240,3 +240,14 @@ def test_answer_engine_uses_typed_identity_failure_reason():
 
     assert "kanonik kimlik kaydı" in draft.content
     assert draft.metadata["reason_code"] == "identity_unresolved"
+
+
+def test_retrieval_excerpt_prefers_the_sentence_that_matches_the_query():
+    excerpt = AnswerEngine._safe_excerpt(
+        "The cobalt orchard archive proves the river allotment. "
+        "Rare lexical marker zephyr-741 belongs to the validated deed.",
+        "Describe the deed with zephyr-741 evidence",
+    )
+
+    assert excerpt == "Rare lexical marker zephyr-741 belongs to the validated deed."
+    assert AnswerEngine._safe_excerpt("First sentence. Second sentence.") == "First sentence."

@@ -10,10 +10,8 @@ class ModelAssignment:
 
 DEFAULT_MODELS = (
     ModelAssignment("answer_generation", "openai", "gpt-5.6-luna"),
-    ModelAssignment("query_router", "openai", "gpt-5.6-luna"),
     ModelAssignment("semantic_planner_simple", "openai", "gpt-5.6-luna"),
     ModelAssignment("semantic_planner_standard", "openai", "gpt-5.6-luna"),
     ModelAssignment("semantic_planner_complex", "openai", "gpt-5.6-luna"),
     ModelAssignment("conversation_summary", "openai", "gpt-5.6-luna"),
-    ModelAssignment("query_expansion", "openai", "gpt-5.6-luna"),
 )

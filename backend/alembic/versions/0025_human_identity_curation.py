@@ -33,10 +33,17 @@ def upgrade():
         sa.Column("actor", sa.String(128), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("evidence_reference_json", sa.Text(), nullable=False),
-        sa.Column("previous_decision_id", sa.String(36), sa.ForeignKey("human_identity_curation_decisions.id")),
+        sa.Column(
+            "previous_decision_id",
+            sa.String(36),
+            sa.ForeignKey("human_identity_curation_decisions.id"),
+        ),
         sa.Column("active", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.CheckConstraint("action IN ('LINK_TO_EXISTING', 'KEEP_UNRESOLVED')", name="ck_human_identity_curation_action"),
+        sa.CheckConstraint(
+            "action IN ('LINK_TO_EXISTING', 'KEEP_UNRESOLVED')",
+            name="ck_human_identity_curation_action",
+        ),
         sa.CheckConstraint(
             "(action = 'LINK_TO_EXISTING' AND canonical_entity_id IS NOT NULL) OR "
             "(action = 'KEEP_UNRESOLVED' AND canonical_entity_id IS NULL)",
@@ -46,7 +53,15 @@ def upgrade():
     op.create_index(
         "ix_human_identity_curation_exact_active",
         "human_identity_curation_decisions",
-        ["workspace_id", "document_version_id", "chunk_id", "span_start", "span_end", "source_text_hash", "active"],
+        [
+            "workspace_id",
+            "document_version_id",
+            "chunk_id",
+            "span_start",
+            "span_end",
+            "source_text_hash",
+            "active",
+        ],
     )
 
 

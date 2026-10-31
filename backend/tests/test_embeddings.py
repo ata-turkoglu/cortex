@@ -1,8 +1,10 @@
 import asyncio
 import json
 
+import httpx
 import pytest
 
+from app.core.config import get_settings
 from app.providers.embeddings import (
     EmbeddingConfiguration,
     EmbeddingHealth,
@@ -37,6 +39,7 @@ def test_ollama_embedding_health_check_uses_embed_endpoint_without_a_real_model(
         assert json.loads(request.content) == {
             "model": "qwen3-embedding:0.6b",
             "input": ["Cortex embedding health check: İstanbul"],
+            "keep_alive": get_settings().embedding_keep_alive,
         }
         return httpx.Response(200, json={"embeddings": [[0.1, 0.2, 0.3]]})
 
@@ -126,3 +129,41 @@ def test_optional_bge_m3_embedding_compatibility_uses_the_same_ollama_contract()
     )
     result = asyncio.run(adapter.health_check())
     assert (result.model, result.dimension) == ("bge-m3:567m", 3)
+
+
+def test_concurrent_embedding_runs_batches_in_parallel_and_keeps_input_order():
+    class TrackingProvider:
+        def __init__(self):
+            self.in_flight = 0
+            self.peak = 0
+
+        async def embed(self, texts):
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+            await asyncio.sleep(0.01)
+            self.in_flight -= 1
+            return [[float(len(text)), 1.0] for text in texts]
+
+    provider = TrackingProvider()
+    texts = ["a", "bb", "ccc", "dddd", "eeeee"]
+
+    vectors = asyncio.run(adaptive_embed(provider, texts, batch_size=2, concurrency=2))
+
+    assert [vector[0] for vector in vectors] == [1.0, 2.0, 3.0, 4.0, 5.0]
+    assert provider.peak == 2
+
+
+def test_ollama_embedding_requests_send_the_configured_keep_alive(monkeypatch):
+    monkeypatch.setattr(get_settings(), "embedding_keep_alive", "30m")
+
+    def handler(request):
+        assert json.loads(request.content)["keep_alive"] == "30m"
+        return httpx.Response(200, json={"embeddings": [[1.0, 0.0]]})
+
+    adapter = OllamaEmbeddingAdapter(
+        EmbeddingConfiguration("ollama", "bge-m3"),
+        base_url="http://ollama.test",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert asyncio.run(adapter.embed(["metin"])) == [[1.0, 0.0]]

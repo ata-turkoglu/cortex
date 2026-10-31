@@ -8,7 +8,9 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from ..core.config import get_settings
 from .answer import AnswerDraft, AnswerEngine
+from .answer_synthesis import AnswerSynthesizer, SynthesisOutcome, apply_synthesis, is_eligible
 from .briefing import WorkspaceBriefing
 from .context import ConversationContext
 from .execution import GenerationScopeResolver, V2PlanExecutor
@@ -33,6 +35,7 @@ class V2ServiceTrace:
     reasoning_package_generation: str | None
     answer_status: str
     citation_count: int
+    retrieval_query: str | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ class V2QueryServiceResult:
     package: ReasoningPackage
     prepared: PreparedQuery
     trace: V2ServiceTrace
+    synthesis: SynthesisOutcome | None = None
 
 
 class _FixedScopeResolver:
@@ -75,6 +79,7 @@ class V2QueryService:
         ) = None,
         completeness_evaluator: Callable[[GenerationScope, object, int | None], object]
         | None = None,
+        answer_synthesizer: AnswerSynthesizer | None = None,
     ) -> None:
         self.preparation = preparation
         self.scope_resolver = scope_resolver
@@ -85,6 +90,7 @@ class V2QueryService:
         self.briefing_loader = briefing_loader
         self.property_vocabulary_loader = property_vocabulary_loader
         self.completeness_evaluator = completeness_evaluator
+        self.answer_synthesizer = answer_synthesizer
 
     async def execute(
         self,
@@ -100,6 +106,8 @@ class V2QueryService:
             briefing = self.briefing_loader(scope)
         if self.property_vocabulary_loader is not None:
             vocabulary = vocabulary.with_governed_properties(self.property_vocabulary_loader(scope))
+        # No provider call may run while a database transaction is open.
+        _end_read_transaction(session)
         prepared = await self.preparation.prepare(query, context, vocabulary, readiness, briefing)
         if scope.workspace_id != prepared.physical_plan.workspace_id:
             raise ValueError("GENERATION_SCOPE_WORKSPACE_MISMATCH")
@@ -110,8 +118,10 @@ class V2QueryService:
         sources = load_generation_manifest(
             session, scope.workspace_id, scope.generation_id, self.data_root
         )
-        vector = await self.query_embedder.embed(query, scope)
-        execution = self._execute_bound(prepared, scope, vector, query, sources)
+        _end_read_transaction(session)
+        retrieval_query = _retrieval_query(query, prepared.semantic.understanding)
+        vector = await self.query_embedder.embed(retrieval_query, scope)
+        execution = self._execute_bound(prepared, scope, vector, retrieval_query, sources)
         contract = _reconciliation_contract(prepared.physical_plan, scope, prepared.logical_ir)
         result_steps = _final_result_steps(prepared.physical_plan, prepared.logical_ir)
         package = reconcile_engine_results(
@@ -119,10 +129,16 @@ class V2QueryService:
             tuple(result for result in execution.results if result.step_id in result_steps),
             sources,
         )
-        package = self._apply_query_completeness(package, scope, prepared.logical_ir)
+        package = self._apply_query_completeness(package, scope, prepared)
         package = _with_failure_reason(package)
-        answer = self.answer_engine.render(package)
+        answer = self.answer_engine.render(package, query=query)
+        synthesis = None
+        if self.answer_synthesizer is not None and is_eligible(package):
+            _end_read_transaction(session)
+            synthesis = await self.answer_synthesizer.synthesize(query, package)
+            answer = apply_synthesis(answer, package, synthesis)
         return V2QueryServiceResult(
+            synthesis=synthesis,
             answer=answer,
             package=package,
             prepared=prepared,
@@ -148,6 +164,7 @@ class V2QueryService:
                 reasoning_package_generation=package.generation_id,
                 answer_status=answer.state,
                 citation_count=len(answer.citations),
+                retrieval_query=retrieval_query,
             ),
         )
 
@@ -201,6 +218,7 @@ class V2QueryService:
             briefing_loader=self.briefing_loader,
             property_vocabulary_loader=self.property_vocabulary_loader,
             completeness_evaluator=self.completeness_evaluator,
+            answer_synthesizer=self.answer_synthesizer,
         )
         return await bound.execute(
             session,
@@ -211,10 +229,15 @@ class V2QueryService:
             inputs.workspace_briefing,
         )
 
-    def _apply_query_completeness(self, package, scope, logical_ir):
-        if self.completeness_evaluator is None:
+    def _apply_query_completeness(self, package, scope, prepared: PreparedQuery):
+        # Canonical population blockers describe structured results only; a grounded
+        # retrieval answer has no population and must not inherit unrelated blockers
+        # or report its top-k hit count as a known count.
+        if self.completeness_evaluator is None or not _has_structured_result(
+            prepared.physical_plan, prepared.logical_ir
+        ):
             return package
-        query = self.completeness_evaluator(scope, logical_ir, _known_count(package))
+        query = self.completeness_evaluator(scope, prepared.logical_ir, _known_count(package))
         completeness = package.completeness.model_copy(update={"query": query})
         if query.status == "COMPLETE":
             return package.model_copy(update={"completeness": completeness})
@@ -243,8 +266,9 @@ class V2QueryService:
             query_vector=vector,
             query_text=query,
             trusted_sources=sources,
-            dense_limit=30,
-            sparse_limit=30,
+            dense_limit=get_settings().dense_top_k,
+            sparse_limit=get_settings().bm25_top_k,
+            fusion_limit=get_settings().fusion_candidate_limit,
         )
 
 
@@ -264,6 +288,38 @@ def _reconciliation_contract(plan, scope: GenerationScope, logical_ir):
         boundary=(logical_ir.coverage.population_boundary if exhaustive else None),
         expected_steps=steps,
     )
+
+
+def _has_structured_result(plan, logical_ir) -> bool:
+    if plan.graph is None:
+        return False
+    by_id = {step.step_id: step for step in plan.graph.steps}
+    return any(
+        by_id[step_id].engine == "structured" for step_id in _final_result_steps(plan, logical_ir)
+    )
+
+
+def _end_read_transaction(session: Session) -> None:
+    """Close a read-only transaction before awaiting a provider or network call."""
+    if session.in_transaction() and not (session.new or session.dirty or session.deleted):
+        session.commit()
+
+
+def _retrieval_query(query: str, understanding) -> str:
+    """Make conversation-resolved referents visible to dense and sparse retrieval.
+
+    A follow-up such as "onun mülkleri?" carries its referent only in the semantic
+    understanding; the raw text alone would retrieve evidence for a pronoun.
+    """
+    names = [
+        entity.display_name
+        for entity in understanding.entities
+        if entity.reference_kind != "explicit"
+        and entity.resolution == "resolved"
+        and entity.display_name
+        and entity.display_name.casefold() not in query.casefold()
+    ]
+    return " ".join((query, *dict.fromkeys(names)))
 
 
 def _known_count(package) -> int | None:

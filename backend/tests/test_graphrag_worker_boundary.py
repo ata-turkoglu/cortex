@@ -8,11 +8,13 @@ WORKER_DEPENDENCY_SYNC = (
 
 def test_api_chat_does_not_import_graphrag_execution_runtime():
     api_chat = (BACKEND_ROOT / "app" / "api" / "chat.py").read_text(encoding="utf-8")
-    chat_service = (BACKEND_ROOT / "app" / "chat" / "service.py").read_text(encoding="utf-8")
+    production_chat = (BACKEND_ROOT / "app" / "query" / "production_chat.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "graphrag.adapter" not in api_chat
-    assert "graphrag.adapter" not in chat_service
-    assert "GraphRAGAdapter" not in chat_service
+    assert "graphrag.adapter" not in production_chat
+    assert "GraphRAGAdapter" not in production_chat
 
 
 def test_worker_image_is_the_only_graphrag_dependency_target():

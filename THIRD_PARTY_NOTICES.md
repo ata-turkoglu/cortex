@@ -21,6 +21,8 @@ dependency inventory is generated from pinned manifests and lockfiles with
 | Microsoft GraphRAG | 2.6.0 | MIT             | Extracted graph producer   |
 | LlamaIndex Core | 0.12.32 | MIT             | Query/workflow adapters    |
 | bm25s     | 0.3.9   | MIT                  | Sparse retrieval           |
+| pandas    | 2.2.3   | BSD-3-Clause         | GraphRAG artifact reading  |
+| PyYAML    | 6.0.3   | MIT                  | GraphRAG configuration     |
 | Sentence Transformers | 3.4.1 | Apache-2.0    | Local BGE reranking        |
 | React     | 19.0.0  | MIT                  | Frontend runtime           |
 | Vite      | 6.2.2   | MIT                  | Frontend build tooling     |

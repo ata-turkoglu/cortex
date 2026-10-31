@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import httpx
 
-from ..providers.base import LLMProvider
+from ..providers.base import GeneratedText, LLMProvider
 from ..providers.openai import OpenAIProvider
 from .extraction import (
     ExtractionMetadata,
@@ -133,6 +133,16 @@ class ProviderExtractionResult:
     rejected_assertion_count: int = 0
 
 
+@dataclass(frozen=True)
+class ExtractionProviderCall:
+    """One billed provider response, including responses later rejected by validation."""
+
+    chunk_id: str
+    request_id: str
+    attempt: int
+    generated: GeneratedText
+
+
 class OpenAIKnowledgeExtractor:
     """Strict adapter for a configured OpenAI text model."""
 
@@ -160,6 +170,13 @@ class OpenAIKnowledgeExtractor:
         self.request_timeout_seconds = request_timeout_seconds
         self.concurrency = concurrency
         self.retry_delay_seconds = retry_delay_seconds
+        self._provider_calls: list[ExtractionProviderCall] = []
+
+    def drain_provider_calls(self) -> tuple[ExtractionProviderCall, ...]:
+        """Return and forget the responses received since the last drain."""
+        calls = tuple(self._provider_calls)
+        self._provider_calls.clear()
+        return calls
 
     async def _extract_chunk(
         self, snapshot: CorpusSnapshot, generation_id: str, chunk_id: str, content: str
@@ -222,6 +239,9 @@ class OpenAIKnowledgeExtractor:
                     delay = self.retry_delay_seconds * (attempt + 1)
                 await asyncio.sleep(delay)
                 continue
+            self._provider_calls.append(
+                ExtractionProviderCall(chunk_id, request_id, attempt, response)
+            )
             metadata = ExtractionMetadata(
                 extraction_run_id=response.request_id or request_id,
                 provider=self.provider_name,

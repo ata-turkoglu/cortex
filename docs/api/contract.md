@@ -48,14 +48,17 @@ returns `202` with its durable workflow run ID.
 Chat is scoped beneath `/api/v1/workspaces/{workspace_id}`. Conversations can be soft-deleted
 with `DELETE /conversations/{id}` within their owning workspace. Conversations, messages, and
 query-debug lookups are all filtered by that workspace. `POST /conversations/{id}/messages`
-accepts `automatic`, `document_search`, or `deep_analysis`, persists route/debug state in a
-query run, and returns an evidence-backed assistant message. Citations carry document,
+accepts `automatic`, `document_search`, or `deep_analysis` for compatibility; Query V2 plans from
+the question alone, so the value does not change execution and the chat UI always sends
+`automatic`. The endpoint persists route/debug state in a query run, and returns an evidence-backed assistant message. Citations carry document,
 document-version, and chunk IDs; unsupported answers contain no citations. `GET /query-runs/{id}`
 returns routes, reason, confidence, answer state, latency, persisted token/cost counters, and
 safe debug fields for the validated query plan and expanded retrieval queries. It never returns
 provider secrets or hidden reasoning. Production V2 retrieval performs generation-bound dense and sparse reads, RRF fusion, trusted-source
-reconciliation, and AnswerEngine rendering. Material structured, canonical-graph, and GraphRAG plans
-are rejected fail-closed until their live execution bridges are available.
+reconciliation, and AnswerEngine rendering. Structured list/count/group/rank/compare plans run
+against the SQLite canonical projection when it is operational and report query-scoped
+completeness; canonical-graph plans are rejected fail-closed, and GraphRAG plans run only when their
+generation artifacts are ready (see `docs/architecture/query-answer-pipeline.md`).
 `PATCH /conversations/{conversation_id}/messages/{message_id}` only permits editing a user
 message in its owning workspace/conversation. `GET /sources/{chunk_id}` returns source content
 and document-version metadata only when the chunk belongs to the requested workspace.
@@ -95,8 +98,11 @@ workflow run, source fingerprint, failure summary, and all mandatory stage finge
 The generated frontend OpenAPI schema includes Chat and canonical-knowledge curation models.
 Feature code consumes those generated component types through the Cortex API-client boundary.
 
-`GET /settings/budgets` exposes safe query defaults: Query Expansion and automatic
-quality escalation are disabled unless global configuration explicitly enables them.
+`GET /settings/budgets` reports daily and monthly soft-budget consumption from recorded usage
+events (`spent_usd`, `budget_usd`, `percent`, `state`, `unpriced_calls`); enforcement is
+`warn_only` (see `docs/architecture/usage-accounting.md`). `PUT /settings` rejects a conversation
+summary assignment other than OpenAI, enabling `answer_synthesis_enabled` with a non-OpenAI
+answer provider, and an `embedding_concurrency` outside 1–8. Unknown settings keys are ignored.
 
 `GET /settings` and `PUT /settings` expose the persistent, global-only operational
 configuration. Secrets and connection locations remain environment/credential-store owned.

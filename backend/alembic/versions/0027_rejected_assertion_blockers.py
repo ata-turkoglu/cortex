@@ -40,9 +40,15 @@ def upgrade():
         sa.ForeignKeyConstraint(["generation_id"], ["knowledge_generations.id"]),
         sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("workspace_id", "generation_id", "chunk_id", "span_start", "span_end", "reason"),
+        sa.UniqueConstraint(
+            "workspace_id", "generation_id", "chunk_id", "span_start", "span_end", "reason"
+        ),
     )
-    op.create_index("ix_rejected_assertion_blockers_scope", "rejected_assertion_blockers", ["workspace_id", "generation_id", "normalized_subject_surname"])
+    op.create_index(
+        "ix_rejected_assertion_blockers_scope",
+        "rejected_assertion_blockers",
+        ["workspace_id", "generation_id", "normalized_subject_surname"],
+    )
 
 
 def downgrade():

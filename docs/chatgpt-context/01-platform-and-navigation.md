@@ -19,8 +19,8 @@ locations: production query planning/execution `backend/app/query/`; retrieval
 `backend/app/retrieval/`; canonical construction `backend/app/knowledge/`; GraphRAG
 `backend/app/graphrag/`; workflows `backend/app/workflows/`; relational models/migrations
 `backend/app/models.py` and `backend/alembic/`; frontend system map
-`frontend/src/flow/ASystemMap.tsx`. `backend/app/chat/` and
-`backend/app/aggregation/property.py` are Historical / V1 compatibility paths.
+`frontend/src/flow/ASystemMap.tsx`. The V1 chat orchestration (`backend/app/chat/`,
+`backend/app/aggregation/property.py`) has been removed.
 
 Query V2 target ownership is scaffolded under `backend/app/query/`, `knowledge/`, `engines/`, and
 `reasoning/`, each with child scoped context. These are navigation and ownership boundaries until

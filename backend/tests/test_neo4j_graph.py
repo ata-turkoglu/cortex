@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.graphrag.adapter import GraphRAGAdapter, GraphRoute
+from app.graphrag.adapter import GraphRAGAdapter
 from app.graphrag.neo4j import Neo4jBackedGraphRAGAdapter
 from app.knowledge.graph import GraphNode, GraphRelationship, GraphSyncResult, Neo4jGraphAdapter
 
@@ -167,7 +167,7 @@ class RecordingGraphStore:
         return GraphSyncResult(self.workspace_id, generation, len(nodes), len(relationships))
 
 
-def test_graphrag_extraction_syncs_to_neo4j_with_provenance_and_typed_findings(tmp_path):
+def test_graphrag_extraction_syncs_to_neo4j_with_provenance(tmp_path):
     root = tmp_path / "graphrag"
     root.mkdir()
     logical_id = "11111111-1111-1111-1111-111111111111"
@@ -203,7 +203,6 @@ def test_graphrag_extraction_syncs_to_neo4j_with_provenance_and_typed_findings(t
     store = RecordingGraphStore("workspace-a")
     bridge = Neo4jBackedGraphRAGAdapter(graphrag, store)
     sync = bridge.sync_extracted("generation-1")
-    output = bridge.query_findings(GraphRoute.LOCAL, "Ankara")
 
     assert store.schema_ready is True
     assert sync.graph.node_count == 2
@@ -212,9 +211,6 @@ def test_graphrag_extraction_syncs_to_neo4j_with_provenance_and_typed_findings(t
     assert nodes[0].provenance["producer"] == "microsoft_graphrag"
     assert nodes[0].provenance["logical_document_ids"] == [logical_id]
     assert relationships[0].source_id == "entities:a"
-    assert output.route is GraphRoute.LOCAL
-    assert output.findings[0].text == "Ankara"
-    assert output.final_answer_authored is False
 
 
 def test_graphrag_and_neo4j_workspace_mismatch_is_rejected(tmp_path):
